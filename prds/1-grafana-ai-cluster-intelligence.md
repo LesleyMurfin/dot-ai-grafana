@@ -7,6 +7,8 @@
 
 > **How this revision is organized:** This is **PRD #1 as written on `main`**, with build-ready detail layered directly on top of it. Under every `##` heading you will find the **original section text first** (unchanged — same words, same bullets, same milestones), then one or more `### Expansion:` blocks. Expansions are **additive only**. Strip every Expansion block (and the reviewer appendices) and you get the original PRD back byte-for-byte. We are not rewriting the PRD; we are building on it.
 
+> **How this revision is organized:** This is **PRD #1 as written on `main`**, with build-ready detail layered directly on top of it. Under every `##` heading you will find the **original section text first** (unchanged — same words, same bullets, same milestones), then one or more `### Expansion:` blocks. Expansions are **additive only**. Strip every Expansion block (and the reviewer appendices) and you get the original PRD back byte-for-byte. We are not rewriting the PRD; we are building on it.
+
 ## Problem Statement
 
 Teams using Grafana for Kubernetes observability must context-switch to separate tools when they want to:
@@ -60,6 +62,133 @@ Two read-only dot-ai tools, same page:
 **Map** is the existing Grafana datasources already configured on this instance: **Loki, Prometheus, Tempo, and Alertmanager**. The plugin reads them through Grafana’s runtime (`getDataSourceSrv` / `ds.query` / `getBackendSrv`) — no new datasource picker, no new screens, no parallel observability UI.
 
 **UI surface stays the existing thread:** Tool selector, intent/issue box, Ask, Analyze this, Current (sent), History (display-only). Stack context is packed into **Current**, then shipped as plain-text `intent` / `issue` on the same POST shapes. No rich visualizations — text responses only.
+
+### Expansion: Tool → endpoint map
+
+| Tool | Endpoint | Method | Request body | Notes |
+|------|----------|--------|--------------|-------|
+| Query | `/api/v1/tools/query` | POST | `{ "intent": "<text>" }` | Single-shot; `intent` 1–1000 chars. Send the **plain** intent — **do not** prefix `[visualization]` (that switches the tool into rich-visualization mode). |
+| Remediate | `/api/v1/tools/remediate` | POST | `{ "issue": "<text>", "mode": "manual" }` | Analysis; execute round-trip (`sessionId`+`executeChoice`) not used. |
+| System status | `/api/v1/tools/version` | POST | `{}` | Powers Test-connection **and** the always-visible cluster context: `data.result.system.kubernetes.{connected,context}`. |
+
+Both tool calls are instances of dot-ai's universal `POST /api/v1/tools/{toolName}` endpoint; one dot-ai server serves MCP, CLI, and REST simultaneously — **no server configuration beyond a token is required.**
+
+### Expansion: Response contract and presentation layer
+
+dot-ai wraps every REST response in a standard envelope:
+
+```jsonc
+{
+  "success": true,
+  "data": { "result": { /* tool-specific */ }, "tool": "query", "executionTime": 1234 },
+  "error": { "code": "…", "message": "…", "details": {} }, // only when success=false
+  "meta": { "timestamp": "…", "requestId": "…", "version": "…" }
+}
+```
+
+dot-ai's tools are built for an *LLM agent*, so `data.result` carries **structured JSON plus agent-oriented fields** (`agentInstructions`, `sessionId`), not a prose string. The plugin extracts the human-readable content per tool (confirmed against source and against how `dot-ai-headlamp` unwraps `data.result`):
+
+| Tool | Render as text | Ignore in the text-only UI |
+|------|----------------|-----------------------------|
+| `query` | **`data.result.summary`** (`QueryOutput.summary`, `src/tools/query.ts` L54) | `agentInstructions`, `sessionId`, `visualizationUrl`, `iterations`, `toolsUsed` |
+| `remediate` | `message`, `analysis.rootCause`, `analysis.confidence`, `analysis.factors[]`, `remediation.summary`, `remediation.actions[]` (`command`/`rationale`/`risk`), `guidance` | `executionChoices`, `nextAction`, `sessionId`, `visualizationUrl`, `agentInstructions` |
+| `version` | `system.kubernetes.context` (shown as the active-cluster label) | everything else |
+
+A **"Show raw response" toggle** always exposes the full `data.result` payload — a safety net if a field mapping drifts across dot-ai versions.
+
+### Expansion: Auth header
+
+dot-ai's auth middleware (`src/interfaces/oauth/middleware.ts` L38–39) reads **`X-Dot-AI-Authorization` first, then `Authorization` as fallback** — so a direct caller may use either. Our Go backend calls dot-ai directly and sends `Authorization: Bearer <token>`. `dot-ai-headlamp` uses the custom `X-Dot-AI-Authorization` header because it proxies through the K8s API server, which consumes `Authorization`; we send the custom header **only** when the deployment is configured to route through such a proxy (not both unconditionally).
+
+### Expansion: Prior art — dot-ai-headlamp
+
+Viktor's existing dot-ai UI plugin already answers our hardest questions with production choices we adopt:
+- **Transport**: reaches dot-ai via Headlamp's **K8s API proxy** (`ApiProxy.request`). Grafana has no equivalent proxy → our Go-backend + `apiUrl` + token is the correct Grafana-native equivalent.
+- **Timeout**: `AI_TOOL_TIMEOUT = 30 min` for all AI tools; `DEFAULT_TIMEOUT = 30 s` otherwise — AI calls are long (see [Timeout & long-call strategy](#timeout--long-call-strategy)).
+- **Auth**: `X-Dot-AI-Authorization: Bearer <token>` (see above).
+- **Presentation**: unwraps `data.result` (`src/api/client.ts` L89).
+- **Read-only vs not**: Headlamp is *not* read-only (`executeRemediation`, `operate`, `recommend`). Our Grafana v1 is a deliberate read-only narrowing.
+- **Resource context**: Headlamp invokes remediate **from a resource detail page** — the resource-scoped context we approximate via [dashboard→intent deep-linking](#scope).
+
+### Expansion: Prior art — GitHub project-setup
+
+dot-ai already has a **first-class GitHub surface** — not a future idea for this PRD:
+
+**[Project Setup](https://devopstoolkit.ai/docs/ai-engine/tools/project-setup)** (`project-setup` tool) audits a repository and generates governance / GitHub automation files (LICENSE, CODE_OF_CONDUCT, CONTRIBUTING, issue/PR templates, OpenSSF Scorecard workflow, Renovate, labeler, stale bot, …). Interactive scope selection + template-based generation; does **not** require Kubernetes or an LLM for generation. Related: PR templates feed the **`prd-done`** prompt workflow for intelligent PR creation ([prompts](https://devopstoolkit.ai/docs/ai-engine/tools/prompts#available-prompts)).
+
+| Surface | Host | Job | Status vs this PRD |
+|---|---|---|---|
+| **GitHub — project-setup** | GitHub repo (files + Actions) | Bootstrap / audit **repo governance & automation** | **Shipped** (server tool) — recognize, do not reimplement |
+| **Headlamp — `dot-ai-headlamp`** | Kubernetes UI | Resource-centric **operate** (incl. execute) | **Shipped** — Phase 2 is dual-surface *wiring*, not rebuild |
+| **Grafana — this plugin** | Observability UI | Dashboard-centric **diagnose / watch** (analysis-only) | **This contribution (Phase 1)** |
+| **Remediate → GitOps PR** | Git (via remediate execute) | Cluster fix as a **reviewable PR** (RBAC-gated) | Server capability; **not** the same as project-setup; optional Grafana surface in Phase 2 M12 |
+
+**Do not conflate:** `project-setup` = *repository* standards and GitHub workflow files. Remediate's GitOps-PR path = *cluster* change proposed as a PR. Both touch GitHub; different jobs, different tools. This Grafana plugin is a third **UI** doorway (observability), complementary to Headlamp (cluster UI) and project-setup (GitHub/repo), all on the same toolkit.
+
+### Expansion: Companion-project model
+
+This repo / PRD is a **companion UI**, not a second product brain — the same split Viktor uses for
+[`dot-ai-headlamp`](https://github.com/vfarcic/dot-ai-headlamp) (`prds/1-headlamp-plugin.md` →
+"Companion Projects: **dot-ai** — MCP server providing the REST API this plugin consumes").
+
+| Question | Lives in | Example |
+|---|---|---|
+| **New capability / contract / intelligence** | **`vfarcic/dot-ai`** (core PRD first) | New tool or MCP, remediate loop change, RBAC verb, OpenAPI field, KB ingest rules |
+| **How it appears in a host UI** | **Companion repo PRD** (this one, or headlamp) | Page, settings, host auth glue, presentation, timeouts for *that* host |
+| **Privileged / platform install** | **Deploy docs + (where live infra) MOP** — not a UI PRD | Kubeshark tap, longhorn, NetworkPolicy |
+
+**Rule (fail-closed):** if the work changes *what the AI can do or what the server promises*, open or extend a **dot-ai** PRD and only then teach the companion UIs to call it. Companions may request a **tiny, host-agnostic** server hook when the host cannot work otherwise (Headlamp's precedent: `X-Dot-AI-Authorization` support on the server). They must **not** reimplement tools, invent parallel evidence pipelines, or own K8s browsing that the host already has.
+
+**Companion projects (ecosystem map)**
+
+| Project | Role |
+|---|---|
+| **[dot-ai](https://github.com/vfarcic/dot-ai)** | AI engine — tools, REST/MCP, RBAC, remediate, knowledge, project-setup, … |
+| **[dot-ai-headlamp](https://github.com/vfarcic/dot-ai-headlamp)** | Companion UI — Headlamp (shipped; full tools incl. execute) |
+| **[dot-ai-ui](https://github.com/vfarcic/dot-ai-ui)** | Companion UI — standalone web (alternative frontend) |
+| **dot-ai-grafana** (this) | Companion UI — Grafana (proposed; analysis-only v1) |
+| **CLI / MCP clients** | Other consumers of the same engine |
+
+```
+  NEW CAPABILITY / CONTRACT          ──►  vfarcic/dot-ai  (core PRD)
+           │
+           │ REST / MCP only
+           ▼
+  ┌────────┴────────┬──────────────┬─────────────┐
+  Headlamp          Grafana        Web UI / CLI  …   (companion PRDs = host glue only)
+```
+
+<a id="prior-core-mcp-auth"></a>
+
+#### Prior core contribution — outbound MCP auth (vfarcic/dot-ai#414 → vfarcic/dot-ai#416 → vfarcic/dot-ai#417)
+
+We already shipped the **engine-side plug** for authenticated external MCPs on `vfarcic/dot-ai`:
+
+| Step | Artifact | Role |
+|---|---|---|
+| PRD | [vfarcic/dot-ai#414](https://github.com/vfarcic/dot-ai/issues/414) | Capability: outbound MCP client auth |
+| Design | [vfarcic/dot-ai#416](https://github.com/vfarcic/dot-ai/pull/416) | Design-doc PR |
+| Implement | **[vfarcic/dot-ai#417](https://github.com/vfarcic/dot-ai/pull/417)** (merged 2026-04-01) | Static Bearer, custom headers, OAuth client_credentials, Helm `existingSecret` |
+
+That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes Phase 3–style evidence MCPs *attachable* (secured `mcp-grafana`, a future Kubeshark MCP, etc.) without inventing auth plumbing again. This companion PRD reuses the same PRD-first discipline; any later packet/evidence capability should open a **new core PRD** on `dot-ai` (after maintainer signal or a thin spike), not grow a client inside this plugin.
+
+### Expansion: Server impact
+
+**This plugin requires no change to the dot-ai server, and no dot-ai user who doesn't install it sees any change.** It is a pure REST client of endpoints that already exist (PRD [vfarcic/dot-ai#354](https://github.com/vfarcic/dot-ai/issues/354)): no new endpoints, schemas, or config-model changes. Only runtime prerequisites: the REST gateway is reachable from Grafana (on by default) and an auth token exists. The recommended read-only token (no `apply`) uses dot-ai's existing RBAC (PRD [vfarcic/dot-ai#392](https://github.com/vfarcic/dot-ai/issues/392)) — a scoped credential, not a server change.
+
+### Expansion: Design Decisions
+
+1. **Query presentation field — RESOLVED.** query's human-readable answer is `data.result.summary` (`src/tools/query.ts` L54); send the plain intent (not `[visualization]`, which switches modes — `query.ts` L210). Keep a "Show raw response" toggle. M0 only confirms envelope unwrapping across the deployed dot-ai version.
+2. **Timeout & long-call strategy.** Query is short (seconds) → a blocking POST is fine. Remediate is a multi-iteration loop up to ~30 min (`dot-ai-headlamp` `AI_TOOL_TIMEOUT`); Grafana's own guidance treats minutes-long blocking resource calls as unstable. **Leaning: async `202 + jobId` + `/status/{jobId}` poll as the *default* for remediate** — minimal, in-memory, single-instance jobs with a TTL; the UI Cancel abandons the poll; poll on a fixed interval with terminal-state handling. Blocking-with-a-tuned-[Timeout chain](#timeout--long-call-strategy) is the fallback only where the operator fully controls every hop. **M0 measures the real Grafana resource-call deadline and picks**; this is [Open Question 5](#open-questions). SSE (`/api/v1/events/remediations`, PRD [vfarcic/dot-ai#425](https://github.com/vfarcic/dot-ai/issues/425)) is the post-v1 streaming upgrade.
+3. **Read-only enforcement (two layers).** **(a)** client never sends `executeChoice`/`sessionId`; the backend **fails closed** with a request-field allowlist so a crafted request can't reach an execution path; **(b)** the dot-ai token's RBAC lacks the `apply` verb (PRD [vfarcic/dot-ai#392](https://github.com/vfarcic/dot-ai/issues/392)), so remediate returns analysis + `fallbackReason` and offers no `executionChoices` **server-side** (`remediate.ts` L1606/L1625). **Both.** (b) is authoritative and requires dot-ai RBAC enabled — verified in M0.
+4. **Identity model.** **Leaning:** single shared service token for v1 (dot-ai RBAC applies at token level; audit logs cannot attribute to individual Grafana users — accepted v1 risk). Per-user OAuth/Dex forwarding is a future enhancement (out of scope).
+5. **Plugin identity & home.** Grafana id form `org-name-type`; proposed `devopstoolkit-dotai-app` — **needs maintainer input** on org slug and repo location.
+6. **Grafana version floor & reference deployment (11.4).** The reference deployment is **Grafana 11.4 self-managed** (the adopter's production; current Grafana is 13.1). The real compatibility lever is the **`@grafana/{data,ui,runtime}` library versions**, not just `grafanaDependency`: `@grafana/create-plugin` now scaffolds against ~13.x libs, which can break at runtime on 11.4. **Leaning:** pin `@grafana/*` to the latest line whose minimum supported Grafana ≤ 11.4, set `grafanaDependency: >=11.0`, and make CI **build+smoke on 11.4 (must-pass) and a current release (13.x)**. Supporting 10.x/9.x is untested burden for versions neither the adopter nor "current" runs — offer only if the maintainer wants a broad range. (Deviation from PRD #1's `9.x+`; see Scope.)
+7. **Distribution.** **Leaning:** unsigned/private first — which **requires** operator allow-listing (`allow_loading_unsigned_plugins` in `grafana.ini` / `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=<id>`); document it in the install guide. Grafana catalog (signing + review) later.
+8. **Auth header.** Send `Authorization: Bearer`; `X-Dot-AI-Authorization` only for proxy-consuming deployments (see [Auth header](#auth-header)).
+9. **Strategic positioning vs Grafana Assistant (read-only scope).** Grafana Assistant + Sift now cover NL analysis of telemetry natively, so this plugin must lead with dot-ai's wedge — **K8s API state, remediation, sovereignty** (see [Competitive landscape](#competitive-landscape--differentiation)). **Leaning:** v1 honors PRD #1's read-only scope and differentiates on **K8s-state + sovereign self-hosting** (not a telemetry-chat clone); **remediation** (GitOps PR) is the strongest differentiator but is out of PRD #1 scope — flagged as the highest-value expansion and the central go/no-go ([Open Question 6](#open-questions)). If neither wedge is compelling for the target users, the honest call is **not** to ship a standalone plugin and instead expose dot-ai via a Grafana Assistant Skill / the Grafana MCP.
+10. **Deployment target: self-managed Grafana only for this contribution.** **Leaning:** design, CI, and install docs target **self-managed Grafana** (reference **11.4**; matrix includes a current 13.x). **Grafana Cloud is explicitly not planned** for this PRD's delivery track — see [Deployment targets](#deployment-targets-self-managed-vs-grafana-cloud). Cloud may still matter to other adopters (including the maintainer); it is left as an optional follow-on for whoever finds value, not a Phase 1/2/3 commitment here.
+11. **Companion vs core ownership.** **Leaning:** this PRD follows the Headlamp companion pattern — UI/host only; capabilities land in **dot-ai** first. Applies especially to **Kubeshark / evidence** (Phase 3): see [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives).
 
 ### Expansion: Tool → endpoint map
 
@@ -255,6 +384,61 @@ Same minimal surface (no new screens or pickers):
 - Multi-stage workflows or wizards
 - **New UI for resource or datasource selection** — no new screens, no custom DS picker, no dashboard-resource browser; use Grafana’s existing Loki / Prometheus / Tempo / Alertmanager wiring only (and any selector Grafana already shows natively)
 - **MCP / server session management** (no `sessionId`, no server conversation store, no multi-turn protocol fields). A **display-only** on-screen History and a client-rewritten **Current** block packed into the next plain-text `intent`/`issue` are in scope for progressive context — they are **not** MCP session management. See Decisions and `docs/progressive-context.md`.
+
+### Expansion: Architecture — implementation detail
+
+**dot-ai — existing, consumed as-is**: `src/interfaces/routes/index.ts` (`POST /api/v1/tools/:toolName`, PRD [vfarcic/dot-ai#354](https://github.com/vfarcic/dot-ai/issues/354)); `schema/openapi.json` + `GET /api/v1/openapi` (client generation source); `src/tools/query.ts` (input `{intent}`; answer `summary`); `src/tools/remediate.ts` (`mode:"manual"` analysis; `apply` RBAC gate L1582–1633); `src/interfaces/oauth/middleware.ts` (auth header precedence); `docs/ai-engine/api/rest-api.md` (envelope, bearer auth, status codes; `version` → `system.kubernetes.context`).
+
+**Grafana plugin — new (mirrors `examples/app-with-backend`, built on `grafana-plugin-sdk-go`)**: `src/plugin.json` (`type:app`, `backend:true`; `includes` a page with `addToNav:true`+`defaultNav:true` + a `role:Admin` Configuration entry; `grafanaDependency` floor); `src/module.tsx` (`setRootPage(DotAiPage).addConfigPage(...)`); `src/components/AppConfig/AppConfig.tsx` (`jsonData.apiUrl` + `secureJsonData.apiKey`; Test-connection); `src/pages/DotAiPage.tsx` (`<PluginPage>`; `getBackendSrv().post('/api/plugins/<id>/resources/<tool>')`); `pkg/plugin/app.go` (`httpadapter.New(mux)`; `httpclient.New(...)` for outbound calls; `CheckHealth` → dot-ai `POST /api/v1/tools/version`, invoked by the frontend via `GET /api/plugins/<id>/health`; token via `httpadapter.PluginConfigFromContext(ctx).AppInstanceSettings.DecryptedSecureJSONData["apiKey"]`); `pkg/plugin/resources.go` (`registerRoutes`: `handleQuery`, `handleRemediate`, `handleHealth`, `handleStatus`); generated OpenAPI client package (from `schema/openapi.json`).
+
+```
+  Grafana browser (React)                  Grafana server                         dot-ai server (existing)
+  +---------------------------+            +--------------------------------+     +---------------------------+
+  | Config page               |  save      | Plugin Go backend              |     | REST gateway              |
+  |  apiUrl · token · Test    | ---------> |  grafana-plugin-sdk-go         |     |  POST /api/v1/tools/:tool |
+  |  connection               |  settings  |  /query /remediate /health     |     |            |              |
+  +---------------------------+            |  /status/{jobId}               |     |            v              |
+  |                           |            |  httpclient + OpenAPI client   |     | tool RBAC (apply verb)    |
+  | dot-ai page               |  getBackendSrv POST                         |     |            |              |
+  |  tool · intent · response | ---------> |  fail-fast · redaction         | HTTPS|            v              |
+  |  cluster-context          |            |               |                | Bearer| query · remediate loop  |
+  |  cancel / retry / copy    |            |               +--------------->| ----> | · version               |
+  +---------------------------+            +--------------------------------+     +------------|--------------+
+                                                                                              |
+                                                                                              v
+                                                                                   Kubernetes + AI provider
+```
+
+### Expansion: Timeout & long-call strategy
+
+A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafana HTTP server → gRPC to the plugin process → plugin `httpclient` → dot-ai. A plugin-set timeout governs only the **last** hop, and Grafana's resource-call gRPC/HTTP deadlines (plus any ingress `proxy_read_timeout`) cap the rest — a plugin timeout alone cannot override them. Because remediate can run minutes, the **default is the async `202`+`/status/{jobId}` poll** (Design Decision 2): the backend runs the dot-ai call in a job (in-memory, single-instance, TTL-bounded), returns `202 + jobId` immediately, and the frontend polls. A **blocking** path (with a fully-tuned chain: browser fetch, ingress, `grafana.ini`, `httpclient`) is offered only where the operator controls every hop and accepts the ceiling. M0 measures the real deadline and confirms which is default.
+
+### Expansion: Deployment targets (self-managed vs Grafana Cloud)
+
+(self-managed vs Grafana Cloud)
+
+| Host | This contribution | Notes |
+|---|---|---|
+| **Self-managed Grafana** (OSS/Enterprise on k8s/VM; reference **11.4**) | **In scope** — primary design, CI matrix, install guide | Operator controls plugin install (incl. unsigned allow-list), backend process, and network path to dot-ai (in-cluster or HTTPS). |
+| **Grafana Cloud** | **Out of scope / not planned here** | Called out so others can evaluate value; **not** a delivery commitment for this PRD. |
+
+**Why call Cloud out at all.** Some adopters (and the maintainer) may care about Cloud-hosted Grafana. The plugin *conceptually* only needs: (1) ability to run an app+backend plugin on that Grafana, (2) a **Cloud-reachable HTTPS** `apiUrl` for the customer's dot-ai (private in-cluster URLs won't work from Cloud without an edge), and (3) catalog/signing or whatever install path Cloud allows. None of that is free: Cloud install policies for private/backend plugins, egress, SSRF defaults (this design fail-closes on non-HTTPS and many private ranges unless allowlisted), and product overlap with **Grafana Assistant** (native on Cloud) all need a deliberate owner.
+
+**Intent for this contribution.** We design and ship for **self-managed**. We do **not** plan Cloud packaging, Cloud CI, or Cloud install docs. If the maintainer or another contributor later finds Cloud worth it, treat it as a **separate follow-on** (likely after catalog signing + a documented public/edge HTTPS path to dot-ai) — not a blocker for Phase 1.
+
+### Expansion: Non-Functional Requirements
+
+- **Latency / long calls**: async default (above); calls may run minutes. Cancelable; progress surfaced.
+- **Fail-fast on misconfiguration** (K8s-native): an unreachable/invalid `apiUrl`, missing token, or non-2xx `version` health check surfaces a **clear error** (Test-connection + explicit error states) — never a silently-degraded "looks fine but returns nothing." Matches dot-ai's own fail-fast posture.
+- **Security**:
+  - Token only in `secureJsonData`; backend-only read; never logged; `Authorization` redacted and **upstream dot-ai error bodies sanitized** before surfacing to the browser. Custom auth header sent only when configured — never both unconditionally.
+  - **Egress/SSRF**: `apiUrl` **must** be `https://` (reject `http://`) and the backend **must** block link-local/metadata (`169.254.169.254`), loopback, and RFC1918 targets unless an operator explicitly allowlists them (fail-closed). Admin-only config lowers but doesn't remove the risk in multi-tenant Grafana.
+  - **Read-only**: enforced server-side via a no-`apply` RBAC token *and* a backend fail-closed request-field allowlist (Design Decision 3).
+  - **Prompt/command injection**: free-text `intent`/`issue` reaches an LLM with read-only cluster tools; the token's read scope bounds the blast radius, and remediate's suggested `command`s are advisory/untrusted (a human runs them). Least-privilege token; rotation; per-Grafana-org isolation.
+  - **Identity**: single shared token → no per-user attribution in dot-ai audit logs (accepted v1 risk).
+- **Observability**: backend logs request id, tool, status, duration (no secrets).
+- **Compatibility**: pin `@grafana/*` libs (to support 11.4) + `grafanaDependency: >=11.0`; CI build+smoke on **11.4 (reference deployment, must-pass) and a current release (13.x)**.
+- **Accessibility**: labelled controls; announced response; keyboard submit.
 
 ### Expansion: Architecture — implementation detail
 
@@ -671,6 +855,5 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Issue**: Hop cap, stack Current packing, public-surface strip, SDK httpclient, and live Ask window were implemented/proven but missing from Decisions (or only implicit).
 - **Action**: Appended five Decisions rows (hop cap 3; stack Current packing; public-surface strip; SDK httpclient; live Ask 22:46Z proof / execute still blocked). Did not duplicate progressive-context or stack-intelligence product rows. Status **In Progress**. Ledger absent — WARN. No commit (`scripts/git.py` missing).
 - **Prompt**: `/prd update-decisions` on PRD-1 (missing rows only).
-
 
 
