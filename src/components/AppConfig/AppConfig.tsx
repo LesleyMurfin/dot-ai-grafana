@@ -136,5 +136,6 @@ const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
     data,
   });
 
-  return lastValueFrom(response);
+  // Cast: @grafana/data@11.4 nests its own rxjs types; dual-package with root rxjs breaks tsc.
+  return lastValueFrom(response as Parameters<typeof lastValueFrom>[0]);
 };
