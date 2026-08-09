@@ -95,3 +95,43 @@ type callResourceResponseSenderFunc func(resp *backend.CallResourceResponse) err
 func (f callResourceResponseSenderFunc) Send(resp *backend.CallResourceResponse) error {
 	return f(resp)
 }
+
+
+func TestMethodNotAllowed(t *testing.T) {
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	cases := []struct {
+		path   string
+		method string
+	}{
+		{"query", http.MethodGet},
+		{"remediate", http.MethodGet},
+		{"health", http.MethodPut},
+		{"echo", http.MethodGet},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.path+"_"+tc.method, func(t *testing.T) {
+			var resp backend.CallResourceResponse
+			err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+				Path:   tc.path,
+				Method: tc.method,
+				Body:   []byte(`{}`),
+			}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+				resp = *r
+				return nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Status != http.StatusMethodNotAllowed {
+				t.Fatalf("path=%s method=%s status=%d body=%s", tc.path, tc.method, resp.Status, string(resp.Body))
+			}
+		})
+	}
+}
