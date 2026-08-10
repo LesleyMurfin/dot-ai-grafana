@@ -24,15 +24,26 @@ describe('Components/AppConfig', () => {
     } as unknown as AppConfigProps;
   });
 
-  test('renders the "API Settings" fieldset with API key, API url inputs and button', () => {
+  test('renders API settings with auth token, URL, save and test connection', () => {
     const plugin = { meta: { ...props.plugin.meta, enabled: false } };
 
     // @ts-ignore - We don't need to provide `addConfigPage()` and `setChannelSupport()` for these tests
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    expect(screen.queryByRole('group', { name: /api settings/i })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /dot-ai api settings/i })).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.apiKey)).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.apiUrl)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save api settings/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /test connection/i })).toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.appConfig.testConnection)).toBeInTheDocument();
+  });
+
+  test('disables test connection until url and token are present', () => {
+    const plugin = { meta: { ...props.plugin.meta, enabled: true, jsonData: {} } };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    expect(screen.getByTestId(testIds.appConfig.testConnection)).toBeDisabled();
   });
 });

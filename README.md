@@ -6,9 +6,9 @@ Grafana **App plugin with backend** for AI-powered Kubernetes cluster intelligen
 - **Grafana floor:** `grafanaDependency: ">=11.0.0"` (reference host **11.4**)
 - **Code home:** `LesleyMurfin/dot-ai-grafana` (this fork)
 
-## Status (M1 scaffold)
+## Status (M2 configuration)
 
-Frontend scaffold + Go backend stubs for `/query`, `/remediate`, `/health`. Not wired to a live dot-ai API yet (M3).
+Admin configuration page: `jsonData.apiUrl` (MCP Server URL) + `secureJsonData.apiKey` (Auth Token) + **Test connection** (`POST /api/v1/tools/version` via backend resource). Query/remediate proxy still M3.
 
 ## Develop
 
@@ -42,8 +42,8 @@ Or env:
 GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=lesleymurfin-dotai-app
 ```
 
-3. Configure plugin settings (M2): `apiUrl` (dot-ai REST base) + secure token (`Authorization: Bearer`).
-4. Use a **no-`apply`** token (analysis-only).
+3. Open **Configuration**: set **MCP Server URL** (`apiUrl`) and **Auth Token** (encrypted). Click **Test connection** (calls dot-ai `POST /api/v1/tools/version` with `Authorization: Bearer`).
+4. Use a **no-`apply`** token (analysis-only). Save settings before relying on plugin health.
 
 ## Product PRDs
 

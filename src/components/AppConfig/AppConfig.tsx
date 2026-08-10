@@ -1,9 +1,9 @@
-import React, { ChangeEvent, useState } from 'react';
+import React, { ChangeEvent, FormEvent, useState } from 'react';
 import { lastValueFrom } from 'rxjs';
 import { css } from '@emotion/css';
 import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
-import { Button, Field, FieldSet, Input, SecretInput, useStyles2 } from '@grafana/ui';
+import { Alert, Button, Field, FieldSet, Input, SecretInput, useStyles2 } from '@grafana/ui';
 import { testIds } from '../testIds';
 
 type AppPluginSettings = {
@@ -11,15 +11,78 @@ type AppPluginSettings = {
 };
 
 type State = {
-  // The URL to reach our custom API.
+  // Dot-ai REST base URL (jsonData.apiUrl).
   apiUrl: string;
-  // Tells us if the API key secret is set.
+  // Whether secureJsonData.apiKey is already stored server-side.
   isApiKeySet: boolean;
-  // A secret key for our custom API.
+  // Draft auth token (never echoed from server).
   apiKey: string;
 };
 
+type TestStatus =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'success'; message: string }
+  | { kind: 'error'; message: string };
+
+type TestConnectionPayload = {
+  status?: string;
+  message?: string;
+  connected?: boolean;
+};
+
 export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
+
+function readStringField(obj: unknown, key: string): string | undefined {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) {
+    return undefined;
+  }
+  const value = (obj as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readBoolField(obj: unknown, key: string): boolean | undefined {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) {
+    return undefined;
+  }
+  const value = (obj as Record<string, unknown>)[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function parseTestConnectionBody(body: unknown): TestConnectionPayload {
+  // backendSrv.fetch resolves to FetchResponse; prefer .data when present.
+  let payload: unknown = body;
+  if (body && typeof body === 'object' && 'data' in body) {
+    payload = (body as { data: unknown }).data;
+  }
+
+  return {
+    status: readStringField(payload, 'status'),
+    message: readStringField(payload, 'message'),
+    connected: readBoolField(payload, 'connected'),
+  };
+}
+
+function errorMessageFromUnknown(err: unknown): string {
+  if (!err || typeof err !== 'object') {
+    return 'Connection test failed';
+  }
+  if ('data' in err) {
+    const nested = readStringField((err as { data: unknown }).data, 'message');
+    if (nested) {
+      return nested;
+    }
+  }
+  const message = readStringField(err, 'message');
+  if (message) {
+    return message;
+  }
+  const statusText = readStringField(err, 'statusText');
+  if (statusText) {
+    return statusText;
+  }
+  return 'Connection test failed';
+}
 
 const AppConfig = ({ plugin }: AppConfigProps) => {
   const s = useStyles2(getStyles);
@@ -29,8 +92,10 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     apiKey: '',
     isApiKeySet: Boolean(secureJsonFields?.apiKey),
   });
+  const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
 
   const isSubmitDisabled = Boolean(!state.apiUrl || (!state.isApiKeySet && !state.apiKey));
+  const isTestDisabled = Boolean(!state.apiUrl || (!state.isApiKeySet && !state.apiKey) || testStatus.kind === 'loading');
 
   const onResetApiKey = () =>
     setState({
@@ -46,7 +111,8 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   };
 
-  const onSubmit = () => {
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     if (isSubmitDisabled) {
       return;
     }
@@ -67,10 +133,52 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     });
   };
 
+  const onTestConnection = async () => {
+    if (isTestDisabled) {
+      return;
+    }
+
+    setTestStatus({ kind: 'loading' });
+    try {
+      const data: { apiUrl: string; apiKey?: string } = { apiUrl: state.apiUrl };
+      if (state.apiKey) {
+        data.apiKey = state.apiKey;
+      }
+
+      const response = await getBackendSrv().fetch({
+        url: `/api/plugins/${plugin.meta.id}/resources/test-connection`,
+        method: 'POST',
+        data,
+        showErrorAlert: false,
+        showSuccessAlert: false,
+      });
+
+      const body = await lastValueFrom(response as unknown as Parameters<typeof lastValueFrom>[0]);
+      const payload = parseTestConnectionBody(body);
+      const message =
+        payload.message ||
+        (payload.connected === false
+          ? 'dot-ai responded but Kubernetes reports not connected'
+          : 'Connection successful');
+
+      if (payload.status === 'ok') {
+        setTestStatus({ kind: 'success', message });
+        return;
+      }
+
+      setTestStatus({ kind: 'error', message: message || 'Connection test failed' });
+    } catch (e) {
+      setTestStatus({ kind: 'error', message: errorMessageFromUnknown(e) });
+    }
+  };
+
   return (
     <form onSubmit={onSubmit}>
-      <FieldSet label="API Settings">
-        <Field label="API Key" description="A secret key for authenticating to our custom API">
+      <FieldSet label="dot-ai API Settings">
+        <Field
+          label="Auth Token"
+          description="Bearer token for the dot-ai REST API (stored encrypted). Use a no-apply token — analysis only."
+        >
           <SecretInput
             width={60}
             id="config-api-key"
@@ -78,27 +186,51 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             name="apiKey"
             value={state.apiKey}
             isConfigured={state.isApiKeySet}
-            placeholder={'Your secret API key'}
+            placeholder="Dot-ai auth token"
             onChange={onChange}
             onReset={onResetApiKey}
           />
         </Field>
 
-        <Field label="API Url" description="" className={s.marginTop}>
+        <Field
+          label="MCP Server URL"
+          description="Dot-ai REST base URL (e.g. http://dot-ai.namespace.svc:3456). No /api/v1 suffix required."
+          className={s.marginTop}
+        >
           <Input
             width={60}
             name="apiUrl"
             id="config-api-url"
             data-testid={testIds.appConfig.apiUrl}
             value={state.apiUrl}
-            placeholder={`E.g.: http://mywebsite.com/api/v1`}
+            placeholder="http://dot-ai:3456"
             onChange={onChange}
           />
         </Field>
 
-        <div className={s.marginTop}>
+        {testStatus.kind === 'success' && (
+          <Alert title="Connection OK" severity="success" className={s.marginTop} data-testid={testIds.appConfig.testStatus}>
+            {testStatus.message}
+          </Alert>
+        )}
+        {testStatus.kind === 'error' && (
+          <Alert title="Connection failed" severity="error" className={s.marginTop} data-testid={testIds.appConfig.testStatus}>
+            {testStatus.message}
+          </Alert>
+        )}
+
+        <div className={s.buttonRow}>
           <Button type="submit" data-testid={testIds.appConfig.submit} disabled={isSubmitDisabled}>
             Save API settings
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid={testIds.appConfig.testConnection}
+            disabled={isTestDisabled}
+            onClick={onTestConnection}
+          >
+            {testStatus.kind === 'loading' ? 'Testing…' : 'Test connection'}
           </Button>
         </div>
       </FieldSet>
@@ -113,6 +245,11 @@ const getStyles = (theme: GrafanaTheme2) => ({
     color: ${theme.colors.text.secondary};
   `,
   marginTop: css`
+    margin-top: ${theme.spacing(3)};
+  `,
+  buttonRow: css`
+    display: flex;
+    gap: ${theme.spacing(1)};
     margin-top: ${theme.spacing(3)};
   `,
 });

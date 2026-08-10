@@ -2,7 +2,10 @@ package plugin
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -19,14 +22,35 @@ var (
 	_ backend.CheckHealthHandler    = (*App)(nil)
 )
 
-// App is an example app plugin with a backend which can respond to data queries.
+// App is the dot-ai Grafana app backend (settings + resource routes).
 type App struct {
 	backend.CallResourceHandler
+
+	apiURL     string
+	apiKey     string
+	httpClient *http.Client
 }
 
-// NewApp creates a new example *App instance.
-func NewApp(_ context.Context, _ backend.AppInstanceSettings) (instancemgmt.Instance, error) {
+type appJSONData struct {
+	APIURL string `json:"apiUrl"`
+}
+
+// NewApp creates a new *App instance from Grafana app settings.
+func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemgmt.Instance, error) {
 	var app App
+
+	var jd appJSONData
+	if len(settings.JSONData) > 0 {
+		if err := json.Unmarshal(settings.JSONData, &jd); err != nil {
+			return nil, err
+		}
+	}
+	app.apiURL = strings.TrimRight(strings.TrimSpace(jd.APIURL), "/")
+	if settings.DecryptedSecureJSONData != nil {
+		app.apiKey = strings.TrimSpace(settings.DecryptedSecureJSONData["apiKey"])
+	}
+
+	app.httpClient = &http.Client{Timeout: 15 * time.Second}
 
 	// Use a httpadapter (provided by the SDK) for resource calls. This allows us
 	// to use a *http.ServeMux for resource calls, so we can map multiple routes
@@ -44,10 +68,17 @@ func (a *App) Dispose() {
 	// cleanup
 }
 
-// CheckHealth handles health checks sent from Grafana to the plugin.
+// CheckHealth handles health checks sent from Grafana to the plugin process.
+// Cluster connectivity is validated via the Test connection resource (version tool).
 func (a *App) CheckHealth(_ context.Context, _ *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
+	if a.apiURL == "" || a.apiKey == "" {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusUnknown,
+			Message: "dot-ai apiUrl or auth token not configured",
+		}, nil
+	}
 	return &backend.CheckHealthResult{
 		Status:  backend.HealthStatusOk,
-		Message: "ok",
+		Message: "configured",
 	}, nil
 }

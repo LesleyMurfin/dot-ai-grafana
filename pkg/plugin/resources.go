@@ -1,15 +1,34 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 )
 
-// stubResponse is returned until M3 wires the real Go→dot-ai proxy.
+// stubResponse is returned until M3 wires the real Go→dot-ai query/remediate proxy.
 type stubResponse struct {
 	Status  string `json:"status"`
 	Message string `json:"message"`
 	Path    string `json:"path"`
+}
+
+// testConnectionRequest allows the config UI to probe draft (unsaved) settings.
+type testConnectionRequest struct {
+	APIURL string `json:"apiUrl"`
+	APIKey string `json:"apiKey"`
+}
+
+// testConnectionResponse is returned by POST /test-connection.
+type testConnectionResponse struct {
+	Status         string `json:"status"`
+	Message        string `json:"message"`
+	Connected      *bool  `json:"connected,omitempty"`
+	UpstreamStatus int    `json:"upstreamStatus,omitempty"`
+	Path           string `json:"path,omitempty"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -23,17 +42,173 @@ func (a *App) handlePing(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "ok"})
 }
 
-// handleHealth is the plugin resource health probe (cluster context later via version tool).
+// handleHealth is the plugin resource health probe.
+// When configured, it calls dot-ai version (same path as Test connection).
 func (a *App) handleHealth(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, stubResponse{
-		Status:  "not_wired",
-		Message: "health stub — M3 will call dot-ai /api/v1/tools/version",
-		Path:    "/health",
-	})
+
+	if a.apiURL == "" || a.apiKey == "" {
+		writeJSON(w, http.StatusOK, stubResponse{
+			Status:  "not_configured",
+			Message: "set MCP Server URL (apiUrl) and Auth Token, then use Test connection",
+			Path:    "/health",
+		})
+		return
+	}
+
+	result, code := a.probeVersion(req.Context(), a.apiURL, a.apiKey)
+	result.Path = "/health"
+	writeJSON(w, code, result)
+}
+
+// handleTestConnection POSTs to dot-ai /api/v1/tools/version with Bearer auth.
+func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	apiURL := a.apiURL
+	apiKey := a.apiKey
+
+	if req.Body != nil {
+		defer req.Body.Close()
+		var body testConnectionRequest
+		dec := json.NewDecoder(req.Body)
+		if err := dec.Decode(&body); err != nil && err != io.EOF {
+			writeJSON(w, http.StatusBadRequest, testConnectionResponse{
+				Status:  "error",
+				Message: "invalid JSON body",
+			})
+			return
+		}
+		if u := strings.TrimRight(strings.TrimSpace(body.APIURL), "/"); u != "" {
+			apiURL = u
+		}
+		if k := strings.TrimSpace(body.APIKey); k != "" {
+			apiKey = k
+		}
+	}
+
+	if apiURL == "" || apiKey == "" {
+		writeJSON(w, http.StatusBadRequest, testConnectionResponse{
+			Status:  "error",
+			Message: "apiUrl and auth token are required (save settings or pass draft values)",
+		})
+		return
+	}
+
+	result, code := a.probeVersion(req.Context(), apiURL, apiKey)
+	result.Path = "/test-connection"
+	writeJSON(w, code, result)
+}
+
+func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConnectionResponse, int) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, versionURL(apiURL), strings.NewReader("{}"))
+	if err != nil {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: fmt.Sprintf("build request: %v", err),
+		}, http.StatusBadRequest
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	client := a.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: fmt.Sprintf("dot-ai unreachable: %v", err),
+		}, http.StatusBadGateway
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg := fmt.Sprintf("dot-ai version returned HTTP %d", resp.StatusCode)
+		if len(raw) > 0 {
+			msg = msg + ": " + truncate(string(raw), 256)
+		}
+		status := http.StatusBadGateway
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			status = http.StatusUnauthorized
+		}
+		return testConnectionResponse{
+			Status:         "error",
+			Message:        msg,
+			UpstreamStatus: resp.StatusCode,
+		}, status
+	}
+
+	connected := extractConnected(raw)
+	msg := "connected to dot-ai"
+	if connected != nil && !*connected {
+		msg = "dot-ai responded but Kubernetes reports not connected"
+	}
+
+	return testConnectionResponse{
+		Status:         "ok",
+		Message:        msg,
+		Connected:      connected,
+		UpstreamStatus: resp.StatusCode,
+	}, http.StatusOK
+}
+
+func versionURL(apiURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	return base + "/api/v1/tools/version"
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+func extractConnected(raw []byte) *bool {
+	// M0 shape: connected may appear at top-level, data, or data.result.
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
+	}
+	if v, ok := boolAt(envelope, "connected"); ok {
+		return &v
+	}
+	if data, ok := envelope["data"].(map[string]any); ok {
+		if v, ok := boolAt(data, "connected"); ok {
+			return &v
+		}
+		if result, ok := data["result"].(map[string]any); ok {
+			if v, ok := boolAt(result, "connected"); ok {
+				return &v
+			}
+		}
+	}
+	if result, ok := envelope["result"].(map[string]any); ok {
+		if v, ok := boolAt(result, "connected"); ok {
+			return &v
+		}
+	}
+	return nil
+}
+
+func boolAt(m map[string]any, key string) (bool, bool) {
+	v, ok := m[key]
+	if !ok {
+		return false, false
+	}
+	b, ok := v.(bool)
+	return b, ok
 }
 
 // handleQuery stubs POST /query until the outbound Bearer proxy lands in M3.
@@ -83,6 +258,7 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ping", a.handlePing)
 	mux.HandleFunc("/echo", a.handleEcho)
 	mux.HandleFunc("/health", a.handleHealth)
+	mux.HandleFunc("/test-connection", a.handleTestConnection)
 	mux.HandleFunc("/query", a.handleQuery)
 	mux.HandleFunc("/remediate", a.handleRemediate)
 }

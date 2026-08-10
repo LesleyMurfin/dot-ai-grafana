@@ -3,6 +3,8 @@ export const testIds = {
     apiKey: 'data-testid ac-api-key',
     apiUrl: 'data-testid ac-api-url',
     submit: 'data-testid ac-submit-form',
+    testConnection: 'data-testid ac-test-connection',
+    testStatus: 'data-testid ac-test-status',
   },
   pageOne: {
     container: 'data-testid pg-one-container',
