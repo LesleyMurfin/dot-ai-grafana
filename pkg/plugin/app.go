@@ -26,9 +26,10 @@ var (
 type App struct {
 	backend.CallResourceHandler
 
-	apiURL     string
-	apiKey     string
-	httpClient *http.Client
+	apiURL         string
+	apiKey         string
+	httpClient     *http.Client // short timeout (version/health)
+	toolHTTPClient *http.Client // longer timeout (query/remediate)
 }
 
 type appJSONData struct {
@@ -51,6 +52,7 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 	}
 
 	app.httpClient = &http.Client{Timeout: 15 * time.Second}
+	app.toolHTTPClient = &http.Client{Timeout: 120 * time.Second}
 
 	// Use a httpadapter (provided by the SDK) for resource calls. This allows us
 	// to use a *http.ServeMux for resource calls, so we can map multiple routes

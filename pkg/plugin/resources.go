@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -211,30 +212,102 @@ func boolAt(m map[string]any, key string) (bool, bool) {
 	return b, ok
 }
 
-// handleQuery stubs POST /query until the outbound Bearer proxy lands in M3.
+// handleQuery proxies POST /query → dot-ai /api/v1/tools/query with Bearer auth.
 func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, stubResponse{
-		Status:  "not_wired",
-		Message: "query stub — not wired to dot-ai; M3 will POST /api/v1/tools/query with Authorization: Bearer",
-		Path:    "/query",
-	})
+	a.proxyTool(w, req, "/api/v1/tools/query")
 }
 
-// handleRemediate stubs POST /remediate (analysis-only; no execute UI).
+// handleRemediate proxies POST /remediate → analysis-only /api/v1/tools/remediate.
 func (a *App) handleRemediate(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, http.StatusOK, stubResponse{
-		Status:  "not_wired",
-		Message: "remediate stub — analysis-only path; M3 will POST /api/v1/tools/remediate (no apply)",
-		Path:    "/remediate",
-	})
+	a.proxyTool(w, req, "/api/v1/tools/remediate")
+}
+
+// proxyTool forwards the request body to a dot-ai tools REST path.
+// Upstream status and body are preserved (including 202 async envelopes).
+func (a *App) proxyTool(w http.ResponseWriter, req *http.Request, toolPath string) {
+	if a.apiURL == "" || a.apiKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"status":  "error",
+			"message": "plugin not configured: set apiUrl and auth token",
+		})
+		return
+	}
+
+	const maxBody = 1 << 20 // 1 MiB
+	body, err := io.ReadAll(io.LimitReader(req.Body, maxBody+1))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"status":  "error",
+			"message": "failed to read request body",
+		})
+		return
+	}
+	if len(body) > maxBody {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"status":  "error",
+			"message": "request body too large",
+		})
+		return
+	}
+	if len(body) == 0 {
+		body = []byte("{}")
+	}
+
+	url := a.apiURL + toolPath
+	httpReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("build upstream request: %v", err),
+		})
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	client := a.toolHTTPClient
+	if client == nil {
+		client = a.httpClient
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("dot-ai unreachable: %v", err),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"status":  "error",
+			"message": "failed reading upstream body",
+		})
+		return
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "application/json"
+	}
+	w.Header().Set("Content-Type", ct)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(raw)
 }
 
 // handleEcho keeps the create-plugin example for local smoke.

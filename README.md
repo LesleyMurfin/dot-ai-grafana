@@ -6,9 +6,9 @@ Grafana **App plugin with backend** for AI-powered Kubernetes cluster intelligen
 - **Grafana floor:** `grafanaDependency: ">=11.0.0"` (reference host **11.4**)
 - **Code home:** `LesleyMurfin/dot-ai-grafana` (this fork)
 
-## Status (M2 configuration)
+## Status (M3 backend proxy)
 
-Admin configuration page: `jsonData.apiUrl` (MCP Server URL) + `secureJsonData.apiKey` (Auth Token) + **Test connection** (`POST /api/v1/tools/version` via backend resource). Query/remediate proxy still M3.
+Admin configuration page: `jsonData.apiUrl` (MCP Server URL) + `secureJsonData.apiKey` (Auth Token) + **Test connection** (`POST /api/v1/tools/version` via backend resource). Backend proxies `POST /query` and `POST /remediate` to dot-ai tools REST with Bearer auth. Product UI is M4+.
 
 ## Develop
 

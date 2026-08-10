@@ -60,33 +60,23 @@ func TestCallResource(t *testing.T) {
 		}
 	})
 
-	for _, path := range []string{"query", "remediate"} {
-		path := path
-		t.Run(path, func(t *testing.T) {
-			var resp backend.CallResourceResponse
-			err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-				Path:   path,
-				Method: http.MethodPost,
-				Body:   []byte(`{}`),
-			}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
-				resp = *r
-				return nil
-			}))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if resp.Status != http.StatusOK {
-				t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
-			}
-			var body stubResponse
-			if err := json.Unmarshal(resp.Body, &body); err != nil {
-				t.Fatal(err)
-			}
-			if body.Status != "not_wired" {
-				t.Fatalf("unexpected status %q", body.Status)
-			}
-		})
-	}
+	t.Run("query_unconfigured", func(t *testing.T) {
+		var resp backend.CallResourceResponse
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   []byte(`{"intent":"x"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusBadRequest {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	})
 
 	t.Run("echo", func(t *testing.T) {
 		var resp backend.CallResourceResponse
@@ -315,6 +305,105 @@ func TestTestConnection(t *testing.T) {
 		}
 	})
 }
+
+
+func TestProxyTools(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer tok" {
+			http.Error(w, `{"error":"UNAUTHORIZED"}`, http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/v1/tools/query":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok-query"}}}`))
+		case "/api/v1/tools/remediate":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok-remediate"}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData: []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"query", "ok-query"},
+		{"remediate", "ok-remediate"},
+	} {
+		tc := tc
+		t.Run(tc.path, func(t *testing.T) {
+			var resp backend.CallResourceResponse
+			err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+				Path:   tc.path,
+				Method: http.MethodPost,
+				Body:   []byte(`{"intent":"test"}`),
+			}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+				resp = *r
+				return nil
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.Status != http.StatusOK {
+				t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+			}
+			if !bytes.Contains(resp.Body, []byte(tc.want)) {
+				t.Fatalf("body=%s", string(resp.Body))
+			}
+		})
+	}
+
+	t.Run("upstream_error_passthrough", func(t *testing.T) {
+		bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"success":false,"error":{"code":"EXECUTION_ERROR","message":"llm down"}}`))
+		}))
+		defer bad.Close()
+		inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + bad.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app2 := inst2.(*App)
+		defer app2.Dispose()
+		var resp backend.CallResourceResponse
+		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   []byte(`{"intent":"x"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusInternalServerError {
+			t.Fatalf("status=%d", resp.Status)
+		}
+		if !bytes.Contains(resp.Body, []byte("EXECUTION_ERROR")) {
+			t.Fatalf("body=%s", string(resp.Body))
+		}
+	})
+}
+
 
 func TestCheckHealth(t *testing.T) {
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
