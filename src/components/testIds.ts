@@ -6,6 +6,14 @@ export const testIds = {
     testConnection: 'data-testid ac-test-connection',
     testStatus: 'data-testid ac-test-status',
   },
+  dotai: {
+    container: 'data-testid dotai-container',
+    intent: 'data-testid dotai-intent',
+    submit: 'data-testid dotai-submit',
+    response: 'data-testid dotai-response',
+    error: 'data-testid dotai-error',
+    loading: 'data-testid dotai-loading',
+  },
   pageOne: {
     container: 'data-testid pg-one-container',
     navigateToFour: 'data-testid navigate-to-four',
