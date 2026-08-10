@@ -2,7 +2,10 @@
 
 **Issue**: [#1](https://github.com/vfarcic/dot-ai-grafana/issues/1)
 **Priority**: High
-**Status**: Draft
+**Status**: In Progress
+**Branch**: `docs/prd-1-start-progress`
+**Updated**: 2026-08-10
+**Implementation PRs (this fork)**: [#1](https://github.com/LesleyMurfin/dot-ai-grafana/pull/1)–[#5](https://github.com/LesleyMurfin/dot-ai-grafana/pull/5) open, unmerged (engineer merge gate)
 
 > **How this revision is organized:** This is **PRD #1 as written on `main`**, with build-ready detail layered directly on top of it. Under every `##` heading you will find the **original section text first** (unchanged — same words, same bullets, same milestones), then one or more `### Expansion:` blocks. Expansions are **additive only**. Strip every Expansion block (and the reviewer appendices) and you get the original PRD back byte-for-byte. We are not rewriting the PRD; we are building on it.
 
@@ -353,15 +356,15 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 
 ## Milestones
 
-- [ ] **Plugin scaffolding and build pipeline** — Grafana app plugin project created with `@grafana/create-plugin`, builds successfully, loads in Grafana dev environment
-- [ ] **Plugin configuration page** — Admin can configure MCP server URL and auth token via Grafana plugin settings, with connection test
-- [ ] **Backend proxy (Go)** — Backend plugin component proxies requests to MCP server with configured auth, handles errors gracefully
-- [ ] **Query tool UI** — Users can type natural language queries, submit, and see text responses from the MCP server
-- [ ] **Remediate analysis UI** — Users can describe issues, submit, and see AI-powered analysis text (no execution)
-- [ ] **Tool selector and shared layout** — Dropdown to switch between Query and Remediate, shared input/response layout, context-aware placeholders
-- [ ] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests
-- [ ] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
-- [ ] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
+- [~] **Plugin scaffolding and build pipeline** — Grafana app plugin project created with `@grafana/create-plugin`, builds successfully, loads in Grafana dev environment
+- [~] **Plugin configuration page** — Admin can configure MCP server URL and auth token via Grafana plugin settings, with connection test
+- [~] **Backend proxy (Go)** — Backend plugin component proxies requests to MCP server with configured auth, handles errors gracefully
+- [~] **Query tool UI** — Users can type natural language queries, submit, and see text responses from the MCP server
+- [~] **Remediate analysis UI** — Users can describe issues, submit, and see AI-powered analysis text (no execution)
+- [~] **Tool selector and shared layout** — Dropdown to switch between Query and Remediate, shared input/response layout, context-aware placeholders
+- [~] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests
+- [~] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
+- [~] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
 
 ### Expansion: Phase 1 detail (M0–M9 mapping to the checklist above)
 
@@ -370,24 +373,24 @@ and **3 (sovereign / self-hosted)** — the two that matter on self-managed **v1
 Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 
 **Stage 1a — Foundation**
-- [ ] **M0 — Validation spike.** Against a live dot-ai: confirm `data.result.summary` unwrapping and remediate analysis fields; confirm `version → system.kubernetes.{connected,context}`; confirm a **no-`apply` token** yields analysis + `fallbackReason`; confirm the auth header; **measure the Grafana resource-call deadline** to decide blocking vs async default. *Done when the presentation table, cluster-context source, read-only guarantee, and timeout strategy are confirmed.*
-- [ ] **M1 — Scaffolding, build & generated client.** `@grafana/create-plugin` app+backend; `@grafana/*` libs **pinned to support Grafana 11.4** (the scaffold defaults to ~13.x); a dot-ai client **generated from `schema/openapi.json`**; builds and loads. *Done when the app appears in the sidebar (correct `includes` nav entry), the Mage backend builds, the generated client compiles, and it loads on 11.4.*
+- [~] **M0 — Validation spike.** Against a live dot-ai: confirm `data.result.summary` unwrapping and remediate analysis fields; confirm `version → system.kubernetes.{connected,context}`; confirm a **no-`apply` token** yields analysis + `fallbackReason`; confirm the auth header; **measure the Grafana resource-call deadline** to decide blocking vs async default. *Done when the presentation table, cluster-context source, read-only guarantee, and timeout strategy are confirmed.*
+- [~] **M1 — Scaffolding, build & generated client.** `@grafana/create-plugin` app+backend; `@grafana/*` libs **pinned to support Grafana 11.4** (the scaffold defaults to ~13.x); a dot-ai client **generated from `schema/openapi.json`**; builds and loads. *Done when the app appears in the sidebar (correct `includes` nav entry), the Mage backend builds, the generated client compiles, and it loads on 11.4.*
 
 **Stage 1b — Connectivity**
-- [ ] **M2 — Configuration page.** apiUrl + token (secureJsonData); Test-connection (post-Save) via `version`, failing fast on misconfig, and surfacing the cluster context. *Done when settings persist and Test-connection reports OK/failure + cluster.*
-- [ ] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/status/{jobId}`; `httpclient` + generated client; token injection; envelope+status mapping; async `202`+poll default (per M0); egress/SSRF fail-closed; redaction; fail-fast. *Done when unit tests cover success + all error classes + timeout + token-never-logged.*
+- [~] **M2 — Configuration page.** apiUrl + token (secureJsonData); Test-connection (post-Save) via `version`, failing fast on misconfig, and surfacing the cluster context. *Done when settings persist and Test-connection reports OK/failure + cluster.*
+- [~] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/status/{jobId}`; `httpclient` + generated client; token injection; envelope+status mapping; async `202`+poll default (per M0); egress/SSRF fail-closed; redaction; fail-fast. *Done when unit tests cover success + all error classes + timeout + token-never-logged.*
 
 **Stage 1c — Intelligence surfaces**
-- [ ] **M4 — Query UI.** Plain-text answer from `summary`; cluster-context display (from `version`); raw-response toggle; char counter. *Done when a real query renders its answer with visible cluster context.*
-- [ ] **M5 — Remediate analysis UI.** Analysis text; per-command Copy; **no execution surfaced**. *Done when a real remediate renders root cause + recommended actions and offers no execute path.*
+- [~] **M4 — Query UI.** Plain-text answer from `summary`; cluster-context display (from `version`); raw-response toggle; char counter. *Done when a real query renders its answer with visible cluster context.*
+- [~] **M5 — Remediate analysis UI.** Analysis text; per-command Copy; **no execution surfaced**. *Done when a real remediate renders root cause + recommended actions and offers no execute path.*
 
 **Stage 1d — Firefighting UX & dashboard integration**
-- [ ] **M6 — Shared layout, selector & firefighting controls.** Tool selector + context-aware placeholders; Cancel, Retry (preserves intent), elapsed-time/staged progress; response Copy; specific error `Alert`s. *Done when switching tools shares state and long/failed calls are cancelable/retryable with clear errors.*
-- [ ] **M7 — Dashboard deep-link.** Intent pre-filled via URL query param / template variable from a panel link. *Done when a panel data-link opens the page with the intent populated.*
+- [~] **M6 — Shared layout, selector & firefighting controls.** Tool selector + context-aware placeholders; Cancel, Retry (preserves intent), elapsed-time/staged progress; response Copy; specific error `Alert`s. *Done when switching tools shares state and long/failed calls are cancelable/retryable with clear errors.*
+- [~] **M7 — Dashboard deep-link.** Intent pre-filled via URL query param / template variable from a panel link. *Done when a panel data-link opens the page with the intent populated.*
 
 **Stage 1e — Ship**
-- [ ] **M8 — Docs & install guide.** README: setup, config, read-only token guidance, **unsigned-plugin allow-list step**, screenshots; a `changelog.d` fragment per repo convention. *Done when a new user installs+configures from the README alone.*
-- [ ] **M9 — End-to-end + compatibility.** A **live-stack integration test** (real Grafana **11.4** + a current release **13.x**, live dot-ai): real Query + Remediate round-trip, token flow, and no-`apply` read-only enforcement verified end-to-end — not just mocks. *Done when the CI matrix passes and the live e2e is green on 11.4 and current.*
+- [~] **M8 — Docs & install guide.** README: setup, config, read-only token guidance, **unsigned-plugin allow-list step**, screenshots; a `changelog.d` fragment per repo convention. *Done when a new user installs+configures from the README alone.*
+- [~] **M9 — End-to-end + compatibility.** A **live-stack integration test** (real Grafana **11.4** + a current release **13.x**, live dot-ai): real Query + Remediate round-trip, token flow, and no-`apply` read-only enforcement verified end-to-end — not just mocks. *Done when the CI matrix passes and the live e2e is green on 11.4 and current.*
 
 > **Phase 1 exit:** a self-managed 11.4 operator gets AI **cluster-state** answers + remediation
 > **analysis** inside **Grafana** — sovereign, read-only, verified against a live stack.
@@ -549,4 +552,29 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 6. **Positioning vs Grafana Assistant** (Design Decision 9 / [Competitive landscape](#competitive-landscape--differentiation)) — given Grafana Assistant + Sift, is an **analysis-only** Grafana plugin worth building, or should v1 differentiate by including **remediation** (GitOps PR) and lean on K8s-state + sovereignty? This is the central go/no-go, above the implementation questions.
 7. **Grafana Cloud (optional, not planned here)** (Design Decision 10 / [Deployment targets](#deployment-targets-self-managed-vs-grafana-cloud)) — does the maintainer or community want a **later** Cloud track (catalog signing, Cloud-reachable dot-ai HTTPS, install path)? This contribution will not take it on; answer only if someone is volunteering to own that follow-on.
 8. **Kubeshark / evidence ownership** (Design Decision 11 / [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives)) — confirm: **core `dot-ai` PRD + platform MOP** for connectivity; this companion only presents server output (optional M16). Reject putting a Kubeshark client in the Grafana plugin.
+
+## Progress
+
+| Date | Milestone | Status | Evidence |
+|---|---|---|---|
+| 2026-08-09 | M0 validation | partial `[~]` | Live Group A probes: A1/A2/A3/A7 PASS; A4–A6 FAIL (LLM free-model route) — presentation/read-only not fully confirmed |
+| 2026-08-09 | M1 scaffold | partial `[~]` | Fork PR [#1](https://github.com/LesleyMurfin/dot-ai-grafana/pull/1) — build/typecheck/go test PASS; peer-review APPROVE; live Grafana host load not done |
+| 2026-08-10 | M2 config | partial `[~]` | Fork PR [#2](https://github.com/LesleyMurfin/dot-ai-grafana/pull/2) — peer-review APPROVE |
+| 2026-08-10 | M3 proxy | partial `[~]` | Fork PR [#3](https://github.com/LesleyMurfin/dot-ai-grafana/pull/3) — peer-review APPROVE |
+| 2026-08-10 | M4–M7 UI | partial `[~]` | Fork PR [#4](https://github.com/LesleyMurfin/dot-ai-grafana/pull/4) — peer-review APPROVE; live Query/Remediate blocked on M0 A4–A6 |
+| 2026-08-10 | M8 docs | partial `[~]` | Fork PR [#5](https://github.com/LesleyMurfin/dot-ai-grafana/pull/5) — docs/compat notes; screenshots still open |
+| 2026-08-10 | M9 compat | partial `[~]` | Pins/build/unit PASS; live Grafana 11.4/13.x e2e not run |
+
+**Completion policy:** no `[x]` until success criteria are fully evidenced (including live Grafana load and real tool round-trips where required). Code-path APPROVE alone stays `[~]`.
+
+## Work Log
+
+### 2026-08-10 — /prd start
+- **Issue:** PRD #1 still Draft while Phase 1 implementation PRs #1–#5 already open on this fork.
+- **Action:** Marked In Progress; recorded branch and implementation PR links. Setup only — no product code in this change.
+- **Next:** continue milestone work via stacked feat PRs; engineer merge gate.
+
+### 2026-08-10 — /prd update-progress
+- **Issue:** Milestone checkboxes still empty despite M1–M9 stack on fork.
+- **Action:** Evidence-only upgrade of original 9 + M0–M9 to `[~]`. No `[x]` — live e2e / LLM A4–A6 / merges still open. Phase 2–3 (M10–M16) unchanged.
 
