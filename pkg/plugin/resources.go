@@ -218,7 +218,7 @@ func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	a.proxyTool(w, req, "/api/v1/tools/query")
+	a.proxyDotAI(w, req, "/api/v1/tools/query")
 }
 
 // handleRemediate proxies POST /remediate → analysis-only /api/v1/tools/remediate.
@@ -227,12 +227,12 @@ func (a *App) handleRemediate(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	a.proxyTool(w, req, "/api/v1/tools/remediate")
+	a.proxyDotAI(w, req, "/api/v1/tools/remediate")
 }
 
-// proxyTool forwards the request body to a dot-ai tools REST path.
+// proxyDotAI forwards the request body to a dot-ai tools REST path.
 // Upstream status and body are preserved (including 202 async envelopes).
-func (a *App) proxyTool(w http.ResponseWriter, req *http.Request, toolPath string) {
+func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
 	if a.apiURL == "" || a.apiKey == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
 			"status":  "error",
@@ -286,7 +286,7 @@ func (a *App) proxyTool(w http.ResponseWriter, req *http.Request, toolPath strin
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"status":  "error",
-			"message": fmt.Sprintf("dot-ai unreachable: %v", err),
+			"message": fmt.Sprintf("dot-ai unreachable (502): %v", err),
 		})
 		return
 	}
