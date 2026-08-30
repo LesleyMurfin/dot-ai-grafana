@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "dot-ai",
+  "id": "lesleymurfin-dotai-app",
+  "backend": true,
+  "executable": "gpx_dot_ai",
+  "info": {
+    "keywords": [
+      "app",
+      "kubernetes",
+      "ai",
+      "dot-ai"
+    ],
+    "description": "AI-powered Kubernetes cluster intelligence (query + analysis-only remediate) via dot-ai REST.",
+    "author": {
+      "name": "LesleyMurfin"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "dot-ai",
+      "path": "/a/%PLUGIN_ID%/",
+      "addToNav": true,
+      "defaultNav": true
+    },
+    {
+      "type": "page",
+      "icon": "cog",
+      "name": "Configuration",
+      "path": "/plugins/%PLUGIN_ID%",
+      "role": "Admin",
+      "addToNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}

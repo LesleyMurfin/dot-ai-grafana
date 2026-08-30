@@ -1,0 +1,278 @@
+import React, { ChangeEvent, FormEvent, useState } from 'react';
+import { lastValueFrom } from 'rxjs';
+import { css } from '@emotion/css';
+import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from '@grafana/data';
+import { getBackendSrv } from '@grafana/runtime';
+import { Alert, Button, Field, FieldSet, Input, SecretInput, useStyles2 } from '@grafana/ui';
+import { testIds } from '../testIds';
+
+type AppPluginSettings = {
+  apiUrl?: string;
+};
+
+type State = {
+  // Dot-ai REST base URL (jsonData.apiUrl).
+  apiUrl: string;
+  // Whether secureJsonData.apiKey is already stored server-side.
+  isApiKeySet: boolean;
+  // Draft auth token (never echoed from server).
+  apiKey: string;
+};
+
+type TestStatus =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'success'; message: string }
+  | { kind: 'error'; message: string };
+
+type TestConnectionPayload = {
+  status?: string;
+  message?: string;
+  connected?: boolean;
+};
+
+export interface AppConfigProps extends PluginConfigPageProps<AppPluginMeta<AppPluginSettings>> {}
+
+function readStringField(obj: unknown, key: string): string | undefined {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) {
+    return undefined;
+  }
+  const value = (obj as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readBoolField(obj: unknown, key: string): boolean | undefined {
+  if (!obj || typeof obj !== 'object' || !(key in obj)) {
+    return undefined;
+  }
+  const value = (obj as Record<string, unknown>)[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function parseTestConnectionBody(body: unknown): TestConnectionPayload {
+  // backendSrv.fetch resolves to FetchResponse; prefer .data when present.
+  let payload: unknown = body;
+  if (body && typeof body === 'object' && 'data' in body) {
+    payload = (body as { data: unknown }).data;
+  }
+
+  return {
+    status: readStringField(payload, 'status'),
+    message: readStringField(payload, 'message'),
+    connected: readBoolField(payload, 'connected'),
+  };
+}
+
+function errorMessageFromUnknown(err: unknown): string {
+  if (!err || typeof err !== 'object') {
+    return 'Connection test failed';
+  }
+  if ('data' in err) {
+    const nested = readStringField((err as { data: unknown }).data, 'message');
+    if (nested) {
+      return nested;
+    }
+  }
+  const message = readStringField(err, 'message');
+  if (message) {
+    return message;
+  }
+  const statusText = readStringField(err, 'statusText');
+  if (statusText) {
+    return statusText;
+  }
+  return 'Connection test failed';
+}
+
+const AppConfig = ({ plugin }: AppConfigProps) => {
+  const s = useStyles2(getStyles);
+  const { enabled, pinned, jsonData, secureJsonFields } = plugin.meta;
+  const [state, setState] = useState<State>({
+    apiUrl: jsonData?.apiUrl || '',
+    apiKey: '',
+    isApiKeySet: Boolean(secureJsonFields?.apiKey),
+  });
+  const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
+
+  const isSubmitDisabled = Boolean(!state.apiUrl || (!state.isApiKeySet && !state.apiKey));
+  const isTestDisabled = Boolean(!state.apiUrl || (!state.isApiKeySet && !state.apiKey) || testStatus.kind === 'loading');
+
+  const onResetApiKey = () =>
+    setState({
+      ...state,
+      apiKey: '',
+      isApiKeySet: false,
+    });
+
+  const onChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setState({
+      ...state,
+      [event.target.name]: event.target.value.trim(),
+    });
+  };
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSubmitDisabled) {
+      return;
+    }
+
+    updatePluginAndReload(plugin.meta.id, {
+      enabled,
+      pinned,
+      jsonData: {
+        apiUrl: state.apiUrl,
+      },
+      // This cannot be queried later by the frontend.
+      // We don't want to override it in case it was set previously and left untouched now.
+      secureJsonData: state.isApiKeySet
+        ? undefined
+        : {
+            apiKey: state.apiKey,
+          },
+    });
+  };
+
+  const onTestConnection = async () => {
+    if (isTestDisabled) {
+      return;
+    }
+
+    setTestStatus({ kind: 'loading' });
+    try {
+      const data: { apiUrl: string; apiKey?: string } = { apiUrl: state.apiUrl };
+      if (state.apiKey) {
+        data.apiKey = state.apiKey;
+      }
+
+      const response = await getBackendSrv().fetch({
+        url: `/api/plugins/${plugin.meta.id}/resources/test-connection`,
+        method: 'POST',
+        data,
+        showErrorAlert: false,
+        showSuccessAlert: false,
+      });
+
+      const body = await lastValueFrom(response as unknown as Parameters<typeof lastValueFrom>[0]);
+      const payload = parseTestConnectionBody(body);
+      const message =
+        payload.message ||
+        (payload.connected === false
+          ? 'dot-ai responded but Kubernetes reports not connected'
+          : 'Connection successful');
+
+      if (payload.status === 'ok') {
+        setTestStatus({ kind: 'success', message });
+        return;
+      }
+
+      setTestStatus({ kind: 'error', message: message || 'Connection test failed' });
+    } catch (e) {
+      setTestStatus({ kind: 'error', message: errorMessageFromUnknown(e) });
+    }
+  };
+
+  return (
+    <form onSubmit={onSubmit}>
+      <FieldSet label="dot-ai API Settings">
+        <Field
+          label="Auth Token"
+          description="Bearer token for the dot-ai REST API (stored encrypted). Use a no-apply token — analysis only."
+        >
+          <SecretInput
+            width={60}
+            id="config-api-key"
+            data-testid={testIds.appConfig.apiKey}
+            name="apiKey"
+            value={state.apiKey}
+            isConfigured={state.isApiKeySet}
+            placeholder="Dot-ai auth token"
+            onChange={onChange}
+            onReset={onResetApiKey}
+          />
+        </Field>
+
+        <Field
+          label="MCP Server URL"
+          description="Dot-ai REST base URL (e.g. http://dot-ai.namespace.svc:3456). No /api/v1 suffix required."
+          className={s.marginTop}
+        >
+          <Input
+            width={60}
+            name="apiUrl"
+            id="config-api-url"
+            data-testid={testIds.appConfig.apiUrl}
+            value={state.apiUrl}
+            placeholder="http://dot-ai:3456"
+            onChange={onChange}
+          />
+        </Field>
+
+        {testStatus.kind === 'success' && (
+          <Alert title="Connection OK" severity="success" className={s.marginTop} data-testid={testIds.appConfig.testStatus}>
+            {testStatus.message}
+          </Alert>
+        )}
+        {testStatus.kind === 'error' && (
+          <Alert title="Connection failed" severity="error" className={s.marginTop} data-testid={testIds.appConfig.testStatus}>
+            {testStatus.message}
+          </Alert>
+        )}
+
+        <div className={s.buttonRow}>
+          <Button type="submit" data-testid={testIds.appConfig.submit} disabled={isSubmitDisabled}>
+            Save API settings
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid={testIds.appConfig.testConnection}
+            disabled={isTestDisabled}
+            onClick={onTestConnection}
+          >
+            {testStatus.kind === 'loading' ? 'Testing…' : 'Test connection'}
+          </Button>
+        </div>
+      </FieldSet>
+    </form>
+  );
+};
+
+export default AppConfig;
+
+const getStyles = (theme: GrafanaTheme2) => ({
+  colorWeak: css`
+    color: ${theme.colors.text.secondary};
+  `,
+  marginTop: css`
+    margin-top: ${theme.spacing(3)};
+  `,
+  buttonRow: css`
+    display: flex;
+    gap: ${theme.spacing(1)};
+    margin-top: ${theme.spacing(3)};
+  `,
+});
+
+const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<AppPluginSettings>>) => {
+  try {
+    await updatePlugin(pluginId, data);
+
+    // Reloading the page as the changes made here wouldn't be propagated to the actual plugin otherwise.
+    // This is not ideal, however unfortunately currently there is no supported way for updating the plugin state.
+    window.location.reload();
+  } catch (e) {
+    console.error('Error while updating the plugin', e);
+  }
+};
+
+const updatePlugin = async (pluginId: string, data: Partial<PluginMeta>) => {
+  const response = await getBackendSrv().fetch({
+    url: `/api/plugins/${pluginId}/settings`,
+    method: 'POST',
+    data,
+  });
+
+  // Cast: @grafana/data@11.4 nests its own rxjs types; dual-package with root rxjs breaks tsc.
+  return lastValueFrom(response as unknown as Parameters<typeof lastValueFrom>[0]);
+};
