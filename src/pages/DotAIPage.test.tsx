@@ -100,12 +100,20 @@ describe('Pages/DotAIPage', () => {
   });
 
   test('loading state shows spinner and disables double-submit', async () => {
-    const { promise, resolve } = Promise.withResolvers<{
+    let resolve!: (value: {
       ok: boolean;
       status: number;
       summary: string;
       raw: unknown;
-    }>();
+    }) => void;
+    const promise = new Promise<{
+      ok: boolean;
+      status: number;
+      summary: string;
+      raw: unknown;
+    }>((r) => {
+      resolve = r;
+    });
 
     mockCallDotAITool.mockReturnValue(promise);
 

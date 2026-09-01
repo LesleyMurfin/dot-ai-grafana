@@ -10,7 +10,10 @@ function toolResourceUrl(tool: 'query' | 'remediate'): RegExp {
 }
 
 async function delay(ms: number): Promise<void> {
-  const { promise, resolve } = Promise.withResolvers<void>();
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
   setTimeout(resolve, ms);
   return promise;
 }
