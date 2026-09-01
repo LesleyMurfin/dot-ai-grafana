@@ -86,7 +86,7 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 	apiKey := a.apiKey
 
 	if req.Body != nil {
-		defer req.Body.Close()
+		defer func() { _ = req.Body.Close() }()
 		var body testConnectionRequest
 		dec := json.NewDecoder(req.Body)
 		if err := dec.Decode(&body); err != nil && err != io.EOF {
@@ -174,7 +174,7 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 			Message: fmt.Sprintf("dot-ai unreachable: %v", err),
 		}, http.StatusBadGateway
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -454,7 +454,7 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", fmt.Sprintf("dot-ai unreachable (502): %v", err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	const maxUpstreamBody = 8 << 20 // 8 MiB
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
