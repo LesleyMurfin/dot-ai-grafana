@@ -21,6 +21,26 @@ export type AskCallMeta = {
   branch?: AskBranch;
 };
 
+/**
+ * Shown whenever the 120s tool-client ceiling (pkg/plugin newPluginHTTPClient) ends an Ask.
+ * One line, actionable; there is no async 202 path to point at.
+ */
+export const ASK_TIMEOUT_MESSAGE = 'Ask stopped at the 120s plugin limit; retry or narrow the question.';
+
+const TIMEOUT_TEXT = /abort|timed out|timeout|deadline exceeded|gateway time-?out/i;
+
+/**
+ * The 120s expiry reaches the browser three ways: a client-side abort, an upstream 504,
+ * or the Go proxy's 502 envelope carrying "context deadline exceeded". A plain 502
+ * (dial refused, bad gateway) is a different fault and keeps its own text.
+ */
+function timeoutAware(status: number, message: string, name?: string): string {
+  if (name === 'AbortError' || name === 'TimeoutError' || status === 504 || TIMEOUT_TEXT.test(message)) {
+    return ASK_TIMEOUT_MESSAGE;
+  }
+  return message;
+}
+
 /** Normalized result for UI consumers (maps backend `error` → errorMessage). */
 export type ToolCallResult = {
   ok: boolean;
@@ -113,7 +133,9 @@ export async function callDotAITool(
         status: contract.status,
         summary: contract.summary,
         raw: payload,
-        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
+        errorMessage: contract.ok
+          ? undefined
+          : timeoutAware(contract.status, contract.error || `Request failed (HTTP ${contract.status})`),
       };
     }
     const status = typeof body?.status === 'number' ? body.status : 0;
@@ -134,10 +156,14 @@ export async function callDotAITool(
         status: contract.status,
         summary: contract.summary,
         raw: errData,
-        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
+        errorMessage: contract.ok
+          ? undefined
+          : timeoutAware(contract.status, contract.error || `Request failed (HTTP ${contract.status})`),
       };
     }
     const status = errObj && typeof errObj.status === 'number' ? errObj.status : 0;
+    const name =
+      e instanceof Error ? e.name : errObj && typeof errObj.name === 'string' ? errObj.name : undefined;
     const message =
       e instanceof Error
         ? e.message
@@ -149,7 +175,7 @@ export async function callDotAITool(
       status,
       summary: '',
       raw: errData ?? e,
-      errorMessage: message,
+      errorMessage: timeoutAware(status, message, name),
     };
   }
 }

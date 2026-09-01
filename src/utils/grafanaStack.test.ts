@@ -3,6 +3,7 @@ import { getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
   fetchStackContext,
+  getDataSourceByType,
   linesFromLokiFrames,
   LOG_LINE_CAP,
   parsePodNamespace,
@@ -172,5 +173,52 @@ describe('fetchStackContext', () => {
     expect(result.currentEmpty).toBe(false);
     const lokiReq = lokiQuery.mock.calls[0][0];
     expect(lokiReq.targets[0].expr).toMatch(/namespace=~/);
+  });
+});
+
+describe('getDataSourceByType selection', () => {
+  test('prefers the default datasource over the first listed', async () => {
+    mockGetList.mockImplementation(() => [
+      { uid: 'loki-a', name: 'Extra Loki', type: 'loki' },
+      { uid: 'loki-b', name: 'Team Loki', type: 'loki', isDefault: true },
+    ]);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('loki');
+    expect(picked?.settings?.uid).toBe('loki-b');
+    expect(mockGet).toHaveBeenCalledWith('loki-b');
+  });
+
+  test('falls back to the type-named datasource when none is default', async () => {
+    mockGetList.mockImplementation(() => [
+      { uid: 'loki-a', name: 'Extra Loki', type: 'loki' },
+      { uid: 'loki-b', name: 'Loki', type: 'loki' },
+    ]);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('loki');
+    expect(picked?.settings?.uid).toBe('loki-b');
+  });
+
+  test('falls back to the first configured when neither default nor named match', async () => {
+    mockGetList.mockImplementation(() => [
+      { uid: 'loki-a', name: 'Extra Loki', type: 'loki' },
+      { uid: 'loki-b', name: 'Other Loki', type: 'loki' },
+    ]);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('loki');
+    expect(picked?.settings?.uid).toBe('loki-a');
+  });
+
+  test('ignores datasources of another type', async () => {
+    mockGetList.mockImplementation(() => [
+      { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', isDefault: true },
+      { uid: 'loki-a', name: 'Extra Loki', type: 'loki' },
+    ]);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('loki');
+    expect(picked?.settings?.uid).toBe('loki-a');
   });
 });

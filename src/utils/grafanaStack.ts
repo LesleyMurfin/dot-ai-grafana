@@ -150,7 +150,32 @@ function baseRequest<T extends { refId: string }>(targets: T[], requestId: strin
 }
 
 /**
- * First configured datasource of a Grafana type.
+ * Pick one datasource among the configured ones of a type.
+ * Order: (1) the Grafana default of that type, (2) the one named after the type
+ * (case-insensitive: Loki/Prometheus/Tempo/Alertmanager), (3) first configured.
+ * No hardcoded uids.
+ */
+export function pickDataSource(
+  list: DataSourceInstanceSettings[],
+  type: 'loki' | 'prometheus' | 'tempo' | 'alertmanager'
+): DataSourceInstanceSettings | undefined {
+  const ofType = list.filter((s) => s && s.type === type);
+  if (ofType.length === 0) {
+    return undefined;
+  }
+  const byDefault = ofType.find((s) => s.isDefault === true);
+  if (byDefault) {
+    return byDefault;
+  }
+  const byName = ofType.find((s) => (s.name || '').trim().toLowerCase() === type);
+  if (byName) {
+    return byName;
+  }
+  return ofType[0];
+}
+
+/**
+ * Configured datasource of a Grafana type, default-first.
  * getDataSourceSrv().getList({ type }) then get(ref) — no hardcoded uids, no picker UI.
  */
 export async function getDataSourceByType(
@@ -163,12 +188,12 @@ export async function getDataSourceByType(
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
-    list = (Array.isArray(raw) ? raw : []).filter((s) => s.type === type);
+    list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
   }
-  if (list.length === 0) {
+  const settings = pickDataSource(list, type);
+  if (!settings) {
     return undefined;
   }
-  const settings = list[0];
   const ref = settings.uid || settings.name;
   if (!ref) {
     return { settings };

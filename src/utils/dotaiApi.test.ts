@@ -1,6 +1,6 @@
 import { of, throwError } from 'rxjs';
 import { getBackendSrv } from '@grafana/runtime';
-import { callDotAITool } from './dotaiApi';
+import { ASK_TIMEOUT_MESSAGE, callDotAITool } from './dotaiApi';
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(),
@@ -147,5 +147,52 @@ describe('callDotAITool', () => {
     expect(result.status).toBe(502);
     expect(result.errorMessage).toBe('Bad Gateway');
     expect(result.raw).toEqual({ detail: 'upstream' });
+  });
+
+  test('client abort maps to the 120s plugin-limit message', async () => {
+    const abort = new Error('The user aborted a request.');
+    abort.name = 'AbortError';
+    mockFetch.mockReturnValue(throwError(() => abort));
+
+    const result = await callDotAITool('query', 'long question');
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toBe(ASK_TIMEOUT_MESSAGE);
+  });
+
+  test('proxy 502 deadline envelope maps to the 120s plugin-limit message', async () => {
+    mockFetch.mockReturnValue(
+      of({
+        status: 200,
+        data: {
+          ok: false,
+          status: 502,
+          summary: '',
+          error: 'dot-ai unreachable (502): Post "http://dot-ai/api/v1/tools/query": context deadline exceeded',
+        },
+      })
+    );
+
+    const result = await callDotAITool('query', 'wide question');
+    expect(result.status).toBe(502);
+    expect(result.errorMessage).toBe(ASK_TIMEOUT_MESSAGE);
+  });
+
+  test('upstream 504 maps to the 120s plugin-limit message', async () => {
+    mockFetch.mockReturnValue(throwError(() => ({ status: 504, message: 'Gateway Timeout' })));
+
+    const result = await callDotAITool('remediate', 'slow issue');
+    expect(result.errorMessage).toBe(ASK_TIMEOUT_MESSAGE);
+  });
+
+  test('a plain 502 keeps its own text (not a timeout)', async () => {
+    mockFetch.mockReturnValue(
+      of({
+        status: 200,
+        data: { ok: false, status: 502, summary: '', error: 'dot-ai unreachable (502): connection refused' },
+      })
+    );
+
+    const result = await callDotAITool('query', 'x');
+    expect(result.errorMessage).toBe('dot-ai unreachable (502): connection refused');
   });
 });

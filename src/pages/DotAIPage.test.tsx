@@ -2,11 +2,12 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import DotAIPage from './DotAIPage';
 import { testIds } from '../components/testIds';
-import { callDotAITool } from '../utils/dotaiApi';
+import { ASK_TIMEOUT_MESSAGE, callDotAITool } from '../utils/dotaiApi';
 import { buildRequestText, stablePreamble } from '../utils/progressiveContext';
 import { fetchStackContext } from '../utils/grafanaStack';
 
 jest.mock('../utils/dotaiApi', () => ({
+  ...jest.requireActual('../utils/dotaiApi'),
   callDotAITool: jest.fn(),
 }));
 
@@ -251,6 +252,24 @@ describe('Pages/DotAIPage', () => {
     // Grafana stack Current is set before callDotAITool; History only on success.
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
+  });
+
+  test('timeout error renders the 120s limit line under an Ask timed out title', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: false,
+      status: 502,
+      summary: '',
+      raw: {},
+      errorMessage: ASK_TIMEOUT_MESSAGE,
+    });
+
+    render(<DotAIPage />);
+    typeIntent('summarize every namespace');
+    clickSubmit();
+
+    const alert = await screen.findByTestId(testIds.dotai.error);
+    expect(alert).toHaveTextContent('Ask stopped at the 120s plugin limit; retry or narrow the question.');
+    expect(alert).toHaveTextContent('Ask timed out');
   });
 
 

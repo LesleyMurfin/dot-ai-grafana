@@ -12,7 +12,7 @@ import {
   useStyles2,
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
-import { DotAITool } from '../utils/dotaiApi';
+import { ASK_TIMEOUT_MESSAGE, DotAITool } from '../utils/dotaiApi';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
 
@@ -199,7 +199,12 @@ function DotAIPage() {
         </form>
 
         {error && (
-          <Alert title="Request failed" severity="error" data-testid={testIds.dotai.error} className={styles.block}>
+          <Alert
+            title={error === ASK_TIMEOUT_MESSAGE ? 'Ask timed out' : 'Request failed'}
+            severity="error"
+            data-testid={testIds.dotai.error}
+            className={styles.block}
+          >
             {error}
           </Alert>
         )}
