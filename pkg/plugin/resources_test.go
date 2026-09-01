@@ -406,6 +406,16 @@ func TestTestConnection(t *testing.T) {
 		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
+		var body testConnectionResponse
+		if err := json.Unmarshal(resp.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Status != "error" {
+			t.Fatalf("body=%+v", body)
+		}
+		if !strings.Contains(body.Message, "Admin role required") {
+			t.Fatalf("expected clear Admin gate message, got %q", body.Message)
+		}
 		if atomic.LoadInt32(&hits) != 0 {
 			t.Fatalf("HTTP was used %d times", hits)
 		}
@@ -449,6 +459,13 @@ func TestTestConnection(t *testing.T) {
 		}
 		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		var body testConnectionResponse
+		if err := json.Unmarshal(resp.Body, &body); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body.Message, "Admin role required") {
+			t.Fatalf("expected clear Admin gate message, got %q", body.Message)
 		}
 		if atomic.LoadInt32(&hits) != 0 {
 			t.Fatalf("HTTP was used %d times", hits)
@@ -500,6 +517,86 @@ func TestTestConnection(t *testing.T) {
 			t.Fatalf("body=%+v", body)
 		}
 	})
+
+	t.Run("saved_url_editor_no_admin_gate", func(t *testing.T) {
+		// Acceptance: saved-URL tests without a divergent draft URL must not require Admin.
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("Authorization"); got != "Bearer from-settings" {
+				t.Errorf("Authorization=%q", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"connected":true}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "from-settings"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: editorPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	})
+
+	t.Run("same_url_as_saved_editor_no_admin_gate", func(t *testing.T) {
+		// Same draft apiUrl as saved settings is not a divergent draft URL.
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"connected":true}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "from-settings"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		payload, _ := json.Marshal(map[string]string{
+			"apiUrl": upstream.URL,
+			"apiKey": "",
+		})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: editorPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	})
+
 
 }
 
