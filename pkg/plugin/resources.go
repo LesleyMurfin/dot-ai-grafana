@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 )
@@ -51,6 +54,122 @@ func writeToolProxy(w http.ResponseWriter, httpStatus int, status int, summary, 
 		Error:   errMsg,
 	})
 }
+
+// Ask log: one JSON line per query/remediate on the Grafana data PVC.
+// Never includes Authorization headers or apiKey values.
+const (
+	defaultAskLogPath = "/var/lib/grafana/dotai-ask.log"
+	maxAskLogBytes    = 1 << 20 // 1 MiB; rotate before append when exceeded
+)
+
+var (
+	askLogPath = defaultAskLogPath
+	askLogMu   sync.Mutex
+)
+
+type askLogEntry struct {
+	Time    string `json:"time"`
+	Tool    string `json:"tool"`
+	Body    string `json:"body"`
+	Status  int    `json:"status"`
+	Summary string `json:"summary,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func toolNameFromPath(toolPath string) string {
+	switch toolPath {
+	case "/api/v1/tools/query":
+		return "query"
+	case "/api/v1/tools/remediate":
+		return "remediate"
+	default:
+		return strings.TrimPrefix(toolPath, "/api/v1/tools/")
+	}
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// askBodyPreview extracts a truncated intent/issue for the log line.
+// Sensitive JSON keys are stripped; Authorization/apiKey never appear.
+func askBodyPreview(body []byte) string {
+	const max = 512
+	if len(body) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		return truncateRunes(string(body), max)
+	}
+	for _, k := range []string{
+		"apiKey", "apikey", "api_key",
+		"authorization", "Authorization",
+		"token", "authToken", "password", "secret",
+	} {
+		delete(m, k)
+	}
+	for _, k := range []string{"intent", "issue"} {
+		if s := trimmedStringAt(m, k); s != "" {
+			return truncateRunes(s, max)
+		}
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return truncateRunes(string(b), max)
+}
+
+// appendAskLog writes one JSON line for a completed query/remediate call.
+// Best-effort: failures to write must not affect the HTTP response.
+// When the log exceeds maxAskLogBytes, it is rotated to path+".1" (replacing any prior .1).
+func appendAskLog(tool string, body []byte, status int, summary, errMsg string) {
+	path := askLogPath
+	if path == "" {
+		return
+	}
+	entry := askLogEntry{
+		Time:    time.Now().UTC().Format(time.RFC3339),
+		Tool:    tool,
+		Body:    askBodyPreview(body),
+		Status:  status,
+		Summary: truncateRunes(summary, 512),
+		Error:   truncateRunes(errMsg, 512),
+	}
+	line, err := json.Marshal(entry)
+	if err != nil {
+		return
+	}
+	line = append(line, '\n')
+
+	askLogMu.Lock()
+	defer askLogMu.Unlock()
+
+	if info, err := os.Stat(path); err == nil && info.Size() >= maxAskLogBytes {
+		rotated := path + ".1"
+		_ = os.Remove(rotated)
+		if err := os.Rename(path, rotated); err != nil {
+			// Rename failed (e.g. cross-device); fall back to truncate in place.
+			_ = os.Truncate(path, 0)
+		}
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	_, _ = f.Write(line)
+}
+
 
 
 // handleHealth is the plugin resource health probe.
@@ -179,16 +298,14 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Do not reflect raw upstream error bodies to the UI.
+		// Never surface upstream 401/403 as Grafana resource auth failure —
+		// that confuses the frontend into treating the Grafana session as expired.
 		msg := fmt.Sprintf("dot-ai version returned HTTP %d", resp.StatusCode)
-		status := http.StatusBadGateway
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			status = http.StatusUnauthorized
-		}
 		return testConnectionResponse{
 			Status:         "error",
 			Message:        msg,
 			UpstreamStatus: resp.StatusCode,
-		}, status
+		}, http.StatusBadGateway
 	}
 
 	connected := extractConnected(raw)
@@ -393,46 +510,56 @@ func extractErrorMessage(payload any, fallback string) string {
 
 // proxyDotAI forwards the request body to a dot-ai tools REST path and returns a
 // stable {ok,status,summary,error} envelope (never the raw upstream body).
+// Each completed call appends one JSON line to the Ask log file (Grafana PVC).
 func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
+	tool := toolNameFromPath(toolPath)
+	var reqBody []byte
+	finish := func(httpStatus, status int, summary, errMsg string) {
+		appendAskLog(tool, reqBody, status, summary, errMsg)
+		writeToolProxy(w, httpStatus, status, summary, errMsg)
+	}
+
 	if a.apiURL == "" || a.apiKey == "" {
-		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", "plugin not configured: set apiUrl and auth token")
+		finish(http.StatusBadRequest, http.StatusBadRequest, "", "plugin not configured: set apiUrl and auth token")
 		return
 	}
 
 	base, err := validateAPIURL(a.apiURL)
 	if err != nil {
-		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
+		finish(http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
 		return
 	}
 
 	const maxBody = 1 << 20 // 1 MiB
 	body, err := io.ReadAll(io.LimitReader(req.Body, maxBody+1))
 	if err != nil {
-		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", "failed to read request body")
+		finish(http.StatusBadRequest, http.StatusBadRequest, "", "failed to read request body")
 		return
 	}
 	if len(body) > maxBody {
-		writeToolProxy(w, http.StatusRequestEntityTooLarge, http.StatusRequestEntityTooLarge, "", "request body too large")
+		finish(http.StatusRequestEntityTooLarge, http.StatusRequestEntityTooLarge, "", "request body too large")
 		return
 	}
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
+	reqBody = body
 
 	// Remediate must stay analysis-only at the proxy, not only in the UI.
 	if toolPath == "/api/v1/tools/remediate" {
 		sanitized, err := sanitizeRemediateBody(body)
 		if err != nil {
-			writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
+			finish(http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
 			return
 		}
 		body = sanitized
+		reqBody = sanitized
 	}
 
 	upstreamURL := base + toolPath
 	httpReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", fmt.Sprintf("build upstream request: %v", err))
+		finish(http.StatusBadRequest, http.StatusBadRequest, "", fmt.Sprintf("build upstream request: %v", err))
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -444,14 +571,14 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 		client = a.httpClient
 	}
 	if client == nil {
-		writeToolProxy(w, http.StatusInternalServerError, http.StatusInternalServerError, "", "HTTP client not configured")
+		finish(http.StatusInternalServerError, http.StatusInternalServerError, "", "HTTP client not configured")
 		return
 	}
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		// Do not log secrets; error string is safe dial failure text.
-		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", fmt.Sprintf("dot-ai unreachable (502): %v", err))
+		finish(http.StatusBadGateway, http.StatusBadGateway, "", fmt.Sprintf("dot-ai unreachable (502): %v", err))
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -459,11 +586,11 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 	const maxUpstreamBody = 8 << 20 // 8 MiB
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
 	if err != nil {
-		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", "failed reading upstream body")
+		finish(http.StatusBadGateway, http.StatusBadGateway, "", "failed reading upstream body")
 		return
 	}
 	if len(raw) > maxUpstreamBody {
-		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", "upstream response too large")
+		finish(http.StatusBadGateway, http.StatusBadGateway, "", "upstream response too large")
 		return
 	}
 
@@ -484,9 +611,15 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 		errMsg = extractErrorMessage(payload, fmt.Sprintf("dot-ai returned HTTP %d", resp.StatusCode))
 	}
 
-	// HTTP status mirrors upstream so callers can still branch on transport code;
-	// body always carries the stable envelope.
-	writeToolProxy(w, resp.StatusCode, resp.StatusCode, summary, errMsg)
+	// Body always carries the stable envelope. Never pass upstream 401/403 through as
+	// Grafana resource status (session-looking auth failure); map to 502 instead.
+	httpStatus := resp.StatusCode
+	outStatus := resp.StatusCode
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		httpStatus = http.StatusBadGateway
+		outStatus = http.StatusBadGateway
+	}
+	finish(httpStatus, outStatus, summary, errMsg)
 }
 
 // registerRoutes takes a *http.ServeMux and registers HTTP handlers.

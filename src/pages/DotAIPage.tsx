@@ -13,11 +13,23 @@ import {
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
 import { callDotAITool, DotAITool } from '../utils/dotaiApi';
+import {
+  appendHistory,
+  buildRequestText,
+  emptyThread,
+  mergeMap,
+  rewriteCurrent,
+  ToolThread,
+} from '../utils/progressiveContext';
+import { fetchStackContext } from '../utils/grafanaStack';
+
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
   { label: 'Remediate (analysis only)', value: 'remediate', description: 'AI issue analysis — no execute' },
 ];
+
+type Threads = Record<DotAITool, ToolThread>;
 
 function DotAIPage() {
   const styles = useStyles2(getStyles);
@@ -26,6 +38,12 @@ function DotAIPage() {
   const [loading, setLoading] = useState(false);
   const [responseText, setResponseText] = useState('');
   const [error, setError] = useState<string | undefined>();
+  const [threads, setThreads] = useState<Threads>({
+    query: emptyThread(),
+    remediate: emptyThread(),
+  });
+
+  const activeThread = threads[tool];
 
   const placeholder = useMemo(() => {
     if (tool === 'remediate') {
@@ -41,14 +59,58 @@ function DotAIPage() {
       return;
     }
 
+    const thread = threads[tool];
     setLoading(true);
     setError(undefined);
     setResponseText('');
+
     try {
-      // D2: plain intent only — never prefix [visualization]
-      const result = await callDotAITool(tool, trimmed);
+      // Query: Grafana DS getList+query → Current/Map, then pack question → existing dot-ai.
+      // Remediate: reuse thread Current/Map. History never packed. No sessionId / execute.
+      let currentForRequest = thread.current;
+      let mapForRequest = thread.map;
+
+      if (tool === 'query') {
+        const stack = await fetchStackContext(trimmed);
+        currentForRequest = stack.current;
+        mapForRequest = mergeMap(stack.mapHint, thread.map, trimmed);
+        setThreads((prev) => ({
+          ...prev,
+          query: {
+            ...prev.query,
+            current: currentForRequest,
+            map: mapForRequest,
+          },
+        }));
+      }
+
+      // Stable + Current + Map + box — never History (display-only).
+      const packed = buildRequestText({
+        tool,
+        current: currentForRequest,
+        map: mapForRequest,
+        box: trimmed,
+      });
+
+      // D2: plain text only — never prefix [visualization]; no sessionId.
+      const result = await callDotAITool(tool, packed);
       if (result.ok) {
-        setResponseText(result.summary);
+        const summaryText = result.summary.trim()
+          ? result.summary
+          : 'dot-ai returned no summary';
+        setResponseText(summaryText);
+        setThreads((prev) => {
+          const prior = prev[tool];
+          return {
+            ...prev,
+            [tool]: {
+              current: rewriteCurrent(prior.current, trimmed, summaryText),
+              map: mergeMap(prior.map, trimmed, summaryText),
+              history: appendHistory(prior.history, trimmed, summaryText),
+            },
+          };
+        });
+        setIntent('');
       } else {
         setError(result.errorMessage || 'Request failed');
         if (result.summary) {
@@ -60,6 +122,48 @@ function DotAIPage() {
     }
   };
 
+  const onClearThread = () => {
+    if (loading) {
+      return;
+    }
+    setThreads((prev) => ({
+      ...prev,
+      [tool]: emptyThread(),
+    }));
+    setResponseText('');
+    setError(undefined);
+  };
+
+  const onAnalyzeThis = () => {
+    if (loading) {
+      return;
+    }
+    const queryCurrent = threads.query.current.trim();
+    if (!queryCurrent) {
+      return;
+    }
+    // Copy Current into Remediate box; Query History stays; analysis only.
+    setTool('remediate');
+    setIntent(queryCurrent);
+    setError(undefined);
+    setResponseText('');
+  };
+
+  const onIntentKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter submits; Shift+Enter keeps the default newline.
+    if (event.key !== 'Enter' || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    if (loading || !intent.trim()) {
+      return;
+    }
+    event.currentTarget.form?.requestSubmit();
+  };
+
+
+  const showAnalyzeThis = tool === 'query' && Boolean(threads.query.current.trim()) && !loading;
+
   return (
     <PluginPage>
       <div className={styles.wrap} data-testid={testIds.dotai.container}>
@@ -68,8 +172,16 @@ function DotAIPage() {
             <Select
               options={TOOL_OPTIONS}
               value={TOOL_OPTIONS.find((o) => o.value === tool)}
-              onChange={(v) => setTool((v.value as DotAITool) || 'query')}
+              onChange={(v) => {
+                if (loading) {
+                  return;
+                }
+                setTool((v.value as DotAITool) || 'query');
+                setResponseText('');
+                setError(undefined);
+              }}
               inputId="dotai-tool"
+              disabled={loading}
             />
           </Field>
 
@@ -85,6 +197,7 @@ function DotAIPage() {
               data-testid={testIds.dotai.intent}
               value={intent}
               onChange={(e) => setIntent(e.currentTarget.value)}
+              onKeyDown={onIntentKeyDown}
               placeholder={placeholder}
               rows={5}
               disabled={loading}
@@ -99,6 +212,26 @@ function DotAIPage() {
             >
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
             </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              data-testid={testIds.dotai.clearThread}
+              disabled={loading}
+              onClick={onClearThread}
+            >
+              Clear thread
+            </Button>
+            {showAnalyzeThis && (
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid={testIds.dotai.analyzeThis}
+                disabled={loading}
+                onClick={onAnalyzeThis}
+              >
+                Analyze this
+              </Button>
+            )}
             {loading && (
               <span className={styles.loading} data-testid={testIds.dotai.loading}>
                 <Spinner inline={true} />
@@ -112,6 +245,33 @@ function DotAIPage() {
           <Alert title="Request failed" severity="error" data-testid={testIds.dotai.error} className={styles.block}>
             {error}
           </Alert>
+        )}
+
+        {activeThread.current && (
+          <div className={styles.context} data-testid={testIds.dotai.current}>
+            <h3 className={styles.responseTitle}>Current</h3>
+            <pre className={styles.pre}>{activeThread.current}</pre>
+          </div>
+        )}
+
+        {activeThread.map && (
+          <div className={styles.context} data-testid={testIds.dotai.map}>
+            <h3 className={styles.responseTitle}>Map</h3>
+            <pre className={styles.pre}>{activeThread.map}</pre>
+          </div>
+        )}
+
+        {activeThread.history.length > 0 && (
+          <div className={styles.history} data-testid={testIds.dotai.history}>
+            <h3 className={styles.responseTitle}>History</h3>
+            <ul className={styles.historyList}>
+              {activeThread.history.map((turn, idx) => (
+                <li key={`${turn.role}-${idx}`} className={styles.historyItem}>
+                  <strong>{turn.role === 'you' ? 'You' : 'Answer'}:</strong> {turn.text}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {responseText && (
@@ -139,6 +299,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
   actions: css`
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: ${theme.spacing(2)};
     margin-bottom: ${theme.spacing(2)};
   `,
@@ -150,6 +311,27 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   block: css`
     margin-top: ${theme.spacing(2)};
+  `,
+  context: css`
+    margin-top: ${theme.spacing(2)};
+    padding: ${theme.spacing(1.5)};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+    background: ${theme.colors.background.canvas};
+  `,
+  history: css`
+    margin-top: ${theme.spacing(2)};
+    padding: ${theme.spacing(1.5)};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+  `,
+  historyList: css`
+    margin: 0;
+    padding-left: ${theme.spacing(2)};
+  `,
+  historyItem: css`
+    margin-bottom: ${theme.spacing(0.5)};
+    word-break: break-word;
   `,
   response: css`
     margin-top: ${theme.spacing(2)};
