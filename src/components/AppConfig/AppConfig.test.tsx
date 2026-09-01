@@ -1,14 +1,26 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
+import { getBackendSrv } from '@grafana/runtime';
+import { of } from 'rxjs';
 import AppConfig, { AppConfigProps } from './AppConfig';
 import { testIds } from 'components/testIds';
 
+jest.mock('@grafana/runtime', () => ({
+  getBackendSrv: jest.fn(),
+}));
+
+const mockGetBackendSrv = getBackendSrv as jest.MockedFunction<typeof getBackendSrv>;
+
 describe('Components/AppConfig', () => {
   let props: AppConfigProps;
+  let mockFetch: jest.Mock;
 
   beforeEach(() => {
     jest.resetAllMocks();
+
+    mockFetch = jest.fn();
+    mockGetBackendSrv.mockReturnValue({ fetch: mockFetch } as never);
 
     props = {
       plugin: {
@@ -45,5 +57,74 @@ describe('Components/AppConfig', () => {
     render(<AppConfig plugin={plugin} query={props.query} />);
 
     expect(screen.getByTestId(testIds.appConfig.testConnection)).toBeDisabled();
+  });
+
+  test('error status without message shows Connection test failed, not Connection successful', async () => {
+    mockFetch.mockReturnValue(of({ data: { status: 'error' } }));
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        enabled: true,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.click(screen.getByTestId(testIds.appConfig.testConnection));
+
+    const status = await screen.findByTestId(testIds.appConfig.testStatus);
+    expect(status).toHaveTextContent('Connection test failed');
+    expect(status).not.toHaveTextContent('Connection successful');
+    expect(screen.getByText('Connection failed')).toBeInTheDocument();
+  });
+
+  test('ok status with empty message falls back to Connection successful', async () => {
+    mockFetch.mockReturnValue(of({ data: { status: 'ok' } }));
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        enabled: true,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.click(screen.getByTestId(testIds.appConfig.testConnection));
+
+    const status = await screen.findByTestId(testIds.appConfig.testStatus);
+    expect(status).toHaveTextContent('Connection successful');
+    expect(screen.getByText('Connection OK')).toBeInTheDocument();
+  });
+
+  test('ok status with connected false keeps not-connected wording', async () => {
+    mockFetch.mockReturnValue(of({ data: { status: 'ok', connected: false } }));
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        enabled: true,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.click(screen.getByTestId(testIds.appConfig.testConnection));
+
+    await waitFor(() => {
+      expect(screen.getByTestId(testIds.appConfig.testStatus)).toHaveTextContent(
+        'dot-ai responded but Kubernetes reports not connected'
+      );
+    });
   });
 });

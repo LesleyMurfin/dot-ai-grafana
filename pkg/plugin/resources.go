@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
-)
 
-// stubResponse is returned until M3 wires the real Go→dot-ai query/remediate proxy.
-type stubResponse struct {
-	Status  string `json:"status"`
-	Message string `json:"message"`
-	Path    string `json:"path"`
-}
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
+)
 
 // testConnectionRequest allows the config UI to probe draft (unsaved) settings.
 type testConnectionRequest struct {
@@ -32,27 +28,41 @@ type testConnectionResponse struct {
 	Path           string `json:"path,omitempty"`
 }
 
+// toolProxyResponse is the stable resource envelope for /query and /remediate.
+// ok is true iff the upstream (or local) status is 2xx.
+type toolProxyResponse struct {
+	OK      bool   `json:"ok"`
+	Status  int    `json:"status"`
+	Summary string `json:"summary"`
+	Error   string `json:"error"`
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// handlePing is a lightweight liveness resource for scaffolding checks.
-func (a *App) handlePing(w http.ResponseWriter, req *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"message": "ok"})
+func writeToolProxy(w http.ResponseWriter, httpStatus int, status int, summary, errMsg string) {
+	writeJSON(w, httpStatus, toolProxyResponse{
+		OK:      status >= 200 && status < 300,
+		Status:  status,
+		Summary: summary,
+		Error:   errMsg,
+	})
 }
+
 
 // handleHealth is the plugin resource health probe.
 // When configured, it calls dot-ai version (same path as Test connection).
 func (a *App) handleHealth(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodGet && req.Method != http.MethodPost {
+	if req.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	if a.apiURL == "" || a.apiKey == "" {
-		writeJSON(w, http.StatusOK, stubResponse{
+		writeJSON(w, http.StatusOK, testConnectionResponse{
 			Status:  "not_configured",
 			Message: "set MCP Server URL (apiUrl) and Auth Token, then use Test connection",
 			Path:    "/health",
@@ -86,11 +96,33 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 			})
 			return
 		}
-		if u := strings.TrimRight(strings.TrimSpace(body.APIURL), "/"); u != "" {
-			apiURL = u
-		}
-		if k := strings.TrimSpace(body.APIKey); k != "" {
-			apiKey = k
+		bodyURL := strings.TrimRight(strings.TrimSpace(body.APIURL), "/")
+		bodyKey := strings.TrimSpace(body.APIKey)
+
+		// Draft URL different from saved settings can only be probed by org Admin.
+		// Saved-URL tests (empty body URL or same as configured) may proceed without Admin.
+		if bodyURL != "" && bodyURL != a.apiURL {
+			if !isOrgAdmin(req.Context()) {
+				writeJSON(w, http.StatusForbidden, testConnectionResponse{
+					Status:  "error",
+					Message: "Admin role required to test a draft apiUrl",
+				})
+				return
+			}
+			apiURL = bodyURL
+			if bodyKey != "" {
+				apiKey = bodyKey
+			} else {
+				// SEC-01: never reuse the saved key against a different (draft) URL.
+				apiKey = ""
+			}
+		} else {
+			if bodyURL != "" {
+				apiURL = bodyURL
+			}
+			if bodyKey != "" {
+				apiKey = bodyKey
+			}
 		}
 	}
 
@@ -108,7 +140,15 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 }
 
 func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConnectionResponse, int) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, versionURL(apiURL), strings.NewReader("{}"))
+	base, err := validateAPIURL(apiURL)
+	if err != nil {
+		return testConnectionResponse{
+			Status:  "error",
+			Message: err.Error(),
+		}, http.StatusBadRequest
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, versionURL(base), strings.NewReader("{}"))
 	if err != nil {
 		return testConnectionResponse{
 			Status:  "error",
@@ -121,7 +161,10 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 
 	client := a.httpClient
 	if client == nil {
-		client = http.DefaultClient
+		return testConnectionResponse{
+			Status:  "error",
+			Message: "HTTP client not configured",
+		}, http.StatusInternalServerError
 	}
 
 	resp, err := client.Do(httpReq)
@@ -135,10 +178,8 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Do not reflect raw upstream error bodies to the UI.
 		msg := fmt.Sprintf("dot-ai version returned HTTP %d", resp.StatusCode)
-		if len(raw) > 0 {
-			msg = msg + ": " + truncate(string(raw), 256)
-		}
 		status := http.StatusBadGateway
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			status = http.StatusUnauthorized
@@ -164,16 +205,34 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 	}, http.StatusOK
 }
 
+// validateAPIURL requires an absolute http(s) URL with a non-empty host.
+// It returns a trimmed base (no trailing slash) suitable for path join.
+// Call before any outbound dial so file://, javascript:, and host-less values never hit the network.
+func validateAPIURL(apiURL string) (string, error) {
+	base := strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	if base == "" {
+		return "", fmt.Errorf("apiUrl is required")
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("invalid apiUrl: %w", err)
+	}
+	if !u.IsAbs() {
+		return "", fmt.Errorf("apiUrl must be an absolute http(s) URL")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", fmt.Errorf("apiUrl scheme must be http or https")
+	}
+	if u.Host == "" {
+		return "", fmt.Errorf("apiUrl must include a host")
+	}
+	return base, nil
+}
+
 func versionURL(apiURL string) string {
 	base := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	return base + "/api/v1/tools/version"
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 func extractConnected(raw []byte) *bool {
@@ -230,44 +289,150 @@ func (a *App) handleRemediate(w http.ResponseWriter, req *http.Request) {
 	a.proxyDotAI(w, req, "/api/v1/tools/remediate")
 }
 
-// proxyDotAI forwards the request body to a dot-ai tools REST path.
-// Upstream status and body are preserved (including 202 async envelopes).
+// sanitizeRemediateBody allowlists analysis-only fields for dot-ai remediate.
+// Frontend historically sent {intent}; upstream requires {issue}. Accept both,
+// map bare intent → issue, and drop execute/apply/mode/confirmation tokens so
+// direct POSTs cannot trigger execution.
+// Empty issue after mapping returns an error and must not forward {}.
+func sanitizeRemediateBody(body []byte) ([]byte, error) {
+	var in map[string]any
+	if err := json.Unmarshal(body, &in); err != nil {
+		return nil, fmt.Errorf("invalid JSON body")
+	}
+	out := make(map[string]any, 2)
+	intent, _ := in["intent"].(string)
+	issue, _ := in["issue"].(string)
+	if strings.TrimSpace(issue) == "" && strings.TrimSpace(intent) != "" {
+		issue = intent
+	}
+	if strings.TrimSpace(issue) == "" {
+		return nil, fmt.Errorf("issue is required")
+	}
+	if strings.TrimSpace(intent) != "" {
+		out["intent"] = intent
+	}
+	out["issue"] = strings.TrimSpace(issue)
+	return json.Marshal(out)
+}
+
+// isOrgAdmin reports whether the Grafana request user has org Admin role.
+func isOrgAdmin(ctx context.Context) bool {
+	u := backend.UserFromContext(ctx)
+	if u == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(u.Role), "Admin")
+}
+
+func asMap(v any) map[string]any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return m
+}
+
+func trimmedStringAt(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	s, ok := m[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+// extractSummary ports the frontend envelope walk: result.summary|analysis|message,
+// then data.summary, then top-level summary.
+func extractSummary(payload any) string {
+	root := asMap(payload)
+	if root == nil {
+		return ""
+	}
+	data := asMap(root["data"])
+	if data == nil {
+		data = root
+	}
+	result := asMap(data["result"])
+	if result == nil {
+		result = asMap(root["result"])
+	}
+	if result != nil {
+		for _, key := range []string{"summary", "analysis", "message"} {
+			if s := trimmedStringAt(result, key); s != "" {
+				return s
+			}
+		}
+	}
+	if s := trimmedStringAt(data, "summary"); s != "" {
+		return s
+	}
+	return trimmedStringAt(root, "summary")
+}
+
+// extractErrorMessage ports the frontend error walk: error.message (+ optional code), else message.
+func extractErrorMessage(payload any, fallback string) string {
+	root := asMap(payload)
+	if root == nil {
+		return fallback
+	}
+	if errObj := asMap(root["error"]); errObj != nil {
+		if msg := trimmedStringAt(errObj, "message"); msg != "" {
+			if code := trimmedStringAt(errObj, "code"); code != "" {
+				return code + ": " + msg
+			}
+			return msg
+		}
+	}
+	if msg := trimmedStringAt(root, "message"); msg != "" {
+		return msg
+	}
+	return fallback
+}
+
+// proxyDotAI forwards the request body to a dot-ai tools REST path and returns a
+// stable {ok,status,summary,error} envelope (never the raw upstream body).
 func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
 	if a.apiURL == "" || a.apiKey == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"status":  "error",
-			"message": "plugin not configured: set apiUrl and auth token",
-		})
+		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", "plugin not configured: set apiUrl and auth token")
+		return
+	}
+
+	base, err := validateAPIURL(a.apiURL)
+	if err != nil {
+		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
 		return
 	}
 
 	const maxBody = 1 << 20 // 1 MiB
 	body, err := io.ReadAll(io.LimitReader(req.Body, maxBody+1))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"status":  "error",
-			"message": "failed to read request body",
-		})
+		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", "failed to read request body")
 		return
 	}
 	if len(body) > maxBody {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
-			"status":  "error",
-			"message": "request body too large",
-		})
+		writeToolProxy(w, http.StatusRequestEntityTooLarge, http.StatusRequestEntityTooLarge, "", "request body too large")
 		return
 	}
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
 
-	url := a.apiURL + toolPath
-	httpReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, url, bytes.NewReader(body))
+	// Remediate must stay analysis-only at the proxy, not only in the UI.
+	if toolPath == "/api/v1/tools/remediate" {
+		sanitized, err := sanitizeRemediateBody(body)
+		if err != nil {
+			writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
+			return
+		}
+		body = sanitized
+	}
+
+	upstreamURL := base + toolPath
+	httpReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("build upstream request: %v", err),
-		})
+		writeToolProxy(w, http.StatusBadRequest, http.StatusBadRequest, "", fmt.Sprintf("build upstream request: %v", err))
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -279,57 +444,54 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 		client = a.httpClient
 	}
 	if client == nil {
-		client = http.DefaultClient
+		writeToolProxy(w, http.StatusInternalServerError, http.StatusInternalServerError, "", "HTTP client not configured")
+		return
 	}
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"status":  "error",
-			"message": fmt.Sprintf("dot-ai unreachable (502): %v", err),
-		})
+		// Do not log secrets; error string is safe dial failure text.
+		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", fmt.Sprintf("dot-ai unreachable (502): %v", err))
 		return
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	const maxUpstreamBody = 8 << 20 // 8 MiB
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBody+1))
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{
-			"status":  "error",
-			"message": "failed reading upstream body",
-		})
+		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", "failed reading upstream body")
+		return
+	}
+	if len(raw) > maxUpstreamBody {
+		writeToolProxy(w, http.StatusBadGateway, http.StatusBadGateway, "", "upstream response too large")
 		return
 	}
 
-	ct := resp.Header.Get("Content-Type")
-	if ct == "" {
-		ct = "application/json"
+	var payload any
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			// Non-JSON upstream: still envelope; do not reflect raw body.
+			payload = nil
+		}
 	}
-	w.Header().Set("Content-Type", ct)
-	w.WriteHeader(resp.StatusCode)
-	_, _ = w.Write(raw)
-}
 
-// handleEcho keeps the create-plugin example for local smoke.
-func (a *App) handleEcho(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+	ok := resp.StatusCode >= 200 && resp.StatusCode < 300
+	summary := ""
+	errMsg := ""
+	if ok {
+		summary = extractSummary(payload)
+	} else {
+		errMsg = extractErrorMessage(payload, fmt.Sprintf("dot-ai returned HTTP %d", resp.StatusCode))
 	}
-	var body struct {
-		Message string `json:"message"`
-	}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	writeJSON(w, http.StatusOK, body)
+
+	// HTTP status mirrors upstream so callers can still branch on transport code;
+	// body always carries the stable envelope.
+	writeToolProxy(w, resp.StatusCode, resp.StatusCode, summary, errMsg)
 }
 
 // registerRoutes takes a *http.ServeMux and registers HTTP handlers.
 func (a *App) registerRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/ping", a.handlePing)
-	mux.HandleFunc("/echo", a.handleEcho)
+	// /health is the sole liveness/connectivity probe (no separate /ping scaffold).
 	mux.HandleFunc("/health", a.handleHealth)
 	mux.HandleFunc("/test-connection", a.handleTestConnection)
 	mux.HandleFunc("/query", a.handleQuery)

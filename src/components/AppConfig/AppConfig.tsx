@@ -155,18 +155,18 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
 
       const body = await lastValueFrom(response as unknown as Parameters<typeof lastValueFrom>[0]);
       const payload = parseTestConnectionBody(body);
-      const message =
-        payload.message ||
-        (payload.connected === false
-          ? 'dot-ai responded but Kubernetes reports not connected'
-          : 'Connection successful');
 
       if (payload.status === 'ok') {
+        const message =
+          payload.message ||
+          (payload.connected === false
+            ? 'dot-ai responded but Kubernetes reports not connected'
+            : 'Connection successful');
         setTestStatus({ kind: 'success', message });
         return;
       }
 
-      setTestStatus({ kind: 'error', message: message || 'Connection test failed' });
+      setTestStatus({ kind: 'error', message: payload.message || 'Connection test failed' });
     } catch (e) {
       setTestStatus({ kind: 'error', message: errorMessageFromUnknown(e) });
     }
