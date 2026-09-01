@@ -212,6 +212,67 @@ func TestTestConnection(t *testing.T) {
 		}
 	})
 
+	t.Run("connected_unknown_shape_does_not_claim_success", func(t *testing.T) {
+		cases := []struct {
+			name string
+			body string
+		}{
+			{"missing_connected_key", `{"success":true,"data":{"result":{}}}`},
+			{"connected_not_a_bool", `{"success":true,"data":{"result":{"connected":"true"}}}`},
+		}
+		for _, tc := range cases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(tc.body))
+				}))
+				defer upstream.Close()
+
+				inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				app := inst.(*App)
+				defer app.Dispose()
+
+				payload, _ := json.Marshal(map[string]string{
+					"apiUrl": upstream.URL,
+					"apiKey": "secret-token",
+				})
+				var resp backend.CallResourceResponse
+				err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+					PluginContext: adminPluginContext(),
+					Path:          "test-connection",
+					Method:        http.MethodPost,
+					Body:          payload,
+				}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+					resp = *r
+					return nil
+				}))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resp.Status != http.StatusOK {
+					t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+				}
+				var body testConnectionResponse
+				if err := json.Unmarshal(resp.Body, &body); err != nil {
+					t.Fatal(err)
+				}
+				if body.Status != "ok" {
+					t.Fatalf("body=%+v", body)
+				}
+				if body.Connected != nil {
+					t.Fatalf("expected Connected=nil for unrecognized shape, got %+v", *body.Connected)
+				}
+				if body.Message != "connected to dot-ai (cluster connectivity unknown)" {
+					t.Fatalf("expected unknown-connectivity message, got %q", body.Message)
+				}
+			})
+		}
+	})
+
 	t.Run("unauthorized", func(t *testing.T) {
 		const leak = "SECRET_UPSTREAM_DETAIL_should_not_leak"
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -814,6 +875,86 @@ func TestProxyTools(t *testing.T) {
 	})
 }
 
+func TestProxyBodyLimits(t *testing.T) {
+	t.Run("body_over_1mib_rejected_413", func(t *testing.T) {
+		var upstreamHit bool
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamHit = true
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		oversized := []byte(`{"intent":"` + strings.Repeat("x", (1<<20)+1) + `"}`)
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   oversized,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if upstreamHit {
+			t.Fatalf("upstream must not be dialed for an oversized body")
+		}
+	})
+
+	t.Run("empty_body_defaults_to_empty_object", func(t *testing.T) {
+		var gotBody []byte
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   []byte(``),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if strings.TrimSpace(string(gotBody)) != "{}" {
+			t.Fatalf("expected upstream to receive {}, got %q", string(gotBody))
+		}
+	})
+}
+
 func TestRemediateAnalysisOnly(t *testing.T) {
 	var gotPath string
 	var gotBody []byte
@@ -980,20 +1121,73 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 
 
 func TestCheckHealth(t *testing.T) {
-	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	app := inst.(*App)
-	defer app.Dispose()
+	t.Run("unconfigured", func(t *testing.T) {
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
 
-	res, err := app.CheckHealth(context.Background(), &backend.CheckHealthRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Status != backend.HealthStatusUnknown {
-		t.Fatalf("status=%v msg=%s", res.Status, res.Message)
-	}
+		res, err := app.CheckHealth(context.Background(), &backend.CheckHealthRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != backend.HealthStatusUnknown {
+			t.Fatalf("status=%v msg=%s", res.Status, res.Message)
+		}
+	})
+
+	t.Run("configured_valid_credentials_probes_and_reports_ok", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"connected":true}}}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		res, err := app.CheckHealth(context.Background(), &backend.CheckHealthRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != backend.HealthStatusOk {
+			t.Fatalf("status=%v msg=%s (expected Ok when dot-ai actually responds)", res.Status, res.Message)
+		}
+	})
+
+	t.Run("configured_invalid_credentials_reports_error_not_ok", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, `{"error":"UNAUTHORIZED"}`, http.StatusUnauthorized)
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "bad"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		res, err := app.CheckHealth(context.Background(), &backend.CheckHealthRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Status != backend.HealthStatusError {
+			t.Fatalf("status=%v msg=%s (expected Error when dot-ai rejects the token, not silently Ok)", res.Status, res.Message)
+		}
+	})
 }
 
 func TestValidateAPIURL(t *testing.T) {
@@ -1397,9 +1591,9 @@ func TestAskBodyPreviewStripsSecrets(t *testing.T) {
 	if strings.Contains(got, "sekrit") || strings.Contains(got, "Bearer") {
 		t.Fatalf("leaked secret in %q", got)
 	}
-	long := strings.Repeat("x", 600)
+	long := strings.Repeat("x", 1200)
 	got = askBodyPreview([]byte(`{"issue":"` + long + `"}`))
-	if len([]rune(got)) != 513 { // 512 + ellipsis
+	if len([]rune(got)) != 1025 { // 1024 + ellipsis
 		t.Fatalf("truncate len=%d got=%q", len([]rune(got)), got)
 	}
 	if !strings.HasSuffix(got, "…") {

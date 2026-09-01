@@ -95,16 +95,24 @@ func (a *App) Dispose() {
 }
 
 // CheckHealth handles health checks sent from Grafana to the plugin process.
-// Cluster connectivity is validated via the Test connection resource (version tool).
-func (a *App) CheckHealth(_ context.Context, _ *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
+// Reuses the same dot-ai version probe as the /health and /test-connection resources
+// so Grafana's native health indicator can't report Ok while dot-ai is unreachable.
+func (a *App) CheckHealth(ctx context.Context, _ *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	if a.apiURL == "" || a.apiKey == "" {
 		return &backend.CheckHealthResult{
 			Status:  backend.HealthStatusUnknown,
 			Message: "dot-ai apiUrl or auth token not configured",
 		}, nil
 	}
+	result, code := a.probeVersion(ctx, a.apiURL, a.apiKey)
+	if code != http.StatusOK {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: result.Message,
+		}, nil
+	}
 	return &backend.CheckHealthResult{
 		Status:  backend.HealthStatusOk,
-		Message: "configured",
+		Message: result.Message,
 	}, nil
 }

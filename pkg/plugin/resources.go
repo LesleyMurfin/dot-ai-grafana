@@ -68,12 +68,16 @@ var (
 )
 
 type askLogEntry struct {
-	Time    string `json:"time"`
-	Tool    string `json:"tool"`
-	Body    string `json:"body"`
-	Status  int    `json:"status"`
-	Summary string `json:"summary,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Time         string `json:"time"`
+	Tool         string `json:"tool"`
+	Body         string `json:"body"`
+	Status       int    `json:"status"`
+	Summary      string `json:"summary,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Hop          int    `json:"hop,omitempty"`
+	Hops         int    `json:"hops,omitempty"`
+	CurrentEmpty *bool  `json:"current_empty,omitempty"`
+	FirstHop     string `json:"first_hop,omitempty"`
 }
 
 func toolNameFromPath(toolPath string) string {
@@ -101,7 +105,7 @@ func truncateRunes(s string, max int) string {
 // askBodyPreview extracts a truncated intent/issue for the log line.
 // Sensitive JSON keys are stripped; Authorization/apiKey never appear.
 func askBodyPreview(body []byte) string {
-	const max = 512
+	const max = 1024
 	if len(body) == 0 {
 		return ""
 	}
@@ -113,6 +117,7 @@ func askBodyPreview(body []byte) string {
 		"apiKey", "apikey", "api_key",
 		"authorization", "Authorization",
 		"token", "authToken", "password", "secret",
+		"hop", "hops", "current_empty", "first_hop",
 	} {
 		delete(m, k)
 	}
@@ -128,6 +133,68 @@ func askBodyPreview(body []byte) string {
 	return truncateRunes(string(b), max)
 }
 
+// askMetaFromBody pulls optional orchestration fields for the ask log.
+func askMetaFromBody(body []byte) (hop, hops int, currentEmpty *bool, firstHop string) {
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil || m == nil {
+		return 0, 0, nil, ""
+	}
+	hop = intFromAny(m["hop"])
+	hops = intFromAny(m["hops"])
+	if v, ok := m["current_empty"]; ok {
+		if b, ok := v.(bool); ok {
+			currentEmpty = &b
+		}
+	}
+	if s, ok := m["first_hop"].(string); ok {
+		s = strings.TrimSpace(s)
+		if s == "grafana" || s == "dot-ai" {
+			firstHop = s
+		}
+	}
+	return hop, hops, currentEmpty, firstHop
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case float64:
+		if n > 0 {
+			return int(n)
+		}
+	case int:
+		if n > 0 {
+			return n
+		}
+	case int64:
+		if n > 0 {
+			return int(n)
+		}
+	case json.Number:
+		i, err := n.Int64()
+		if err == nil && i > 0 {
+			return int(i)
+		}
+	}
+	return 0
+}
+
+// stripAskMetaForUpstream drops hop meta before dot-ai.
+// Remediate stays analysis-only allowlist. Query only removes hop meta keys.
+func stripAskMetaForUpstream(body []byte, toolPath string) ([]byte, error) {
+	if toolPath == "/api/v1/tools/remediate" {
+		return sanitizeRemediateBody(body)
+	}
+	var in map[string]any
+	if err := json.Unmarshal(body, &in); err != nil {
+		// Non-JSON query body: forward as-is (legacy).
+		return body, nil
+	}
+	for _, k := range []string{"hop", "hops", "current_empty", "first_hop"} {
+		delete(in, k)
+	}
+	return json.Marshal(in)
+}
+
 // appendAskLog writes one JSON line for a completed query/remediate call.
 // Best-effort: failures to write must not affect the HTTP response.
 // When the log exceeds maxAskLogBytes, it is rotated to path+".1" (replacing any prior .1).
@@ -136,13 +203,18 @@ func appendAskLog(tool string, body []byte, status int, summary, errMsg string) 
 	if path == "" {
 		return
 	}
+	hop, hops, currentEmpty, firstHop := askMetaFromBody(body)
 	entry := askLogEntry{
-		Time:    time.Now().UTC().Format(time.RFC3339),
-		Tool:    tool,
-		Body:    askBodyPreview(body),
-		Status:  status,
-		Summary: truncateRunes(summary, 512),
-		Error:   truncateRunes(errMsg, 512),
+		Time:         time.Now().UTC().Format(time.RFC3339),
+		Tool:         tool,
+		Body:         askBodyPreview(body),
+		Status:       status,
+		Summary:      truncateRunes(summary, 512),
+		Error:        truncateRunes(errMsg, 512),
+		Hop:          hop,
+		Hops:         hops,
+		CurrentEmpty: currentEmpty,
+		FirstHop:     firstHop,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {
@@ -157,7 +229,6 @@ func appendAskLog(tool string, body []byte, status int, summary, errMsg string) 
 		rotated := path + ".1"
 		_ = os.Remove(rotated)
 		if err := os.Rename(path, rotated); err != nil {
-			// Rename failed (e.g. cross-device); fall back to truncate in place.
 			_ = os.Truncate(path, 0)
 		}
 	}
@@ -310,7 +381,12 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 
 	connected := extractConnected(raw)
 	msg := "connected to dot-ai"
-	if connected != nil && !*connected {
+	switch {
+	case connected == nil:
+		// dot-ai responded, but its body didn't carry a recognizable `connected`
+		// field/shape — do not claim cluster connectivity we haven't confirmed.
+		msg = "connected to dot-ai (cluster connectivity unknown)"
+	case !*connected:
 		msg = "dot-ai responded but Kubernetes reports not connected"
 	}
 
@@ -531,10 +607,16 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 	}
 
 	const maxBody = 1 << 20 // 1 MiB
-	body, err := io.ReadAll(io.LimitReader(req.Body, maxBody+1))
-	if err != nil {
-		finish(http.StatusBadRequest, http.StatusBadRequest, "", "failed to read request body")
-		return
+	var body []byte
+	if req.Body != nil {
+		// req.Body is nil (not an empty reader) when the resource call body was
+		// empty — httpadapter only wraps req.Body when len(body) > 0. Guard here
+		// instead of assuming a real Reader is always present.
+		body, err = io.ReadAll(io.LimitReader(req.Body, maxBody+1))
+		if err != nil {
+			finish(http.StatusBadRequest, http.StatusBadRequest, "", "failed to read request body")
+			return
+		}
 	}
 	if len(body) > maxBody {
 		finish(http.StatusRequestEntityTooLarge, http.StatusRequestEntityTooLarge, "", "request body too large")
@@ -543,18 +625,15 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
-	reqBody = body
+	reqBody = body // original body (incl. hop meta) for ask-log
 
-	// Remediate must stay analysis-only at the proxy, not only in the UI.
-	if toolPath == "/api/v1/tools/remediate" {
-		sanitized, err := sanitizeRemediateBody(body)
-		if err != nil {
-			finish(http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
-			return
-		}
-		body = sanitized
-		reqBody = sanitized
+	// Drop hop meta before upstream; remediate stays analysis-only allowlist.
+	sanitized, err := stripAskMetaForUpstream(body, toolPath)
+	if err != nil {
+		finish(http.StatusBadRequest, http.StatusBadRequest, "", err.Error())
+		return
 	}
+	body = sanitized
 
 	upstreamURL := base + toolPath
 	httpReq, err := http.NewRequestWithContext(req.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
