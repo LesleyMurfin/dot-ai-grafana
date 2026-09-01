@@ -12,17 +12,9 @@ import {
   useStyles2,
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
-import { callDotAITool, DotAITool } from '../utils/dotaiApi';
-import {
-  appendHistory,
-  buildRequestText,
-  emptyThread,
-  mergeMap,
-  rewriteCurrent,
-  ToolThread,
-} from '../utils/progressiveContext';
-import { fetchStackContext } from '../utils/grafanaStack';
-
+import { DotAITool } from '../utils/dotaiApi';
+import { emptyThread, ToolThread } from '../utils/progressiveContext';
+import { runAskOrchestrator } from '../utils/askOrchestrator';
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -65,51 +57,21 @@ function DotAIPage() {
     setResponseText('');
 
     try {
-      // Query: Grafana DS getList+query → Current/Map, then pack question → existing dot-ai.
-      // Remediate: reuse thread Current/Map. History never packed. No sessionId / execute.
-      let currentForRequest = thread.current;
-      let mapForRequest = thread.map;
-
-      if (tool === 'query') {
-        const stack = await fetchStackContext(trimmed);
-        currentForRequest = stack.current;
-        mapForRequest = mergeMap(stack.mapHint, thread.map, trimmed);
-        setThreads((prev) => ({
-          ...prev,
-          query: {
-            ...prev.query,
-            current: currentForRequest,
-            map: mapForRequest,
-          },
-        }));
-      }
-
-      // Stable + Current + Map + box — never History (display-only).
-      const packed = buildRequestText({
+      // M4: first-hop + loop (cap 3) via runAskOrchestrator. History never packed.
+      // Observability → Grafana Current first; inventory → dot-ai first. Answer FROM Current.
+      const result = await runAskOrchestrator({
         tool,
-        current: currentForRequest,
-        map: mapForRequest,
-        box: trimmed,
+        question: trimmed,
+        thread,
       });
 
-      // D2: plain text only — never prefix [visualization]; no sessionId.
-      const result = await callDotAITool(tool, packed);
+      setThreads((prev) => ({
+        ...prev,
+        [tool]: result.thread,
+      }));
+
       if (result.ok) {
-        const summaryText = result.summary.trim()
-          ? result.summary
-          : 'dot-ai returned no summary';
-        setResponseText(summaryText);
-        setThreads((prev) => {
-          const prior = prev[tool];
-          return {
-            ...prev,
-            [tool]: {
-              current: rewriteCurrent(prior.current, trimmed, summaryText),
-              map: mergeMap(prior.map, trimmed, summaryText),
-              history: appendHistory(prior.history, trimmed, summaryText),
-            },
-          };
-        });
+        setResponseText(result.summary);
         setIntent('');
       } else {
         setError(result.errorMessage || 'Request failed');
@@ -161,7 +123,6 @@ function DotAIPage() {
     event.currentTarget.form?.requestSubmit();
   };
 
-
   const showAnalyzeThis = tool === 'query' && Boolean(threads.query.current.trim()) && !loading;
 
   return (
@@ -205,11 +166,7 @@ function DotAIPage() {
           </Field>
 
           <div className={styles.actions}>
-            <Button
-              type="submit"
-              data-testid={testIds.dotai.submit}
-              disabled={loading || !intent.trim()}
-            >
+            <Button type="submit" data-testid={testIds.dotai.submit} disabled={loading || !intent.trim()}>
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
             </Button>
             <Button

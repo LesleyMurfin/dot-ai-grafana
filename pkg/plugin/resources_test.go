@@ -1591,12 +1591,67 @@ func TestAskBodyPreviewStripsSecrets(t *testing.T) {
 	if strings.Contains(got, "sekrit") || strings.Contains(got, "Bearer") {
 		t.Fatalf("leaked secret in %q", got)
 	}
-	long := strings.Repeat("x", 1200)
+	// Over-long bodies keep head AND tail: the question is packed after Current, so a
+	// head-only cut drops the follow-up prompt that identifies the hop branch.
+	long := strings.Repeat("x", 5000)
 	got = askBodyPreview([]byte(`{"issue":"` + long + `"}`))
-	if len([]rune(got)) != 1025 { // 1024 + ellipsis
+	if len([]rune(got)) != 4096+len([]rune("…[+904]…")) {
 		t.Fatalf("truncate len=%d got=%q", len([]rune(got)), got)
 	}
-	if !strings.HasSuffix(got, "…") {
-		t.Fatalf("expected ellipsis suffix: %q", got)
+	if !strings.Contains(got, "…[+904]…") {
+		t.Fatalf("expected middle elision marker: %q", got[:80])
+	}
+
+	// The branch marker at the very end of a long packed body must survive.
+	tailMarker := "Final follow-up: your previous answer still hedged"
+	packed := "Current:\n" + strings.Repeat("loki line noise. ", 400) + "\n\n" + tailMarker
+	got = askBodyPreview([]byte(`{"intent":` + mustJSONString(packed) + `}`))
+	if !strings.HasSuffix(got, tailMarker) {
+		t.Fatalf("branch marker lost from tail: %q", got[len(got)-120:])
+	}
+	// A progressive-context question (Current block + question) must survive intact.
+	ctxQuestion := "Current: " + strings.Repeat("pods in ns foo are healthy. ", 60) + "\n\nWhat is broken?"
+	body, err := json.Marshal(map[string]any{"intent": ctxQuestion})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if got = askBodyPreview(body); got != ctxQuestion {
+		t.Fatalf("context question truncated: len=%d", len([]rune(got)))
+	}
+}
+
+func mustJSONString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func TestAskMetaFromBodyReadsBranch(t *testing.T) {
+	body := []byte(`{"hop":3,"hops":3,"current_empty":false,"first_hop":"grafana","branch":"hedge"}`)
+	hop, hops, currentEmpty, firstHop, branch := askMetaFromBody(body)
+	if hop != 3 || hops != 3 || firstHop != "grafana" || branch != "hedge" {
+		t.Fatalf("hop=%d hops=%d firstHop=%q branch=%q", hop, hops, firstHop, branch)
+	}
+	if currentEmpty == nil || *currentEmpty {
+		t.Fatalf("current_empty not parsed: %v", currentEmpty)
+	}
+
+	// Unknown branch values are dropped rather than logged verbatim.
+	if _, _, _, _, b := askMetaFromBody([]byte(`{"branch":"bogus"}`)); b != "" {
+		t.Fatalf("expected empty branch, got %q", b)
+	}
+
+	// branch never reaches dot-ai and never appears in the body preview.
+	out, err := stripAskMetaForUpstream(body, "/api/v1/tools/query")
+	if err != nil {
+		t.Fatalf("strip: %v", err)
+	}
+	if strings.Contains(string(out), "branch") {
+		t.Fatalf("branch forwarded upstream: %s", out)
+	}
+	if strings.Contains(askBodyPreview(body), "branch") {
+		t.Fatalf("branch leaked into body preview")
 	}
 }

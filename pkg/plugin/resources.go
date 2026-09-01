@@ -78,6 +78,7 @@ type askLogEntry struct {
 	Hops         int    `json:"hops,omitempty"`
 	CurrentEmpty *bool  `json:"current_empty,omitempty"`
 	FirstHop     string `json:"first_hop,omitempty"`
+	Branch       string `json:"branch,omitempty"`
 }
 
 func toolNameFromPath(toolPath string) string {
@@ -102,42 +103,67 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+// truncateRunesKeepTail caps s at max runes while preserving the last tail runes.
+// Progressive-context bodies pack the Current block first and the question last, so a
+// head-only truncation silently drops the follow-up prompt — which is exactly the text
+// that identifies which hop branch fired. Elision is marked with the omitted rune count.
+func truncateRunesKeepTail(s string, max, tail int) string {
+	if max <= 0 || s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if tail <= 0 || tail >= max {
+		return string(r[:max]) + "…"
+	}
+	head := max - tail
+	return string(r[:head]) + fmt.Sprintf("…[+%d]…", len(r)-max) + string(r[len(r)-tail:])
+}
+
 // askBodyPreview extracts a truncated intent/issue for the log line.
 // Sensitive JSON keys are stripped; Authorization/apiKey never appear.
+// The cap must hold a progressive-context question (Current state block +
+// the user question) intact so ask-log measures can score used_current.
+// The question is packed AFTER Current, so the tail is preserved explicitly.
 func askBodyPreview(body []byte) string {
-	const max = 1024
+	const (
+		max  = 4096
+		tail = 1024
+	)
 	if len(body) == 0 {
 		return ""
 	}
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
-		return truncateRunes(string(body), max)
+		return truncateRunesKeepTail(string(body), max, tail)
 	}
 	for _, k := range []string{
 		"apiKey", "apikey", "api_key",
 		"authorization", "Authorization",
 		"token", "authToken", "password", "secret",
-		"hop", "hops", "current_empty", "first_hop",
+		"hop", "hops", "current_empty", "first_hop", "branch",
 	} {
 		delete(m, k)
 	}
 	for _, k := range []string{"intent", "issue"} {
 		if s := trimmedStringAt(m, k); s != "" {
-			return truncateRunes(s, max)
+			return truncateRunesKeepTail(s, max, tail)
 		}
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		return ""
 	}
-	return truncateRunes(string(b), max)
+	return truncateRunesKeepTail(string(b), max, tail)
 }
 
 // askMetaFromBody pulls optional orchestration fields for the ask log.
-func askMetaFromBody(body []byte) (hop, hops int, currentEmpty *bool, firstHop string) {
+func askMetaFromBody(body []byte) (hop, hops int, currentEmpty *bool, firstHop, branch string) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil || m == nil {
-		return 0, 0, nil, ""
+		return 0, 0, nil, "", ""
 	}
 	hop = intFromAny(m["hop"])
 	hops = intFromAny(m["hops"])
@@ -152,7 +178,15 @@ func askMetaFromBody(body []byte) (hop, hops int, currentEmpty *bool, firstHop s
 			firstHop = s
 		}
 	}
-	return hop, hops, currentEmpty, firstHop
+	// Which follow-up branch produced this POST; makes hop attribution deterministic
+	// instead of inferred from hop counts and truncated prompt text.
+	if s, ok := m["branch"].(string); ok {
+		switch s = strings.TrimSpace(s); s {
+		case "initial", "across", "conflict", "hedge", "refine":
+			branch = s
+		}
+	}
+	return hop, hops, currentEmpty, firstHop, branch
 }
 
 func intFromAny(v any) int {
@@ -189,7 +223,7 @@ func stripAskMetaForUpstream(body []byte, toolPath string) ([]byte, error) {
 		// Non-JSON query body: forward as-is (legacy).
 		return body, nil
 	}
-	for _, k := range []string{"hop", "hops", "current_empty", "first_hop"} {
+	for _, k := range []string{"hop", "hops", "current_empty", "first_hop", "branch"} {
 		delete(in, k)
 	}
 	return json.Marshal(in)
@@ -203,7 +237,7 @@ func appendAskLog(tool string, body []byte, status int, summary, errMsg string) 
 	if path == "" {
 		return
 	}
-	hop, hops, currentEmpty, firstHop := askMetaFromBody(body)
+	hop, hops, currentEmpty, firstHop, branch := askMetaFromBody(body)
 	entry := askLogEntry{
 		Time:         time.Now().UTC().Format(time.RFC3339),
 		Tool:         tool,
@@ -215,6 +249,7 @@ func appendAskLog(tool string, body []byte, status int, summary, errMsg string) 
 		Hops:         hops,
 		CurrentEmpty: currentEmpty,
 		FirstHop:     firstHop,
+		Branch:       branch,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {

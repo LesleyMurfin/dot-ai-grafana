@@ -13,5 +13,10 @@ export const testIds = {
     response: 'data-testid dotai-response',
     error: 'data-testid dotai-error',
     loading: 'data-testid dotai-loading',
+    history: 'data-testid dotai-history',
+    current: 'data-testid dotai-current',
+    map: 'data-testid dotai-map',
+    clearThread: 'data-testid dotai-clear-thread',
+    analyzeThis: 'data-testid dotai-analyze-this',
   },
 };

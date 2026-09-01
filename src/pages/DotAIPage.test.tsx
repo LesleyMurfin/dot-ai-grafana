@@ -10,9 +10,13 @@ jest.mock('../utils/dotaiApi', () => ({
   callDotAITool: jest.fn(),
 }));
 
-jest.mock('../utils/grafanaStack', () => ({
-  fetchStackContext: jest.fn(),
-}));
+jest.mock('../utils/grafanaStack', () => {
+  const actual = jest.requireActual('../utils/grafanaStack');
+  return {
+    ...actual,
+    fetchStackContext: jest.fn(),
+  };
+});
 
 const mockCallDotAITool = callDotAITool as jest.MockedFunction<typeof callDotAITool>;
 const mockFetchStackContext = fetchStackContext as jest.MockedFunction<typeof fetchStackContext>;
@@ -25,6 +29,7 @@ const emptyStack = {
   promLines: [] as string[],
   tempoLines: [] as string[],
   alertLines: [] as string[],
+  currentEmpty: false,
 };
 
 
@@ -82,24 +87,35 @@ describe('Pages/DotAIPage', () => {
     typeIntent('  show failing pods  ');
     clickSubmit();
 
+    // Unscoped observability Ask: hop1 packs Grafana, hop2 searches all clusters.
     await waitFor(() => {
-      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
+      expect(mockCallDotAITool.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
 
     expect(mockFetchStackContext).toHaveBeenCalledWith('show failing pods');
-    const expected = buildRequestText({
+    const expectedHop1 = buildRequestText({
       tool: 'query',
       current: emptyStack.current,
       map: emptyStack.mapHint,
       box: 'show failing pods',
     });
-    expect(mockCallDotAITool).toHaveBeenCalledWith('query', expected);
+    expect(mockCallDotAITool).toHaveBeenCalledWith(
+      'query',
+      expectedHop1,
+      expect.objectContaining({ first_hop: 'grafana', hop: 1 })
+    );
     const packed = mockCallDotAITool.mock.calls[0][1];
     expect(packed).toContain(stablePreamble('query'));
     expect(packed).toContain('show failing pods');
     expect(packed).toContain('Loki last 15m');
     expect(packed).not.toMatch(/\bHistory\b/i);
     expect(JSON.stringify(mockCallDotAITool.mock.calls[0])).not.toMatch(/\bHistory\b/i);
+    const hop2 = mockCallDotAITool.mock.calls[1][1];
+    expect(hop2).toContain('Loki last 15m');
+    expect(hop2).toMatch(/across ALL clusters/i);
+    expect(mockCallDotAITool.mock.calls[1][2]).toEqual(
+      expect.objectContaining({ hop: 2, hops: 2, first_hop: 'grafana' })
+    );
   });
 
   test('Query Current includes mocked Grafana stack log lines before callDotAITool', async () => {
@@ -112,6 +128,7 @@ describe('Pages/DotAIPage', () => {
       promLines: ['checkout-api ns/prod restarts=12'],
       tempoLines: [],
       alertLines: [],
+      currentEmpty: false,
     });
     mockCallDotAITool.mockResolvedValue({
       ok: true,
@@ -141,29 +158,27 @@ describe('Pages/DotAIPage', () => {
 
 
   test('follow-up packs Current into intent and still omits History from body', async () => {
-    mockCallDotAITool
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        summary: 'pod checkout-api CrashLooping in namespace prod',
-        raw: {},
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        summary: 'restarts due to OOM',
-        raw: {},
-      });
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'pod checkout-api CrashLooping in namespace prod — restarts due to OOM',
+      raw: {},
+    });
 
     render(<DotAIPage />);
-    typeIntent('status of checkout-api');
+    // Named pod/ns keeps hop count at 1 per Ask when there is no Current/answer conflict.
+    typeIntent('status of pod checkout-api in namespace prod');
     clickSubmit();
 
     expect(await screen.findByTestId(testIds.dotai.history)).toBeInTheDocument();
     expect(screen.getByTestId(testIds.dotai.current)).toBeInTheDocument();
 
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
+    });
+
     const currentText = screen.getByTestId(testIds.dotai.current).textContent || '';
-    typeIntent('why is it restarting?');
+    typeIntent('why is pod checkout-api restarting in namespace prod?');
     clickSubmit();
 
     await waitFor(() => {
@@ -174,13 +189,12 @@ describe('Pages/DotAIPage', () => {
     expect(secondPacked).toContain('Current:');
     // Each Query turn packs fresh Grafana stack Current (not History).
     expect(secondPacked).toContain('Loki last 15m');
-    expect(secondPacked).toContain('why is it restarting?');
+    expect(secondPacked).toContain('why is pod checkout-api restarting in namespace prod?');
     expect(secondPacked).not.toMatch(/\bHistory\b/i);
     // On-screen history still present but not in body
     expect(screen.getByTestId(testIds.dotai.history)).toBeInTheDocument();
     expect(currentText.length).toBeGreaterThan(0);
     expect(mockFetchStackContext).toHaveBeenCalledTimes(2);
-
   });
 
   test('success path renders response summary and Current rewrite', async () => {
@@ -399,7 +413,7 @@ describe('Pages/DotAIPage', () => {
       map: '',
       box: 'checkout-api CrashLooping',
     });
-    expect(mockCallDotAITool).toHaveBeenCalledWith('remediate', expected);
+    expect(mockCallDotAITool).toHaveBeenCalledWith('remediate', expected, expect.objectContaining({ first_hop: 'dot-ai', hops: 1 }));
     const [toolArg, issueText] = mockCallDotAITool.mock.calls[0];
     expect(toolArg).toBe('remediate');
     expect(issueText).toContain('checkout-api CrashLooping');
