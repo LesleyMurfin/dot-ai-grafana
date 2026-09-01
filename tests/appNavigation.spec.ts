@@ -50,7 +50,10 @@ test.describe('dot-ai app navigation', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          data: { result: { summary: 'e2e-mock-query: 3 pods running' } },
+          ok: true,
+          status: 200,
+          summary: 'e2e-mock-query: 3 pods running',
+          error: '',
         }),
       });
     });
@@ -87,7 +90,10 @@ test.describe('dot-ai app navigation', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          data: { result: { summary: 'e2e-mock-remediate: CrashLoop likely image pull failure' } },
+          ok: true,
+          status: 200,
+          summary: 'e2e-mock-remediate: CrashLoop likely image pull failure',
+          error: '',
         }),
       });
     });
@@ -128,7 +134,12 @@ test.describe('dot-ai app navigation', () => {
       await route.fulfill({
         status: 502,
         contentType: 'application/json',
-        body: JSON.stringify({ message: 'e2e-mock upstream unavailable' }),
+        body: JSON.stringify({
+          ok: false,
+          status: 502,
+          summary: '',
+          error: 'e2e-mock upstream unavailable',
+        }),
       });
     });
 
