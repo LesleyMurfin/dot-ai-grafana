@@ -3,11 +3,13 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/httpclient"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/resource/httpadapter"
 )
@@ -51,8 +53,18 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 		app.apiKey = strings.TrimSpace(settings.DecryptedSecureJSONData["apiKey"])
 	}
 
-	app.httpClient = &http.Client{Timeout: 15 * time.Second}
-	app.toolHTTPClient = &http.Client{Timeout: 120 * time.Second}
+	// SDK httpclient applies DefaultMiddlewares (tracing, headers) and sane dial/TLS
+	// timeouts; only overall request Timeout differs between probe vs tool traffic.
+	httpClient, err := newPluginHTTPClient(15 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("create http client: %w", err)
+	}
+	toolHTTPClient, err := newPluginHTTPClient(120 * time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("create tool http client: %w", err)
+	}
+	app.httpClient = httpClient
+	app.toolHTTPClient = toolHTTPClient
 
 	// Use a httpadapter (provided by the SDK) for resource calls. This allows us
 	// to use a *http.ServeMux for resource calls, so we can map multiple routes
@@ -62,6 +74,18 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 	app.CallResourceHandler = httpadapter.New(mux)
 
 	return &app, nil
+}
+
+// newPluginHTTPClient builds an *http.Client via grafana-plugin-sdk-go/backend/httpclient.
+// Starts from DefaultTimeoutOptions so dial/TLS/idle knobs stay non-zero; only Timeout is overridden.
+// Tool traffic uses 120s: a known Grafana plugin-host request limit (vs Headlamp's ~30m tool window); no async 202 in this pass.
+// Tests may replace App.httpClient / App.toolHTTPClient after NewApp (e.g. custom Transport).
+func newPluginHTTPClient(timeout time.Duration) (*http.Client, error) {
+	timeouts := httpclient.DefaultTimeoutOptions
+	timeouts.Timeout = timeout
+	return httpclient.New(httpclient.Options{
+		Timeouts: &timeouts,
+	})
 }
 
 // Dispose here tells plugin SDK that plugin wants to clean up resources when a new instance

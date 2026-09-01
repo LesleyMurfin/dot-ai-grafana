@@ -6,8 +6,11 @@ test('should be possible to save app configuration', async ({ appConfigPage, pag
 
   await expect(testButton).toBeVisible();
 
-  // reset the configured secret
-  await page.getByRole('button', { name: /reset/i }).click();
+  // Reset only appears when a secret is already configured (SecretInput isConfigured).
+  const resetButton = page.getByRole('button', { name: /reset/i });
+  if (await resetButton.isVisible()) {
+    await resetButton.click();
+  }
 
   // enter some valid values (labels: Auth Token / MCP Server URL)
   await page.getByRole('textbox', { name: /Auth Token|API Key/i }).fill('secret-api-key');

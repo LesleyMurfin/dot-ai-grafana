@@ -1,13 +1,10 @@
-import { lastValueFrom } from 'rxjs';
+import { lastValueFrom, Observable } from 'rxjs';
 import { getBackendSrv } from '@grafana/runtime';
 import pluginJson from '../plugin.json';
 
 export type DotAITool = 'query' | 'remediate';
 
-export type ToolRequestBody = {
-  intent: string;
-};
-
+/** Normalized result for UI consumers (maps backend `error` → errorMessage). */
 export type ToolCallResult = {
   ok: boolean;
   status: number;
@@ -16,119 +13,95 @@ export type ToolCallResult = {
   errorMessage?: string;
 };
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return undefined;
-}
+/** Backend resource JSON contract (pkg/plugin resources). */
+type ResourceContract = {
+  ok: boolean;
+  status: number;
+  summary: string;
+  error: string;
+};
 
-/** D1: prefer data.result.summary; tolerate a few envelope shapes. */
-export function extractSummary(payload: unknown): string | undefined {
-  const root = asRecord(payload);
-  if (!root) {
+type FetchResponseLike = {
+  data?: unknown;
+  status?: number;
+};
+
+function asContract(value: unknown): ResourceContract | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
-
-  const data = asRecord(root.data) ?? root;
-  const result = asRecord(data.result) ?? asRecord(root.result);
-  if (result) {
-    const summary = result.summary;
-    if (typeof summary === 'string' && summary.trim()) {
-      return summary;
-    }
-    const analysis = result.analysis;
-    if (typeof analysis === 'string' && analysis.trim()) {
-      return analysis;
-    }
-    const message = result.message;
-    if (typeof message === 'string' && message.trim()) {
-      return message;
-    }
+  const rec = value as Record<string, unknown>;
+  if (typeof rec.ok !== 'boolean' || typeof rec.status !== 'number') {
+    return undefined;
   }
-
-  if (typeof data.summary === 'string' && data.summary.trim()) {
-    return data.summary;
-  }
-  if (typeof root.summary === 'string' && root.summary.trim()) {
-    return root.summary;
-  }
-  return undefined;
+  return {
+    ok: rec.ok,
+    status: rec.status,
+    summary: typeof rec.summary === 'string' ? rec.summary : '',
+    error: typeof rec.error === 'string' ? rec.error : '',
+  };
 }
 
-export function extractErrorMessage(payload: unknown, fallback: string): string {
-  const root = asRecord(payload);
-  if (!root) {
-    return fallback;
-  }
-  const err = asRecord(root.error);
-  if (err && typeof err.message === 'string' && err.message.trim()) {
-    const code = typeof err.code === 'string' ? `${err.code}: ` : '';
-    return code + err.message;
-  }
-  if (typeof root.message === 'string' && root.message.trim()) {
-    return root.message;
-  }
-  return fallback;
-}
-
-function unwrapFetchBody(body: unknown): unknown {
-  const rec = asRecord(body);
-  if (rec && 'data' in rec) {
-    return rec.data;
-  }
-  return body;
-}
-
-export async function callDotAITool(tool: DotAITool, intent: string): Promise<ToolCallResult> {
-  const id = pluginJson.id;
+/** Single cast boundary for Grafana dual-package rxjs types. */
+async function fetchResource(tool: DotAITool, intent: string): Promise<FetchResponseLike> {
   const response = await getBackendSrv().fetch({
-    url: `/api/plugins/${id}/resources/${tool}`,
+    url: `/api/plugins/${pluginJson.id}/resources/${tool}`,
     method: 'POST',
-    data: { intent } satisfies ToolRequestBody,
+    data: { intent },
     showErrorAlert: false,
     showSuccessAlert: false,
   });
+  return lastValueFrom(response as unknown as Observable<FetchResponseLike>);
+}
 
+export async function callDotAITool(tool: DotAITool, intent: string): Promise<ToolCallResult> {
   try {
-    const body = await lastValueFrom(response as unknown as Parameters<typeof lastValueFrom>[0]);
-    const status =
-      body && typeof body === 'object' && 'status' in body && typeof (body as { status: unknown }).status === 'number'
-        ? (body as { status: number }).status
-        : 200;
-    const payload = unwrapFetchBody(body);
-    const summary = extractSummary(payload);
-    if (status >= 200 && status < 300 && summary) {
-      return { ok: true, status, summary, raw: payload };
-    }
-    if (status >= 200 && status < 300) {
-      const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+    const body = await fetchResource(tool, intent);
+    // Grafana FetchResponse wraps JSON in `.data`; tolerate bare contract too.
+    const payload = body && typeof body === 'object' && 'data' in body ? body.data : body;
+    const contract = asContract(payload);
+    if (contract) {
       return {
-        ok: true,
-        status,
-        summary: text.slice(0, 8000),
+        ok: contract.ok,
+        status: contract.status,
+        summary: contract.summary,
         raw: payload,
+        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
       };
     }
+    const status = typeof body?.status === 'number' ? body.status : 0;
     return {
       ok: false,
       status,
       summary: '',
       raw: payload,
-      errorMessage: extractErrorMessage(payload, `Request failed (HTTP ${status})`),
+      errorMessage: 'Invalid resource response',
     };
   } catch (e) {
-    const errPayload = e && typeof e === 'object' && 'data' in e ? (e as { data: unknown }).data : undefined;
-    const status =
-      e && typeof e === 'object' && 'status' in e && typeof (e as { status: unknown }).status === 'number'
-        ? (e as { status: number }).status
-        : 0;
-    const message = extractErrorMessage(errPayload, e instanceof Error ? e.message : 'Request failed');
+    const errObj = e && typeof e === 'object' ? (e as Record<string, unknown>) : undefined;
+    const errData = errObj && 'data' in errObj ? errObj.data : undefined;
+    const contract = asContract(errData);
+    if (contract) {
+      return {
+        ok: contract.ok,
+        status: contract.status,
+        summary: contract.summary,
+        raw: errData,
+        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
+      };
+    }
+    const status = errObj && typeof errObj.status === 'number' ? errObj.status : 0;
+    const message =
+      e instanceof Error
+        ? e.message
+        : errObj && typeof errObj.message === 'string'
+          ? errObj.message
+          : 'Request failed';
     return {
       ok: false,
       status,
       summary: '',
-      raw: errPayload ?? e,
+      raw: errData ?? e,
       errorMessage: message,
     };
   }
