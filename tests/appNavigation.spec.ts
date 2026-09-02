@@ -32,7 +32,7 @@ test.describe('dot-ai app navigation', () => {
   test('tools page exposes Query and Remediate options', async ({ gotoPage, page, selectors }) => {
     const appPage = await gotoPage('/');
 
-    const toolSelect = page.getByRole('combobox', { name: /Tool/i });
+    const toolSelect = page.getByTestId(testIds.dotai.tool);
     await expect(toolSelect).toBeVisible();
     await toolSelect.click();
 
@@ -101,7 +101,7 @@ test.describe('dot-ai app navigation', () => {
     const appPage = await gotoPage('/');
 
     // Select Remediate (analysis only) — no execute UI.
-    await page.getByRole('combobox', { name: /Tool/i }).click();
+    await page.getByTestId(testIds.dotai.tool).click();
     const optionSelector = selectors.components.Select.option;
     await appPage.getByGrafanaSelector(optionSelector).filter({ hasText: /Remediate/ }).click();
 

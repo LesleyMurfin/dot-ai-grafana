@@ -13,6 +13,7 @@ export const testIds = {
     response: 'data-testid dotai-response',
     error: 'data-testid dotai-error',
     loading: 'data-testid dotai-loading',
+    tool: 'data-testid dotai-tool',
     history: 'data-testid dotai-history',
     current: 'data-testid dotai-current',
     map: 'data-testid dotai-map',
