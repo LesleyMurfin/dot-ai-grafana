@@ -7,7 +7,7 @@ import {
   MAX_ASK_HOPS,
   runAskOrchestrator,
 } from './askOrchestrator';
-import { emptyThread } from './progressiveContext';
+import { emptyThread, MAX_INTENT_CHARS } from './progressiveContext';
 import { StackContextResult } from './grafanaStack';
 import { ToolCallResult } from './dotaiApi';
 
@@ -50,6 +50,15 @@ describe('isUnscopedQuestion / answerConflictsWithCurrent', () => {
     expect(isUnscopedQuestion('how healthy is the cluster')).toBe(true);
     expect(isUnscopedQuestion('logs for pod api in namespace prod')).toBe(false);
     expect(isUnscopedQuestion('app=argocd status')).toBe(false);
+  });
+
+  test("Viktor's table: bogus English pods do not block hop-2 across", () => {
+    expect(isUnscopedQuestion('show failing pods in production')).toBe(true);
+    expect(isUnscopedQuestion('top issues in the cluster')).toBe(true);
+    expect(isUnscopedQuestion('which pods are crashlooping in staging')).toBe(true);
+    // Real hyphenated workload — scoped, hop-2 across must not fire for this reason.
+    expect(isUnscopedQuestion('why is checkout-api CrashLooping in prod?')).toBe(false);
+    expect(isUnscopedQuestion('show logs for pod checkout-api in namespace production')).toBe(false);
   });
 
   test('denial vs Loki evidence is a conflict', () => {
@@ -194,6 +203,8 @@ describe('runAskOrchestrator', () => {
     expect(calls[0].text).not.toMatch(/\bHistory\b/i);
     expect(calls[1].text).toContain('Loki last 15m');
     expect(calls[1].text).toMatch(/across ALL clusters/i);
+    expect(calls[0].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(calls[1].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
     expect(calls[0].meta).toEqual(
       expect.objectContaining({
         hop: 1,
@@ -210,6 +221,51 @@ describe('runAskOrchestrator', () => {
       })
     );
     expect(result.summary).toContain('error boom');
+  });
+
+  test('Viktor item 4: 30×145-char Loki dump still packs every hop ≤ 1000', async () => {
+    const lokiLines = Array.from({ length: 30 }, (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`);
+    const current = [
+      'Loki last 15m (pod/checkout-api ns/prod):',
+      ...lokiLines,
+      '',
+      'Prometheus last 15m:',
+      'pod/checkout-api ns/prod restarts=12',
+      '',
+      'Tempo last 15m:',
+      'trace abc123',
+      '',
+      'Alertmanager:',
+      'KubePodCrashLooping firing',
+    ].join('\n');
+    expect(current.length).toBeGreaterThan(MAX_INTENT_CHARS);
+
+    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
+      expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      return { ok: true, status: 200, summary: 'error boom across clusters', raw: {} };
+    });
+
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues in the cluster',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () =>
+        stackResult({
+          current,
+          logLines: lokiLines,
+          currentEmpty: false,
+        })
+      ),
+      callTool,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(callTool.mock.calls.length).toBeGreaterThanOrEqual(1);
+    for (const [, text] of callTool.mock.calls) {
+      expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      expect(text as string).toContain('Loki last 15m');
+      expect(text as string).toContain('Question:');
+    }
   });
 
   test.each([
@@ -335,6 +391,8 @@ describe('runAskOrchestrator', () => {
     // trimmed to the 1000-char intent cap, so assert headers not full Loki lines).
     expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('KubePodCrashLooping firing');
+    expect(secondPacked.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(((callTool.mock.calls[0][1] as string) || '').length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
 
     // The follow-up names only the sources that actually carry data, plus the target.
     expect(secondPacked).toMatch(/live evidence from Loki, Alertmanager for pod\/argocd-application-controller ns\/demo-gitops/i);

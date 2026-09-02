@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
+import pluginJson from '../src/plugin.json';
 
 /** Live / cluster MCP endpoints must never be overwritten by the placeholder host. */
 function looksLikeLiveMcpUrl(value: string): boolean {
@@ -68,7 +69,7 @@ test.describe('dot-ai app configuration', () => {
     // Fixture already navigates with an admin session (plugin-e2e).
     void appConfigPage;
 
-    const settingsRes = await page.request.get('/api/plugins/lesleymurfin-dotai-app/settings');
+    const settingsRes = await page.request.get(`/api/plugins/${pluginJson.id}/settings`);
 
     // Soft-pass if settings are forbidden and we are not admin in this environment.
     if (settingsRes.status() === 403) {

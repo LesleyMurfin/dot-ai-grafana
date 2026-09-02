@@ -2,6 +2,7 @@ import { of } from 'rxjs';
 import { getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
+  CLUSTER_LOGQL,
   fetchStackContext,
   getDataSourceByType,
   linesFromLokiFrames,
@@ -92,6 +93,33 @@ describe('parsePodNamespace / buildLogQL', () => {
       pod: 'checkout-api',
       namespace: 'production',
     });
+  });
+
+  test("Viktor's table: generated LogQL never uses invented pod/ns labels", () => {
+    expect(buildLogQL(parsePodNamespace('show failing pods in production'))).toBe(CLUSTER_LOGQL);
+    expect(buildLogQL(parsePodNamespace('top issues in the cluster'))).toBe(CLUSTER_LOGQL);
+    expect(buildLogQL(parsePodNamespace('which pods are crashlooping in staging'))).toBe(CLUSTER_LOGQL);
+
+    const crashLogQL = buildLogQL(parsePodNamespace('why is checkout-api CrashLooping in prod?'));
+    expect(crashLogQL).toBe('{pod=~"checkout-api.*"}');
+    expect(crashLogQL).not.toMatch(/CrashLooping/i);
+    expect(crashLogQL).not.toMatch(/namespace="prod"/);
+
+    expect(buildLogQL(parsePodNamespace('show logs for pod checkout-api in namespace production'))).toBe(
+      '{namespace="production",pod=~"checkout-api.*"}'
+    );
+
+    const invented = /pod=~"(in|issues|are|CrashLooping)\.\*"/;
+    for (const q of [
+      'show failing pods in production',
+      'top issues in the cluster',
+      'which pods are crashlooping in staging',
+      'why is checkout-api CrashLooping in prod?',
+      'show logs for pod checkout-api in namespace production',
+    ]) {
+      expect(buildLogQL(parsePodNamespace(q))).not.toMatch(invented);
+      expect(buildLogQL(parsePodNamespace(q))).not.toMatch(/namespace="the"/);
+    }
   });
 
 });
