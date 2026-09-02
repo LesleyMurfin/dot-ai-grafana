@@ -286,6 +286,8 @@ Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafa
 Settings (Admin): Grafana plugin `jsonData` / `secureJsonData` (URL, token, Debug Log, Show context).
 Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic/dot-ai#463).
 
+**Grafana 12+ `/apis` HTTP structure** ([docs](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis/)): Grafana 12 adds Kubernetes-style `/apis/<group>/<version>/namespaces/<ns>/<resource>`. Grafana 13 **deprecates** some legacy `/api` HTTP APIs (dashboards, folders, playlists, …). **This plugin does not call those APIs.** Stack reads go through `getDataSourceSrv` / `ds.query` (Explore path). Asks go through the **plugin resource** contract `POST /api/plugins/<id>/resources/*` and settings `POST /api/plugins/<id>/settings` — Grafana plugin SDK, not dashboard HTTP. CI Playwright already runs Grafana **11.0–13 + nightly**. We do not use removed Grafana 12 UI-extension APIs (`getPluginExtensions`, etc.). Tool dropdown stays `@grafana/ui` `Select` because `Combobox` landed in 11.5 and our libs are pinned **11.4.0** for the 11.4 floor; migrate to Combobox when the floor rises.
+
 ### Expansion: By Design (as-built honesty)
 
 | Pillar | Verdict | What we did | Gap |
