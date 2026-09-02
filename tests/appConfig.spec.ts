@@ -63,4 +63,37 @@ test.describe('dot-ai app configuration', () => {
     await saveButton.click();
     await expect(saveResponse).toBeOK();
   });
+
+  test('settings GET does not echo auth token (B2)', async ({ appConfigPage, page }) => {
+    // Fixture already navigates with an admin session (plugin-e2e).
+    void appConfigPage;
+
+    const settingsRes = await page.request.get('/api/plugins/lesleymurfin-dotai-app/settings');
+
+    // Soft-pass if settings are forbidden and we are not admin in this environment.
+    if (settingsRes.status() === 403) {
+      test.skip(true, 'settings GET returned 403 — not admin in this fixture; B2 deferred');
+      return;
+    }
+
+    expect(settingsRes.ok()).toBeTruthy();
+    const body = (await settingsRes.json()) as {
+      jsonData?: Record<string, unknown>;
+      secureJsonData?: Record<string, unknown>;
+      secureJsonFields?: Record<string, boolean>;
+    };
+
+    // Token must never appear as a plain string on the public settings surface.
+    expect(body.secureJsonData?.apiKey).toBeUndefined();
+    expect(body.jsonData?.apiKey).toBeUndefined();
+
+    // When a token is configured, Grafana may advertise the field is set — that is OK.
+    if (body.secureJsonFields && 'apiKey' in body.secureJsonFields) {
+      expect(typeof body.secureJsonFields.apiKey).toBe('boolean');
+    }
+
+    // Defense in depth: entire payload must not contain a non-empty apiKey string value.
+    const raw = JSON.stringify(body);
+    expect(raw).not.toMatch(/"apiKey"\s*:\s*"[^"]+"/);
+  });
 });
