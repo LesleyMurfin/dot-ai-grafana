@@ -8,6 +8,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 
 - **Query** — Ask questions about your cluster in plain English. Responses are text (`data.result.summary`).
 - **Remediate (analysis only)** — Get AI-powered issue analysis. No execute, apply, or mutation UI.
+- **Progressive context** — On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources (`getDataSourceSrv`, no hardcoded uids) and packs **Current** + **Map** into the same `{intent}` string. **History** is on screen only (last 5 turns) and is never POSTed. No `sessionId`. One Ask may issue up to 3 dot-ai POSTs (unscoped question or answer vs Current). Remediate is one hop and reuses Query Current. JSONL ask log: `/var/lib/grafana/dotai-ask.log` (no tokens; hop meta stripped before upstream).
 
 ## Requirements
 

@@ -194,7 +194,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Tools | Query (`intent`) + Remediate analysis-only (`issue` / mapped `intent`). No execute / operate / recommend UI |
 | Client | Thin Grafana SDK `httpclient` for query, remediate, version only. **No** generated OpenAPI client (full schema includes mutation tools) |
 | Timeouts | Probe/version **15s**; query/remediate **120s** blocking. **No** async `202` + job poll |
-| UI | Tool select, intent box, Ask/Analyze, spinner, error `Alert`, text response. Analysis-only banner on Remediate. No History/Current/Map, no Ask multi-hop, no cluster-context chip, no raw-response toggle, no dashboard deep-link |
+| UI | Tool select, intent box, Ask/Analyze, spinner, error `Alert`, text response. Analysis-only banner on Remediate. **Current/Map** packed from Grafana DS into `{intent}`/`{issue}`; **History** display-only (never POSTed); Clear thread / Analyze this. Query ≤3 hops. No cluster-context chip, no raw-response toggle, no dashboard deep-link |
 | Config | Admin: MCP Server URL (`http(s)` absolute) + Bearer token in encrypted settings. Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
@@ -407,11 +407,11 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 - [x] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/test-connection`; SDK `httpclient`; remediate field allowlist; token never logged. **No** `/status/{jobId}` (no 202).
 
 **Stage 1c — Intelligence surfaces**
-- [x] **M4 — Query UI.** Plain-text `summary`. No cluster-context chip, raw-response toggle, or char counter in v1.
-- [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens).
+- [x] **M4 — Query UI.** Plain-text `summary`. Grafana DS **Current/Map** packed into `{intent}`; History display-only. No cluster-context chip, raw-response toggle, or char counter in v1.
+- [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
-- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`. No Cancel/Retry/elapsed in v1.
+- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. No Cancel/Retry/elapsed in v1.
 - [ ] **M7 — Dashboard deep-link.** **Not in v1.**
 
 **Stage 1e — Ship**
