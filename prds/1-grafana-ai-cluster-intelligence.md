@@ -203,32 +203,61 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing; ask-log on/off setting |
 
 ```
-  Grafana (this plugin)                         dot-ai (unchanged)
-  ─────────────────────                         ─────────────────
-  Dashboards + datasources
-    Loki  Prometheus  Tempo  Alertmanager
-              │
-              ▼
-  Pack Current + Map + question     History on screen only
-  (Query ≤3 hops; Remediate 1 hop)  never POSTed
-              │
-              ▼
-  Go backend  ──ask log──►  /var/lib/grafana/dotai-ask.log
-  Bearer + {intent}|{issue}         (always on; no toggle)
-              │
-              ▼
-                                    POST /api/v1/tools/query
-                                    POST /api/v1/tools/remediate  (analysis)
-                                    POST /api/v1/tools/version
-                                              │
-                                              ▼
-                                    K8s API + LLM
-                                    (query toolLoop inside one Ask)
+  Ask
+   |
+   +-- Remediate ── pack existing Query Current + issue
+   |                 1x POST /remediate (analysis) ── done
+   |
+   +-- Query
+         |
+         v
+      Read Grafana DS: Loki, Prometheus, Tempo, Alertmanager
+      (no hardcoded uids; cluster-wide if no pod/ns; never skip)
+         |
+         v
+      Current + Map     History stays on screen — never POSTed
+         |
+         v
+      classifyFirstHop(question)
+         |                              |
+         | alerts/logs/metrics/traces   | list/show namespaces|pods|...
+         | "top issues" / default       | (inventory language)
+         v                              v
+      first_hop=grafana            first_hop=dot-ai
+         |                              |
+         +--------------+---------------+
+                        v
+      hop 1  POST /query
+             intent = Stable + Current + Map + question
+                        |
+         +--------------+--------------+
+         | unscoped (no pod/ns/app)?   | answer denies facts in Current?
+         v                             v
+      hop 2 across                  hop 2 conflict
+         |                             |
+         |          hop 2 still hedges on Current?
+         |                             v
+         +---------------------- hop 3 hedge
+                        |
+                        v
+      cap 3; stop. Rewrite Current from the answer (for next Ask /
+      Analyze this). Each hop = one ask-log line.
+
+  Go backend (every hop):
+    strip hop/branch/first_hop before upstream
+    append JSONL ask log (always on; no tokens)
+    Authorization: Bearer  -->  dot-ai
+
+  dot-ai (unchanged):
+    query toolLoop (kubectl / capabilities / optional MCP, <=30)
+    intent max 1000 chars; sessionId = visualization cache, not chat
+    remediate sessionId = execute round-trip — this plugin never sends it
 
   Headlamp (not this PR): K8s resource object + execute / operate
 ```
 
-Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent** so Asks see the dashboards the operator is looking at.
+Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
+
 
 ## User Journey
 
