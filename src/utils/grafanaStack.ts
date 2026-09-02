@@ -301,6 +301,48 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
   return lines.slice(0, cap);
 }
 
+const DASHBOARD_UID_KEYS = ['dashboardUID', 'dashboardUid', '__dashboardUid__', 'dashboard_uid'];
+
+function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[]) {
+  const s = String(raw ?? '').trim();
+  if (!s || seen[s] || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
+    return;
+  }
+  seen[s] = true;
+  uids.push(s);
+}
+
+/** v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search. */
+export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
+  const uids: string[] = [];
+  const seen: Record<string, true> = {};
+  for (const frame of frames) {
+    for (const field of frame.fields ?? []) {
+      if (DASHBOARD_UID_KEYS.includes(field.name)) {
+        const len = fieldLength(field.values);
+        for (let i = 0; i < len; i++) {
+          addDashboardUid(fieldGet(field.values, i), seen, uids);
+        }
+      }
+      const labels = (field as { labels?: Record<string, string> }).labels ?? {};
+      for (const key of DASHBOARD_UID_KEYS) {
+        if (labels[key]) {
+          addDashboardUid(labels[key], seen, uids);
+        }
+      }
+    }
+  }
+  return uids;
+}
+
+export function dashboardHintFromUids(uids: string[]): string {
+  if (uids.length === 0) {
+    return 'dashboards: none linked on firing alerts';
+  }
+  return `dashboards: ${uids.map((u) => `/d/${u}`).join(' ')}`;
+}
+
+
 export function linesFromLokiFrames(frames: DataFrame[]): string[] {
   return textLinesFromFrames(frames, LOG_LINE_CAP);
 }
@@ -391,6 +433,7 @@ function formatCurrent(args: {
   promLines: string[];
   tempoLines: string[];
   alertLines: string[];
+  dashboardUids: string[];
   lokiNote?: string;
   promNote?: string;
   tempoNote?: string;
@@ -410,9 +453,17 @@ function formatCurrent(args: {
   parts.push('');
   parts.push(`Alertmanager${scope}:`);
   parts.push(args.alertLines.length > 0 ? args.alertLines.join('\n') : args.alertNote ?? 'no alerts');
+  parts.push('');
+  parts.push('Dashboards (from firing alerts):');
+  parts.push(
+    args.dashboardUids.length > 0
+      ? args.dashboardUids.map((u) => `/d/${u}`).join('\n')
+      : 'none linked on firing alerts'
+  );
 
   return parts.join('\n');
 }
+
 
 /**
  * Grafana stack → Current/Map for Query (connect-only).
@@ -430,6 +481,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   let promLines: string[] = [];
   let tempoLines: string[] = [];
   let alertLines: string[] = [];
+  let dashboardUids: string[] = [];
   let lokiNote: string | undefined;
   let promNote: string | undefined;
   let tempoNote: string | undefined;
@@ -452,7 +504,8 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   if (target.pod) {
     mapParts.push(`pod/${target.pod}`);
   }
-  const mapHint = mapParts.join(', ');
+  let mapHint = mapParts.join(', ');
+
 
   // --- Loki (always; cluster-wide when no pod/ns) ---
   if (!loki?.ds) {
@@ -539,7 +592,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
         am.ds,
         baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
       );
-      alertLines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
+      const amFrames = framesOf(resp);
+      alertLines = textLinesFromFrames(amFrames, ALERT_CAP);
+      dashboardUids = dashboardUidsFromAlertFrames(amFrames);
       if (alertLines.length === 0) {
         alertNote = 'no alerts';
       }
@@ -549,6 +604,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   }
 
   const currentEmpty = isStackCurrentEmpty({ logLines, promLines, tempoLines, alertLines });
+  mapHint = `${mapHint}, ${dashboardHintFromUids(dashboardUids)}`;
 
   return {
     logLines,
@@ -562,6 +618,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       promLines,
       tempoLines,
       alertLines,
+      dashboardUids,
       lokiNote,
       promNote,
       tempoNote,
@@ -569,4 +626,5 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     }),
     mapHint,
   };
+
 }

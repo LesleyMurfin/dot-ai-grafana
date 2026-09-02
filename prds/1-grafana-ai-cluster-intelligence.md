@@ -200,7 +200,8 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; display-only), **Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; independent of Show context). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
-| Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing |
+| Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing; **Remediate v2** “how do we improve dashboards/alerts so we catch this next time?” (needs Dashboard `/apis` inventory — never `/api/search`) |
+
 
 ```
   Ask
@@ -258,7 +259,8 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
-**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in **Current** from Alertmanager when send is on. Dashboard-to-open is **not** built (would be Grafana `/apis` dashboards later).
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in **Current** from Alertmanager when send is on. **v1 “what dashboard / show me logs / show me alerts”:** Current already holds last-15m Loki/Prom/Tempo/AM; Map lists `/d/<uid>` only when a **firing alert** carries `dashboardUid` (Grafana annotation). We do not search dashboards. **v2 remediate:** recommend new panels/alerts; not this PR.
+
 
 **Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
 
