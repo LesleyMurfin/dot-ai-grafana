@@ -212,12 +212,11 @@ describe('Pages/DotAIPage', () => {
     render(<DotAIPage />);
     typeIntent('how is the cluster?');
     clickSubmit();
+
     expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/What's true now/i);
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('You');
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('cluster looks healthy');
-
     expect(screen.queryByTestId(testIds.dotai.error)).not.toBeInTheDocument();
   });
 
@@ -254,9 +253,7 @@ describe('Pages/DotAIPage', () => {
 
     expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('llm unavailable');
     expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
-
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
   });
 
@@ -644,9 +641,8 @@ describe('Pages/DotAIPage', () => {
     expect(await screen.findByTestId(testIds.dotai.drilldown)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Explore logs' });
     expect(link).toHaveAttribute('href', '/explore?panes=x');
+    expect(link).toHaveAttribute('target', '_blank');
     expect(mockCallDotAITool).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
-
   });
 });

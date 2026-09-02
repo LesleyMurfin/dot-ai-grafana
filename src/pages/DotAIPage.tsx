@@ -5,7 +5,6 @@ import { PluginPage } from '@grafana/runtime';
 import {
   Alert,
   Button,
-  Collapse,
   Field,
   Select,
   Spinner,
@@ -13,12 +12,10 @@ import {
   useStyles2,
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
-import { ResponseMarkdown } from '../components/ResponseMarkdown';
 import { DotAITool } from '../utils/dotaiApi';
 import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
-
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -39,9 +36,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
   const [responseText, setResponseText] = useState('');
-  const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
-
   const [threads, setThreads] = useState<Threads>({
     query: emptyThread(),
     remediate: emptyThread(),
@@ -270,10 +265,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </Alert>
         )}
 
-        {responseText && (
-          <div className={styles.response} data-testid={testIds.dotai.response}>
-            <h3 className={styles.responseTitle}>Answer</h3>
-            <ResponseMarkdown text={responseText} />
+        {showContext && activeThread.current && (
+          <div className={styles.context} data-testid={testIds.dotai.current}>
+            <h3 className={styles.responseTitle}>Current</h3>
+            <pre className={styles.pre}>{activeThread.current}</pre>
           </div>
         )}
 
@@ -299,19 +294,6 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </div>
         )}
 
-        {showContext && activeThread.current && (
-          <div className={styles.context} data-testid={testIds.dotai.current}>
-            <Collapse
-              label="Current (Grafana evidence)"
-              collapsible={true}
-              isOpen={currentOpen}
-              onToggle={() => setCurrentOpen(!currentOpen)}
-            >
-              <pre className={styles.pre}>{activeThread.current}</pre>
-            </Collapse>
-
-          </div>
-        )}
 
         {showContext && activeThread.history.length > 0 && (
           <div className={styles.history} data-testid={testIds.dotai.history}>
@@ -326,6 +308,13 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </div>
         )}
 
+
+        {responseText && (
+          <div className={styles.response} data-testid={testIds.dotai.response}>
+            <h3 className={styles.responseTitle}>Response</h3>
+            <pre className={styles.pre}>{responseText}</pre>
+          </div>
+        )}
       </div>
     </PluginPage>
   );
