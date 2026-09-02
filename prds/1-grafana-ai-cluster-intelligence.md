@@ -259,7 +259,8 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
-**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in **Current** from Alertmanager when send is on. **v1 “what dashboard / show me logs / show me alerts”:** Current already holds last-15m Loki/Prom/Tempo/AM; Map lists `/d/<uid>` only when a **firing alert** carries `dashboardUid` (Grafana annotation). We do not search dashboards. **v2 remediate:** recommend new panels/alerts; not this PR.
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. **v1 “show me logs/alerts/traces/metrics/dashboards”:** skip the dot-ai POST; keep Current; Map links open Grafana Explore (11+ panes URL) or Drilldown apps if installed (`grafana-lokiexplore-app`, `grafana-metricsdrilldown-app`, `grafana-exploretraces-app`). Dashboard `/d/<uid>` only from firing-alert `dashboardUid`. Never `GET /api/search`. **v2 remediate:** recommend new panels/alerts; not this PR.
+
 
 
 **Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**

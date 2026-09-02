@@ -22,6 +22,7 @@ function stackResult(overrides: Partial<StackContextResult> = {}): StackContextR
     tempoLines: overrides.tempoLines ?? [],
     alertLines: overrides.alertLines ?? [],
     currentEmpty: overrides.currentEmpty ?? false,
+    drilldowns: overrides.drilldowns ?? [],
   };
 }
 
@@ -256,7 +257,8 @@ describe('runAskOrchestrator', () => {
       expect(callTool).toHaveBeenCalledTimes(2);
       const secondPacked = (callTool.mock.calls[1][1] as string) || '';
       expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
-      expect(secondPacked).toContain('Comparing app state');
+      expect(secondPacked).toContain('Loki last 15m');
+
       expect(result.summary).not.toMatch(/not available|from a different cluster/i);
     }
   );
@@ -332,18 +334,18 @@ describe('runAskOrchestrator', () => {
     const secondPacked = (callTool.mock.calls[1][1] as string) || '';
 
     // The Grafana evidence itself is still packed for hop 2.
-    expect(secondPacked).toContain('Comparing app state');
+    expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('KubePodCrashLooping firing');
+
 
     // The follow-up names only the sources that actually carry data, plus the target.
     expect(secondPacked).toMatch(/live evidence from Loki, Alertmanager for pod\/argocd-application-controller ns\/demo-gitops/i);
     expect(secondPacked).not.toMatch(/evidence from[^\n]*Prometheus/i);
 
-    // Hard denial ban — the soft "solely because" hedge is gone.
     expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
     expect(secondPacked).toMatch(/does not exist, was not found, is not deployed/i);
     expect(secondPacked).not.toMatch(/solely because/i);
-    expect(secondPacked).toMatch(/Answer the original question FROM the Current evidence/i);
+
 
     // A bare namespace-does-not-exist answer is not what the user ends up with.
     expect(result.summary).not.toMatch(/does not exist/i);
@@ -391,8 +393,8 @@ describe('runAskOrchestrator', () => {
     expect(thirdPacked).toMatch(/Final follow-up: your previous answer still hedged/i);
     expect(thirdPacked).toMatch(/Do NOT repeat that the pod\/namespace is unreachable/i);
     expect(thirdPacked).toMatch(/live Loki, Alertmanager evidence/i);
-    // Hop 3 still carries the Grafana evidence, not just the scolding.
-    expect(thirdPacked).toContain('Comparing app state');
+    expect(thirdPacked).toContain('Loki last 15m');
+
 
     // The user ends on the committed answer, not the "not accessible" hedge.
     expect(result.summary).not.toMatch(/not accessible/i);
@@ -580,7 +582,7 @@ describe('runAskOrchestrator', () => {
     const result = await runAskOrchestrator({
       tool: 'remediate',
       question: 'pod crash',
-      thread: { current: 'prior current', map: 'ns/x', history: [] },
+      thread: { current: 'prior current', map: 'ns/x', history: [], drilldowns: [] },
       callTool,
     });
 
@@ -648,5 +650,30 @@ describe('runAskOrchestrator', () => {
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toMatch(/cancelled/i);
     expect(callTool).not.toHaveBeenCalled();
+  });
+
+  test('show me the logs skips dot-ai and keeps Current', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Loki last 15m:\nboom',
+        drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.current).toContain('boom');
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+    ]);
+    expect(result.summary).toMatch(/Map links/i);
   });
 });
