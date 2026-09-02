@@ -3,7 +3,7 @@
 **Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/13
 **Priority**: High (follows PRD #1 ship)  
 **Status**: Draft  
-**Updated**: 2026-09-01
+**Updated**: 2026-09-02
 
 ## Problem
 
@@ -24,10 +24,21 @@ After PRD #1 is live, Grafana UI keeps proposing remediation analysis; an explic
 - RBAC/approval: who may trigger PR creation; optional second approver before open.
 - e2e against a real or fixture GitOps repo proving proposal → PR without direct cluster write.
 
+## Related PRDs (do not mix)
+
+```
+  PRD #1  vfarcic#3 / fork #21 / 0.1.0     analysis-only pack   — not this file
+  PRD #2  this file / issue #13 / PR #18   GitOps PR execute
+  PRD #3  issue #23 / PR #22 / 0.2.x       Map / Explore / show-me — not this file
+```
+
+Do **not** dump M7 Map/Explore/show-me/markdown into this PRD. That is [issue #23](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22).
+
 ## Out of scope
 
 - In-cluster `kubectl apply` / live mutate from the Grafana plugin.
-- Any change to PRD #1 v1 analysis-only product surface.
+- Any change to PRD #1 v1 analysis-only product surface ([vfarcic#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) / [fork #21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21)).
+- M7 Map `/d/<uid>`, Explore/Drilldown, show-me skip POST, markdown Answer — [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23).
 - operate/recommend multi-tool expansion (separate work if needed).
 - Marketplace publishing, rich visualization of diffs beyond reviewable PR content.
 
@@ -51,6 +62,7 @@ After PRD #1 is live, Grafana UI keeps proposing remediation analysis; an explic
 |------|----------|-----------|
 | 2026-09-01 | Execute = GitOps PR only; no in-plugin cluster apply | Viktor PR #2; keeps GitOps SoT and review; RULE-027 separate from PRD #1 |
 | 2026-09-01 | PRD #1 remains analysis-only; this PRD owns execute | Avoid double scope and Phase-2 parking inside PRD #1 |
+| 2026-09-02 | M7 Map/Explore/show-me is **not** this PRD | [issue #23](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) |
 
 ## Work Log
 
@@ -59,3 +71,8 @@ After PRD #1 is live, Grafana UI keeps proposing remediation analysis; an explic
 - **Issue**: Execute path must be roadmap-real without expanding PRD #1.
 - **Action**: Draft PRD #2 (problem, scope, out, milestones). PRD #1 OQ6 points here.
 - **Prompt**: Finish Viktor PR #2 comments — separate GitOps-PR remediate PRD.
+
+### 2026-09-02 — Point at PRD #3; keep GitOps-only
+
+- **Issue**: Parked M7 extras must not land in this PRD.
+- **Action**: Related-PRDs table + out-of-scope pointer to issue #23 / PR #22. No Map/Explore/show-me content added.
