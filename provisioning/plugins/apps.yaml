@@ -8,4 +8,4 @@ apps:
     jsonData:
       apiUrl: http://dot-ai.dot-ai.svc:3456
     secureJsonData:
-      apiKey: ''
+      apiKey: 'dev-token'
