@@ -1384,7 +1384,7 @@ func TestAskLogFile(t *testing.T) {
 	defer upstream.Close()
 
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
@@ -1540,6 +1540,43 @@ func TestAskLogFile(t *testing.T) {
 		t.Fatalf("error line leaked secret: %s", lines[2])
 	}
 }
+
+func TestAskLogDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+		Path:   "query",
+		Method: http.MethodPost,
+		Body:   []byte(`{"intent":"list pods"}`),
+	}, callResourceResponseSenderFunc(func(*backend.CallResourceResponse) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("ask log should not exist when debugLog is off: %v", err)
+	}
+}
+
 
 func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 	dir := t.TempDir()

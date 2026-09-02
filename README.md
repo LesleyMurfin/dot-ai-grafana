@@ -44,6 +44,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 |---|---|
 | MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API (example: `http://dot-ai.dot-ai.svc:3456`) |
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
+| Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |
 
 Do not point `apiUrl` at agentgateway or Context Forge — only the dot-ai tools REST base.
@@ -79,7 +80,7 @@ The published OpenAPI document for dot-ai includes execute/operate/recommend. Th
 
 ## Ask log (troubleshooting)
 
-There is **no plugin setting** to turn this off. Every query/remediate hop appends one JSON line to `/var/lib/grafana/dotai-ask.log` (rotate at 1MiB → `.1`): `time`, `tool`, truncated `body`, `status`, `summary`, `hop`, `hops`, `first_hop`, `branch`, `current_empty`. Tokens never written. Hop meta stripped before dot-ai.
+**Debug Log** in plugin settings (`jsonData.debugLog`) enables it. **Off by default.** When on, every query/remediate hop appends one JSON line to `/var/lib/grafana/dotai-ask.log` (rotate at 1MiB → `.1`): `time`, `tool`, truncated `body`, `status`, `summary`, `hop`, `hops`, `first_hop`, `branch`, `current_empty`. Tokens never written. Hop meta stripped before dot-ai.
 
 Grafana plugin debug (`GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug`) is separate and only set in create-plugin docker for `npm run server`.
 

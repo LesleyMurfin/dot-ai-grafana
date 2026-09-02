@@ -3,20 +3,19 @@ import { lastValueFrom } from 'rxjs';
 import { css } from '@emotion/css';
 import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
-import { Alert, Button, Field, FieldSet, Input, SecretInput, useStyles2 } from '@grafana/ui';
+import { Alert, Button, Field, FieldSet, Input, SecretInput, Switch, useStyles2 } from '@grafana/ui';
 import { testIds } from '../testIds';
 
 type AppPluginSettings = {
   apiUrl?: string;
+  debugLog?: boolean;
 };
 
 type State = {
-  // Dot-ai REST base URL (jsonData.apiUrl).
   apiUrl: string;
-  // Whether secureJsonData.apiKey is already stored server-side.
   isApiKeySet: boolean;
-  // Draft auth token (never echoed from server).
   apiKey: string;
+  debugLog: boolean;
 };
 
 type TestStatus =
@@ -91,6 +90,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     apiUrl: jsonData?.apiUrl || '',
     apiKey: '',
     isApiKeySet: Boolean(secureJsonFields?.apiKey),
+    debugLog: Boolean(jsonData?.debugLog),
   });
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
 
@@ -122,6 +122,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       pinned,
       jsonData: {
         apiUrl: state.apiUrl,
+        debugLog: state.debugLog,
       },
       // This cannot be queried later by the frontend.
       // We don't want to override it in case it was set previously and left untouched now.
@@ -206,6 +207,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             placeholder="http://dot-ai:3456"
             onChange={onChange}
           />
+        </Field>
+
+        <Field
+          label="Debug Log"
+          description="Write one JSON line per query/remediate hop to /var/lib/grafana/dotai-ask.log (no tokens). Off by default."
+          className={s.marginTop}
+        >
+          <span data-testid={testIds.appConfig.debugLog}>
+            <Switch
+              value={state.debugLog}
+              onChange={(event) => {
+                setState({ ...state, debugLog: event.currentTarget.checked });
+              }}
+            />
+          </span>
         </Field>
 
         {testStatus.kind === 'success' && (

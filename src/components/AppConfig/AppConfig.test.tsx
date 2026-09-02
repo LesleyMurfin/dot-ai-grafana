@@ -160,7 +160,7 @@ describe('Components/AppConfig', () => {
 
     const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
     expect(call).toBeDefined();
-    expect(call![0].data.jsonData).toEqual({ apiUrl: 'http://dot-ai:3456' });
+    expect(call![0].data.jsonData).toEqual({ apiUrl: 'http://dot-ai:3456', debugLog: false });
     expect(call![0].data.secureJsonData).toBeUndefined();
 
     await waitFor(() => {

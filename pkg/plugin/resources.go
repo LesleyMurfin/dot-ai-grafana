@@ -621,12 +621,14 @@ func extractErrorMessage(payload any, fallback string) string {
 
 // proxyDotAI forwards the request body to a dot-ai tools REST path and returns a
 // stable {ok,status,summary,error} envelope (never the raw upstream body).
-// Each completed call appends one JSON line to the Ask log file (Grafana PVC).
+// When jsonData.debugLog is true, each completed call appends one JSON line to the ask log.
 func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
 	tool := toolNameFromPath(toolPath)
 	var reqBody []byte
 	finish := func(httpStatus, status int, summary, errMsg string) {
-		appendAskLog(tool, reqBody, status, summary, errMsg)
+		if a.debugLog {
+			appendAskLog(tool, reqBody, status, summary, errMsg)
+		}
 		writeToolProxy(w, httpStatus, status, summary, errMsg)
 	}
 

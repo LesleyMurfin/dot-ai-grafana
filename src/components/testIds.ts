@@ -5,6 +5,7 @@ export const testIds = {
     submit: 'data-testid ac-submit-form',
     testConnection: 'data-testid ac-test-connection',
     testStatus: 'data-testid ac-test-status',
+    debugLog: 'data-testid ac-debug-log',
   },
   dotai: {
     container: 'data-testid dotai-container',
