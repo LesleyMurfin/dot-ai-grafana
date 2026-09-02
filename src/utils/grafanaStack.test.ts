@@ -2,14 +2,12 @@ import { of } from 'rxjs';
 import { getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
-  dashboardUidsFromAlertFrames,
   fetchStackContext,
   getDataSourceByType,
   linesFromLokiFrames,
   LOG_LINE_CAP,
   parsePodNamespace,
 } from './grafanaStack';
-
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
@@ -92,34 +90,6 @@ describe('linesFromLokiFrames', () => {
   });
 });
 
-describe('dashboardUidsFromAlertFrames', () => {
-  test('reads dashboardUid field and labels; ignores junk', () => {
-    const uids = dashboardUidsFromAlertFrames([
-      {
-        fields: [
-          { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
-          { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
-        ],
-      } as never,
-      {
-        fields: [
-          {
-            name: 'alertname',
-            type: 'string',
-            values: ['Other'],
-            labels: { __dashboardUid__: 'panel-uid-1' },
-          },
-        ],
-      } as never,
-      {
-        fields: [{ name: 'dashboardUid', type: 'string', values: ['no'] }],
-      } as never,
-    ]);
-    expect(uids).toEqual(['abc12def', 'panel-uid-1']);
-  });
-});
-
-
 describe('fetchStackContext', () => {
   test('Current includes mocked Loki log lines via ds.query', async () => {
     const lokiLines = ['OOMKilled container', 'Back-off restarting failed container'];
@@ -168,42 +138,13 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('trace abc123');
     expect(result.current).toContain('Alertmanager');
     expect(result.current).toContain('KubePodCrashLooping');
-    expect(result.current).toContain('none linked on firing alerts');
     expect(result.mapHint).toMatch(/Loki/);
     expect(result.mapHint).toMatch(/Prometheus/);
     expect(result.mapHint).toMatch(/Tempo/);
     expect(result.mapHint).toMatch(/Alertmanager/);
-    expect(result.mapHint).toMatch(/dashboards: none linked on firing alerts/);
-
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/P8E80F9AEF21F6940/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/datasources\/proxy/);
   });
-
-  test('Map and Current include /d/uid when alert has dashboardUid', async () => {
-    mockGet.mockImplementation(async (ref: string) => {
-      if (ref === 'am-1' || ref === 'Alertmanager') {
-        return {
-          query: () =>
-            of({
-              data: [
-                {
-                  fields: [
-                    { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
-                    { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
-                  ],
-                },
-              ],
-            }),
-        };
-      }
-      return { query: () => of({ data: [] }) };
-    });
-
-    const result = await fetchStackContext('show me the alerts for checkout');
-    expect(result.current).toContain('/d/abc12def');
-    expect(result.mapHint).toMatch(/dashboards: \/d\/abc12def/);
-  });
-
 
   test('one-line note when Loki datasource missing', async () => {
     mockGetList.mockImplementation((opts?: { type?: string }) => {
