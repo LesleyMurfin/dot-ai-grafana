@@ -6,6 +6,7 @@ export const testIds = {
     testConnection: 'data-testid ac-test-connection',
     testStatus: 'data-testid ac-test-status',
     debugLog: 'data-testid ac-debug-log',
+    showContext: 'data-testid ac-show-context',
   },
   dotai: {
     container: 'data-testid dotai-container',

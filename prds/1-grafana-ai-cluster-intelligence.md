@@ -197,7 +197,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | UI | Tool select, intent box, Ask/Analyze, spinner, error `Alert`, text response. Analysis-only banner on Remediate. **Current/Map** packed from Grafana DS into `{intent}`/`{issue}`; **History** display-only (never POSTed); Clear thread / Analyze this. Query ≤3 hops. No cluster-context chip, no raw-response toggle, no dashboard deep-link |
 | Ask log | **Debug Log** setting (`jsonData.debugLog`), **off by default**. When on: JSONL `/var/lib/grafana/dotai-ask.log`, rotate 1MiB. One line per hop. Tokens never logged; hop meta stripped before upstream. Grafana `GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug` is separate (create-plugin docker only) |
 | vs Headlamp / core | Headlamp Query = box → one POST. Resource-detail passes the **K8s object** into remediate/operate. `sessionId` is the **execute** round-trip, not Grafana DS packing. No Loki/Prom/Tempo/AM in `dot-ai-headlamp`. Closest core plan: [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) (Low, draft — evaluate external monitoring MCP). This packing is Grafana-host glue |
-| Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default). Test connection = `POST /api/v1/tools/version` |
+| Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; packing still runs when off). Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
 | Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing |
@@ -307,6 +307,7 @@ Grafana admin configures via plugin settings:
 - **MCP Server URL** — `jsonData.apiUrl` (absolute http(s) base, no `/api/v1` suffix)
 - **Auth Token** — `secureJsonData.apiKey` (Bearer; stored encrypted)
 - **Debug Log** — `jsonData.debugLog` enable/disable the JSONL ask log (`/var/lib/grafana/dotai-ask.log`). **Off by default.** Tokens never written; hop meta stripped before upstream.
+- **Show context** — `jsonData.showContext` show Current, Map, and History on the page. **On by default.** Packing and hops still run when this is off.
 
 ### UI Components
 

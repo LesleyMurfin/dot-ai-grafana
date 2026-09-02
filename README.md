@@ -45,6 +45,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API (example: `http://dot-ai.dot-ai.svc:3456`) |
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
 | Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** |
+| Show context | Show Current, Map, and History on the page. **On by default.** Packing still runs when off. |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |
 
 Do not point `apiUrl` at agentgateway or Context Forge — only the dot-ai tools REST base.

@@ -6,9 +6,10 @@ import { getBackendSrv } from '@grafana/runtime';
 import { Alert, Button, Field, FieldSet, Input, SecretInput, Switch, useStyles2 } from '@grafana/ui';
 import { testIds } from '../testIds';
 
-type AppPluginSettings = {
+export type AppPluginSettings = {
   apiUrl?: string;
   debugLog?: boolean;
+  showContext?: boolean;
 };
 
 type State = {
@@ -16,6 +17,7 @@ type State = {
   isApiKeySet: boolean;
   apiKey: string;
   debugLog: boolean;
+  showContext: boolean;
 };
 
 type TestStatus =
@@ -91,6 +93,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     apiKey: '',
     isApiKeySet: Boolean(secureJsonFields?.apiKey),
     debugLog: Boolean(jsonData?.debugLog),
+    showContext: jsonData?.showContext !== false,
   });
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
 
@@ -123,6 +126,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       jsonData: {
         apiUrl: state.apiUrl,
         debugLog: state.debugLog,
+        showContext: state.showContext,
       },
       // This cannot be queried later by the frontend.
       // We don't want to override it in case it was set previously and left untouched now.
@@ -219,6 +223,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               value={state.debugLog}
               onChange={(event) => {
                 setState({ ...state, debugLog: event.currentTarget.checked });
+              }}
+            />
+          </span>
+        </Field>
+
+        <Field
+          label="Show context"
+          description="Show Current, Map, and History on the page. Packing still runs when this is off. On by default."
+          className={s.marginTop}
+        >
+          <span data-testid={testIds.appConfig.showContext}>
+            <Switch
+              value={state.showContext}
+              onChange={(event) => {
+                setState({ ...state, showContext: event.currentTarget.checked });
               }}
             />
           </span>

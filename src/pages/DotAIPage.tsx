@@ -23,7 +23,11 @@ const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
 
 type Threads = Record<DotAITool, ToolThread>;
 
-function DotAIPage() {
+type DotAIPageProps = {
+  showContext?: boolean;
+};
+
+function DotAIPage({ showContext = true }: DotAIPageProps) {
   const styles = useStyles2(getStyles);
   const [tool, setTool] = useState<DotAITool>('query');
   const [intent, setIntent] = useState('');
@@ -216,21 +220,21 @@ function DotAIPage() {
           </Alert>
         )}
 
-        {activeThread.current && (
+        {showContext && activeThread.current && (
           <div className={styles.context} data-testid={testIds.dotai.current}>
             <h3 className={styles.responseTitle}>Current</h3>
             <pre className={styles.pre}>{activeThread.current}</pre>
           </div>
         )}
 
-        {activeThread.map && (
+        {showContext && activeThread.map && (
           <div className={styles.context} data-testid={testIds.dotai.map}>
             <h3 className={styles.responseTitle}>Map</h3>
             <pre className={styles.pre}>{activeThread.map}</pre>
           </div>
         )}
 
-        {activeThread.history.length > 0 && (
+        {showContext && activeThread.history.length > 0 && (
           <div className={styles.history} data-testid={testIds.dotai.history}>
             <h3 className={styles.responseTitle}>History</h3>
             <ul className={styles.historyList}>
@@ -242,6 +246,7 @@ function DotAIPage() {
             </ul>
           </div>
         )}
+
 
         {responseText && (
           <div className={styles.response} data-testid={testIds.dotai.response}>

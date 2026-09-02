@@ -502,4 +502,43 @@ describe('Pages/DotAIPage', () => {
     expect(screen.queryByTestId(testIds.dotai.current)).not.toBeInTheDocument();
     expect(screen.queryByTestId(testIds.dotai.response)).not.toBeInTheDocument();
   });
+
+  test('showContext on (default) displays Current after a packed Ask', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    expect(screen.getByTestId(testIds.dotai.current)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.dotai.history)).toBeInTheDocument();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('Loki last 15m');
+  });
+
+  test('showContext off hides Current/Map/History but still packs intent', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage showContext={false} />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    expect(screen.queryByTestId(testIds.dotai.current)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.map)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
+    expect(mockCallDotAITool).toHaveBeenCalled();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('Loki last 15m');
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
+  });
 });
