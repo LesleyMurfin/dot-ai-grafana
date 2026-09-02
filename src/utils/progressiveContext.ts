@@ -70,7 +70,17 @@ export const HINT_STOPWORDS: Record<string, true> = {
   being: true,
   found: true,
   running: true,
+  our: true,
+  the: true,
+  this: true,
+  that: true,
+  top: true,
+  issue: true,
+  need: true,
+  address: true,
+  environment: true,
 };
+
 /**
  * Pack Stable + Current + Map + box for the next POST.
  * History is intentionally omitted.

@@ -68,9 +68,10 @@ export function isShowMeOnly(question: string): boolean {
   if (!q) {
     return false;
   }
-  if (/\b(why|how|fix|remediat|improve|root cause|because)\b/.test(q)) {
+  if (/\b(why|how|fix|remediat|improve|root cause|because|issue|issues|crash|failing|unhealthy)\b/.test(q)) {
     return false;
   }
+
   return /^(please\s+)?((show me|open|display)\s+(the\s+)?(logs?|alerts?|traces?|metrics?|dashboards?)(\s+for\b.*)?)$/.test(
     q
   );

@@ -80,7 +80,11 @@ describe('parsePodNamespace / buildLogQL', () => {
   test('rejects stopword and non-RFC1123 captures', () => {
     expect(parsePodNamespace('pod are in namespace prod').pod).toBeUndefined();
     expect(parsePodNamespace('pod _bad in namespace prod').pod).toBeUndefined();
+    expect(
+      parsePodNamespace('show me the logs for the top issue we need to address in our environment')
+    ).toEqual({});
   });
+
 });
 
 describe('linesFromLokiFrames', () => {

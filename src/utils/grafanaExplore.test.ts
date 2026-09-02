@@ -29,6 +29,9 @@ describe('isShowMeOnly', () => {
     expect(isShowMeOnly('show failing pods')).toBe(false);
     expect(isShowMeOnly('show logs for pod api')).toBe(false);
     expect(isShowMeOnly('list namespaces')).toBe(false);
+    expect(isShowMeOnly('show me the logs for the top issue we need to address in our environment')).toBe(
+      false
+    );
   });
 
 });
