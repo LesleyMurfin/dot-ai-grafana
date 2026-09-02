@@ -1,6 +1,6 @@
 # PRD: Grafana Map / Explore / show-me (M7, post v1)
 
-**Issue**: to file on `LesleyMurfin/dot-ai-grafana` (fork-first)
+**Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/23
 **Priority**: High (follows PRD #1 ship)
 **Status**: Draft
 **Updated**: 2026-09-02
@@ -45,7 +45,13 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 - Post–PRD #1 only. Depends on v1 analysis-only Query/Remediate + Current packing.
 - `dashboardUid` from Alertmanager frames → Map `/d/<uid>` (Grafana annotation already on the firing alert). No dashboard search.
 - Explore panes URL (Grafana 11+). Drilldown `/a/<pluginId>` only when `config.apps` has that app.
-- `isShowMeOnly`: “show me/open/display the logs|alerts|traces|metrics|dashboards” skips the dot-ai POST; keep Current; hops = 0. Diagnosis words (`why` / `fix` / …) still POST.
+- `isShowMeOnly` matching contract (must be unit-tested):
+  - Lowercase the question; strip surrounding punctuation (`.?!`).
+  - Match a **complete phrase**: `(show me|open|display) the? (logs|alerts|traces|metrics|dashboards)`. No partial-word hits.
+  - **Diagnosis wins:** if the same question also has a diagnosis token (`why`, `fix`, `crash`, `failing`, `analyze`, `remediate`), **POST** — show-me does not skip.
+  - `SHOW ME LOGS.` → skip POST (hops = 0); keep Current; open Map links.
+  - `show me the logs — why is checkout-api crashing?` → POST.
+  - `show me dashboards`: skip POST. Map `/d/<uid>` **only** when Current has a firing-alert `dashboardUid`. **Empty state:** no UID → no `/d/` link, no search, Ask still succeeds (Current + Explore/Drilldown if those apps exist). Never `GET /api/search`.
 - Render Answer with Grafana `renderMarkdown` (sanitized). Collapse Current. Answer above Map.
 - Target **0.2.x** on **LesleyMurfin/dot-ai-grafana** only. Do not target `vfarcic` until PRD #1 / PR #3 merges.
 
@@ -64,14 +70,15 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 
 - Firing-alert `dashboardUid` appears as Map `/d/<uid>`; no `/api/search`.
 - Map offers Explore panes plus Logs/Metrics/Traces Drilldown when those apps are installed; omitted when not.
-- “show me the logs” (and alerts/traces/metrics/dashboards) skips dot-ai, keeps Current, Map links work.
+- “show me the logs” (and alerts/traces/metrics) skips dot-ai, keeps Current, Map Explore/Drilldown links work when those apps are installed.
+- “show me dashboards” skips dot-ai; Map `/d/<uid>` only for firing-alert `dashboardUid`; no UID → no `/d/` link, no search, Ask still succeeds.
 - Answer renders markdown; Current starts collapsed.
 - Plugin resources remain `/api/plugins/devopstoolkit-dotai-app/resources/*`.
 - Ships as **0.2.x** on the fork; 0.1.0 v1 on vfarcic#3 unchanged.
 
 ## Milestones
 
-- [ ] PRD GitHub issue filed on `LesleyMurfin/dot-ai-grafana`
+- [x] PRD GitHub issue filed on `LesleyMurfin/dot-ai-grafana` (#23)
 - [ ] `dashboardUid` → Map `/d/<uid>` (restore `85de5d4`)
 - [ ] Explore panes + Drilldown Map links if apps installed (restore `da65c76`)
 - [ ] show-me skip POST; keep Current; open Map links
@@ -87,7 +94,9 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 | 2026-09-02 | Never `GET /api/search` or `/api/datasources` | Grafana 13 deprecates legacy search; dashboard-to-open is firing-alert `dashboardUid` now, Dashboard `/apis` later |
 | 2026-09-02 | Plugin resource paths stay SDK `/api/plugins/<id>/resources/*` | Not Grafana 12+ Kubernetes-style `/apis` HTTP |
 | 2026-09-02 | Target **0.2.x** `devopstoolkit-dotai-app`; fork-first `LesleyMurfin/dot-ai-grafana` | 0.1.0 is v1 on vfarcic#3; do not target vfarcic until PRD #1 / PR #3 merges |
-| 2026-09-02 | GitOps execute is **not** this PRD | prds/2 / LesleyMurfin#18 |
+| 2026-09-02 | GitOps execute is **not** this PRD | prds/2 / LesleyMurfin#18 / issue #13 |
+| 2026-09-02 | `show me dashboards` is alert-`dashboardUid` only; empty = no `/d/` link | Never `/api/search`; Dashboard `/apis` later |
+| 2026-09-02 | Diagnosis tokens beat show-me; punctuation/case ignored | `SHOW ME LOGS.` skips; mixed `why` POSTs |
 
 ## Work Log
 
@@ -96,3 +105,8 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 - **Issue**: Map `/d/<uid>`, Explore/Drilldown links, show-me skip POST, and markdown Answer landed after Viktor’s vfarcic#3 review at `7af77b3`, then were reverted so v1 stays analysis-only packing.
 - **Action**: Draft PRD #3 (problem, scope, out, milestones). Does not edit `prds/1`. Does not mix GitOps execute.
 - **Prompt**: Own parked M7 as post-v1 0.2.x on the fork.
+
+### 2026-09-02 — Split documented; show-me contract
+
+- **Issue**: CodeRabbit on #22: show-me matching unspecified; `show me dashboards` had no empty state.
+- **Action**: Issue #23 filed. Matching contract + dashboard empty state written here. PRD #1 (fork #21) and PRD #2 (fork #18) now point here.
