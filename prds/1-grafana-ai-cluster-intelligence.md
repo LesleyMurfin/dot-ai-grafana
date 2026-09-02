@@ -258,6 +258,42 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
+**Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
+
+```
+  Browser (signed-in Grafana user)
+           │
+           │  1. Grafana runtime (existing)
+           │     getDataSourceSrv()
+           │       .getList({ type: loki|prometheus|tempo|alertmanager })
+           │       .get(uid)
+           │       ds.query(DataQueryRequest)   ← same path as Explore
+           ▼
+  Current + Map packed into {intent}     History never POSTed
+           │
+           │  2. Grafana plugin resource API (existing)
+           │     getBackendSrv().fetch
+           │       POST /api/plugins/devopstoolkit-dotai-app/resources/{query|remediate}
+           ▼
+  Grafana server → our Go backend (plugin SDK httpadapter)
+           │
+           │  3. Not Grafana — outbound to dot-ai
+           │     Authorization: Bearer
+           ▼
+  POST /api/v1/tools/query | /remediate | /version
+```
+
+Settings (Admin): Grafana plugin `jsonData` / `secureJsonData` (URL, token, Debug Log, Show context).
+Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic/dot-ai#463).
+
+### Expansion: By Design (as-built honesty)
+
+| Pillar | Verdict | What we did | Gap |
+|---|---|---|---|
+| **Reliability** | Partial | Fail-fast config + Test connection; hop cap 3; Cancel; Retry; stack DS throw isolated; 120s classified timeout | No async 202 — long remediate can still hit 120s |
+| **Security** | Partial | Token in `secureJsonData` (backend only); remediate allowlist (no execute); 401/403 → 502 no secret leak; no generated OpenAPI client; Debug Log off by default | `http` allowed for in-cluster; shared Bearer (any user who can open the plugin); Current/logs go to the LLM |
+| **Privacy** | Partial | History never POSTed; error log has no body/token; Debug Log opt-in | Packing still sends Grafana DS facts to dot-ai even if Show context is off |
+| **Consent** | Partial | Admin configures; user clicks Ask; Debug Log opt-in; analysis-only banner | Grafana users share one token; no per-user consent that dashboard data leaves Grafana |
 
 ## User Journey
 
