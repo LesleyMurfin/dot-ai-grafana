@@ -26,7 +26,7 @@ describe('callDotAITool', () => {
     expect(mockFetch).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'POST',
-        url: '/api/plugins/lesleymurfin-dotai-app/resources/query',
+        url: '/api/plugins/devopstoolkit-dotai-app/resources/query',
         data: { intent: 'list pods' },
       })
     );
@@ -43,7 +43,7 @@ describe('callDotAITool', () => {
     expect(mockFetch).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'POST',
-        url: '/api/plugins/lesleymurfin-dotai-app/resources/remediate',
+        url: '/api/plugins/devopstoolkit-dotai-app/resources/remediate',
         data: { issue: 'CrashLoopBackOff on api', intent: 'CrashLoopBackOff on api' },
       })
     );
