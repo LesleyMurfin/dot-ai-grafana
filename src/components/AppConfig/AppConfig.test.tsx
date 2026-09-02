@@ -127,4 +127,85 @@ describe('Components/AppConfig', () => {
       );
     });
   });
+
+  test('submit saves apiUrl and omits secureJsonData when key is already stored', async () => {
+    mockFetch.mockReturnValue(of({ data: {} }));
+    const reloadMock = jest.fn();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { reload: reloadMock },
+    });
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        id: 'sample-app',
+        enabled: true,
+        pinned: false,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.objectContaining({ url: '/api/plugins/sample-app/settings', method: 'POST' })
+      );
+    });
+
+    const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
+    expect(call).toBeDefined();
+    expect(call![0].data.jsonData).toEqual({ apiUrl: 'http://dot-ai:3456' });
+    expect(call![0].data.secureJsonData).toBeUndefined();
+
+    await waitFor(() => {
+      expect(reloadMock).toHaveBeenCalled();
+    });
+  });
+
+  test('submit sends a newly typed auth token as secureJsonData', async () => {
+    mockFetch.mockReturnValue(of({ data: {} }));
+    const reloadMock = jest.fn();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { reload: reloadMock },
+    });
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        id: 'sample-app',
+        enabled: true,
+        pinned: false,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.change(screen.getByTestId(testIds.appConfig.apiKey), {
+      target: { value: 'new-secret-token' },
+    });
+    fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.objectContaining({ url: '/api/plugins/sample-app/settings', method: 'POST' })
+      );
+    });
+
+    const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
+    expect(call).toBeDefined();
+    expect(call![0].data.secureJsonData).toEqual({ apiKey: 'new-secret-token' });
+
+    await waitFor(() => {
+      expect(reloadMock).toHaveBeenCalled();
+    });
+  });
 });

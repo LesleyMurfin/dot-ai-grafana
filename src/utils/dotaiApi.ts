@@ -4,6 +4,43 @@ import pluginJson from '../plugin.json';
 
 export type DotAITool = 'query' | 'remediate';
 
+/**
+ * Which follow-up decision produced a POST. Declared here rather than in askOrchestrator
+ * because that module imports this one; a second literal union would drift.
+ */
+export type AskBranch = 'initial' | 'across' | 'conflict' | 'hedge' | 'refine';
+
+const ASK_BRANCHES: readonly AskBranch[] = ['initial', 'across', 'conflict', 'hedge', 'refine'];
+
+/** Optional Ask orchestration fields logged by the backend (stripped before upstream). */
+export type AskCallMeta = {
+  hop?: number;
+  hops?: number;
+  current_empty?: boolean;
+  first_hop?: 'grafana' | 'dot-ai';
+  branch?: AskBranch;
+};
+
+/**
+ * Shown whenever the 120s tool-client ceiling (pkg/plugin newPluginHTTPClient) ends an Ask.
+ * One line, actionable; there is no async 202 path to point at.
+ */
+export const ASK_TIMEOUT_MESSAGE = 'Ask stopped at the 120s plugin limit; retry or narrow the question.';
+
+const TIMEOUT_TEXT = /abort|timed out|timeout|deadline exceeded|gateway time-?out/i;
+
+/**
+ * The 120s expiry reaches the browser three ways: a client-side abort, an upstream 504,
+ * or the Go proxy's 502 envelope carrying "context deadline exceeded". A plain 502
+ * (dial refused, bad gateway) is a different fault and keeps its own text.
+ */
+function timeoutAware(status: number, message: string, name?: string): string {
+  if (name === 'AbortError' || name === 'TimeoutError' || status === 504 || TIMEOUT_TEXT.test(message)) {
+    return ASK_TIMEOUT_MESSAGE;
+  }
+  return message;
+}
+
 /** Normalized result for UI consumers (maps backend `error` → errorMessage). */
 export type ToolCallResult = {
   ok: boolean;
@@ -43,20 +80,50 @@ function asContract(value: unknown): ResourceContract | undefined {
 }
 
 /** Single cast boundary for Grafana dual-package rxjs types. */
-async function fetchResource(tool: DotAITool, intent: string): Promise<FetchResponseLike> {
+async function fetchResource(
+  tool: DotAITool,
+  text: string,
+  meta?: AskCallMeta
+): Promise<FetchResponseLike> {
+  // Query uses {intent}; remediate requires upstream {issue}. Send both on remediate
+  // so the Go proxy and tools REST stay aligned (analysis-only; no execute flags).
+  // Meta fields are for ask-log only; backend strips them before upstream.
+  const data: Record<string, unknown> =
+    tool === 'remediate' ? { issue: text, intent: text } : { intent: text };
+  if (meta) {
+    if (typeof meta.hop === 'number') {
+      data.hop = meta.hop;
+    }
+    if (typeof meta.hops === 'number') {
+      data.hops = meta.hops;
+    }
+    if (typeof meta.current_empty === 'boolean') {
+      data.current_empty = meta.current_empty;
+    }
+    if (meta.first_hop === 'grafana' || meta.first_hop === 'dot-ai') {
+      data.first_hop = meta.first_hop;
+    }
+    if (meta.branch && ASK_BRANCHES.includes(meta.branch)) {
+      data.branch = meta.branch;
+    }
+  }
   const response = await getBackendSrv().fetch({
     url: `/api/plugins/${pluginJson.id}/resources/${tool}`,
     method: 'POST',
-    data: { intent },
+    data,
     showErrorAlert: false,
     showSuccessAlert: false,
   });
   return lastValueFrom(response as unknown as Observable<FetchResponseLike>);
 }
 
-export async function callDotAITool(tool: DotAITool, intent: string): Promise<ToolCallResult> {
+export async function callDotAITool(
+  tool: DotAITool,
+  intent: string,
+  meta?: AskCallMeta
+): Promise<ToolCallResult> {
   try {
-    const body = await fetchResource(tool, intent);
+    const body = await fetchResource(tool, intent, meta);
     // Grafana FetchResponse wraps JSON in `.data`; tolerate bare contract too.
     const payload = body && typeof body === 'object' && 'data' in body ? body.data : body;
     const contract = asContract(payload);
@@ -66,7 +133,9 @@ export async function callDotAITool(tool: DotAITool, intent: string): Promise<To
         status: contract.status,
         summary: contract.summary,
         raw: payload,
-        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
+        errorMessage: contract.ok
+          ? undefined
+          : timeoutAware(contract.status, contract.error || `Request failed (HTTP ${contract.status})`),
       };
     }
     const status = typeof body?.status === 'number' ? body.status : 0;
@@ -87,10 +156,14 @@ export async function callDotAITool(tool: DotAITool, intent: string): Promise<To
         status: contract.status,
         summary: contract.summary,
         raw: errData,
-        errorMessage: contract.ok ? undefined : contract.error || `Request failed (HTTP ${contract.status})`,
+        errorMessage: contract.ok
+          ? undefined
+          : timeoutAware(contract.status, contract.error || `Request failed (HTTP ${contract.status})`),
       };
     }
     const status = errObj && typeof errObj.status === 'number' ? errObj.status : 0;
+    const name =
+      e instanceof Error ? e.name : errObj && typeof errObj.name === 'string' ? errObj.name : undefined;
     const message =
       e instanceof Error
         ? e.message
@@ -102,7 +175,7 @@ export async function callDotAITool(tool: DotAITool, intent: string): Promise<To
       status,
       summary: '',
       raw: errData ?? e,
-      errorMessage: message,
+      errorMessage: timeoutAware(status, message, name),
     };
   }
 }
