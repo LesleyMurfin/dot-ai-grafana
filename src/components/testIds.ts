@@ -21,5 +21,7 @@ export const testIds = {
     map: 'data-testid dotai-map',
     clearThread: 'data-testid dotai-clear-thread',
     analyzeThis: 'data-testid dotai-analyze-this',
+    retry: 'data-testid dotai-retry',
+    cancel: 'data-testid dotai-cancel',
   },
 };

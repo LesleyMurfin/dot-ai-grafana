@@ -103,7 +103,8 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool).toHaveBeenCalledWith(
       'query',
       expectedHop1,
-      expect.objectContaining({ first_hop: 'grafana', hop: 1 })
+      expect.objectContaining({ first_hop: 'grafana', hop: 1 }),
+      expect.any(AbortSignal)
     );
     const packed = mockCallDotAITool.mock.calls[0][1];
     expect(packed).toContain(stablePreamble('query'));
@@ -249,7 +250,7 @@ describe('Pages/DotAIPage', () => {
     clickSubmit();
 
     expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('llm unavailable');
-    // Grafana stack Current is set before callDotAITool; History only on success.
+    expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
   });
@@ -272,6 +273,49 @@ describe('Pages/DotAIPage', () => {
     expect(alert).toHaveTextContent('Ask timed out');
   });
 
+  test('HTTP 401 copy uses Authentication failed title and Retry', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: false,
+      status: 502,
+      summary: '',
+      raw: {},
+      errorMessage: 'HTTP 401: UNAUTHORIZED',
+    });
+    render(<DotAIPage />);
+    typeIntent('list pods');
+    clickSubmit();
+    const alert = await screen.findByTestId(testIds.dotai.error);
+    expect(alert).toHaveTextContent('Authentication failed');
+    expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
+  });
+
+  test('Cancel aborts an in-flight Ask', async () => {
+    mockCallDotAITool.mockImplementation((_tool, _text, _meta, signal?: AbortSignal) => {
+      const { promise, reject } = Promise.withResolvers<{
+        ok: boolean;
+        status: number;
+        summary: string;
+        raw: unknown;
+        errorMessage?: string;
+      }>();
+      const fail = () => {
+        const err = new Error('Ask cancelled.');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      if (signal?.aborted) {
+        fail();
+      } else {
+        signal?.addEventListener('abort', fail);
+      }
+      return promise;
+    });
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+    fireEvent.click(await screen.findByTestId(testIds.dotai.cancel));
+    expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('Ask cancelled');
+  });
 
   test('loading state shows spinner and disables double-submit', async () => {
     let resolve!: (value: {
@@ -432,7 +476,12 @@ describe('Pages/DotAIPage', () => {
       map: '',
       box: 'checkout-api CrashLooping',
     });
-    expect(mockCallDotAITool).toHaveBeenCalledWith('remediate', expected, expect.objectContaining({ first_hop: 'dot-ai', hops: 1 }));
+    expect(mockCallDotAITool).toHaveBeenCalledWith(
+      'remediate',
+      expected,
+      expect.objectContaining({ first_hop: 'dot-ai', hops: 1 }),
+      expect.any(AbortSignal)
+    );
     const [toolArg, issueText] = mockCallDotAITool.mock.calls[0];
     expect(toolArg).toBe('remediate');
     expect(issueText).toContain('checkout-api CrashLooping');

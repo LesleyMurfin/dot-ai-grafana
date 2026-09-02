@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 // testConnectionRequest allows the config UI to probe draft (unsaved) settings.
@@ -626,6 +627,9 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 	tool := toolNameFromPath(toolPath)
 	var reqBody []byte
 	finish := func(httpStatus, status int, summary, errMsg string) {
+		if errMsg != "" {
+			log.DefaultLogger.Error("dot-ai tool call failed", "tool", tool, "status", status, "error", errMsg)
+		}
 		if a.debugLog {
 			appendAskLog(tool, reqBody, status, summary, errMsg)
 		}

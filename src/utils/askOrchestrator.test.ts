@@ -588,4 +588,43 @@ describe('runAskOrchestrator', () => {
     expect(result.hops).toBe(1);
     expect(result.firstHop).toBe('dot-ai');
   });
+
+  test('Grafana stack throw does not fail the Ask; packs failure note', async () => {
+    const callTool = jest.fn(async (): Promise<ToolCallResult> => ({
+      ok: true,
+      status: 200,
+      summary: 'pods listed',
+      raw: {},
+    }));
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show failing pods',
+      thread: emptyThread(),
+      fetchStack: async () => {
+        throw new Error('ds.query exploded');
+      },
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.lastPacked).toMatch(/Grafana stack read failed/);
+    expect(result.lastPacked).toMatch(/ds.query exploded/);
+    expect(callTool).toHaveBeenCalled();
+  });
+
+  test('aborted signal returns cancelled without calling the tool', async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show failing pods',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () => stackResult()),
+      callTool,
+      signal: ac.signal,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/cancelled/i);
+    expect(callTool).not.toHaveBeenCalled();
+  });
 });

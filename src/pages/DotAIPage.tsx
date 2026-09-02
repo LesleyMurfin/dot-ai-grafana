@@ -1,4 +1,4 @@
-import React, { FormEvent, useMemo, useState } from 'react';
+import React, { FormEvent, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { PluginPage } from '@grafana/runtime';
@@ -12,7 +12,8 @@ import {
   useStyles2,
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
-import { ASK_TIMEOUT_MESSAGE, DotAITool } from '../utils/dotaiApi';
+import { DotAITool } from '../utils/dotaiApi';
+import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
 
@@ -29,6 +30,7 @@ type DotAIPageProps = {
 
 function DotAIPage({ showContext = true }: DotAIPageProps) {
   const styles = useStyles2(getStyles);
+  const abortRef = useRef<AbortController | null>(null);
   const [tool, setTool] = useState<DotAITool>('query');
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -48,32 +50,32 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
     return 'Ask about cluster resources (e.g. show failing pods in production)';
   }, [tool]);
 
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = intent.trim();
-    if (!trimmed || loading) {
+  const runAsk = async (trimmed: string) => {
+    if (!trimmed) {
       return;
     }
-
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     const thread = threads[tool];
     setLoading(true);
     setError(undefined);
     setResponseText('');
-
     try {
-      // M4: first-hop + loop (cap 3) via runAskOrchestrator. History never packed.
-      // Observability → Grafana Current first; inventory → dot-ai first. Answer FROM Current.
       const result = await runAskOrchestrator({
         tool,
         question: trimmed,
         thread,
+        signal: ac.signal,
       });
-
+      if (ac.signal.aborted) {
+        setError(ASK_CANCELLED_MESSAGE);
+        return;
+      }
       setThreads((prev) => ({
         ...prev,
         [tool]: result.thread,
       }));
-
       if (result.ok) {
         setResponseText(result.summary);
         setIntent('');
@@ -83,9 +85,34 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
           setResponseText(result.summary);
         }
       }
+    } catch (e) {
+      if (ac.signal.aborted) {
+        setError(ASK_CANCELLED_MESSAGE);
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Request failed');
     } finally {
+      if (abortRef.current === ac) {
+        abortRef.current = null;
+      }
       setLoading(false);
     }
+  };
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (loading) {
+      return;
+    }
+    await runAsk(intent.trim());
+  };
+
+  const onCancel = () => {
+    abortRef.current?.abort();
+  };
+
+  const onRetry = () => {
+    void runAsk(intent.trim());
   };
 
   const onClearThread = () => {
@@ -180,6 +207,11 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
             <Button type="submit" data-testid={testIds.dotai.submit} disabled={loading || !intent.trim()}>
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
             </Button>
+            {loading && (
+              <Button type="button" variant="secondary" data-testid={testIds.dotai.cancel} onClick={onCancel}>
+                Cancel
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -210,13 +242,15 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
         </form>
 
         {error && (
-          <Alert
-            title={error === ASK_TIMEOUT_MESSAGE ? 'Ask timed out' : 'Request failed'}
-            severity="error"
-            data-testid={testIds.dotai.error}
-            className={styles.block}
-          >
+          <Alert title={askErrorTitle(error)} severity="error" data-testid={testIds.dotai.error} className={styles.block}>
             {error}
+            {error !== ASK_CANCELLED_MESSAGE && (
+              <div className={styles.actions}>
+                <Button type="button" data-testid={testIds.dotai.retry} onClick={onRetry} disabled={loading || !intent.trim()}>
+                  Retry
+                </Button>
+              </div>
+            )}
           </Alert>
         )}
 

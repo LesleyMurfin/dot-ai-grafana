@@ -1,4 +1,5 @@
 import { AskBranch, callDotAITool, DotAITool, ToolCallResult } from './dotaiApi';
+import { ASK_CANCELLED_MESSAGE } from './askErrors';
 import {
   appendHistory,
   buildRequestText,
@@ -269,13 +270,28 @@ export async function runAskOrchestrator(args: {
   thread: ToolThread;
   fetchStack?: (q: string) => Promise<StackContextResult>;
   callTool?: (tool: DotAITool, text: string, meta?: AskMeta) => Promise<ToolCallResult>;
+  signal?: AbortSignal;
 }): Promise<OrchestratorResult> {
   const question = args.question.trim();
   const fetchStack = args.fetchStack ?? fetchStackContext;
-  const callTool = args.callTool ?? callDotAITool;
+  const callTool = args.callTool ?? ((t, text, meta) => callDotAITool(t, text, meta, args.signal));
   const tool = args.tool;
 
+  const aborted = () => Boolean(args.signal?.aborted);
+
   if (tool === 'remediate') {
+    if (aborted()) {
+      return {
+        ok: false,
+        summary: '',
+        errorMessage: ASK_CANCELLED_MESSAGE,
+        thread: args.thread,
+        firstHop: 'dot-ai',
+        hops: 0,
+        currentEmpty: !args.thread.current.trim(),
+        lastPacked: '',
+      };
+    }
     const packed = buildRequestText({
       tool,
       current: args.thread.current,
@@ -325,22 +341,36 @@ export async function runAskOrchestrator(args: {
   let history = args.thread.history;
   let lastPacked = '';
   let lastSummary = '';
-  /** Latest Grafana stack block — kept across hops so follow-ups still pack evidence. */
   let stackSnapshot = '';
   let stackEmpty = true;
   let currentEmpty = !args.thread.current.trim();
 
   const loadStack = async (q: string) => {
-    const stack = await fetchStack(q);
-    stackSnapshot = stack.current;
-    stackEmpty = stack.currentEmpty;
-    currentEmpty = stack.currentEmpty;
-    map = mergeMap(stack.mapHint, map, q);
+    try {
+      const stack = await fetchStack(q);
+      stackSnapshot = stack.current;
+      stackEmpty = stack.currentEmpty;
+      currentEmpty = stack.currentEmpty;
+      map = mergeMap(stack.mapHint, map, q);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : 'Grafana stack query failed';
+      stackSnapshot = `Grafana stack read failed:\n${why}`;
+      stackEmpty = true;
+      currentEmpty = true;
+      map = mergeMap(map, q);
+    }
   };
 
-
-
   const callDotAI = async (box: string, branch: AskBranch): Promise<ToolCallResult> => {
+    if (aborted()) {
+      return {
+        ok: false,
+        status: 0,
+        summary: lastSummary,
+        raw: null,
+        errorMessage: ASK_CANCELLED_MESSAGE,
+      };
+    }
     if (hops >= MAX_ASK_HOPS) {
       return {
         ok: false,
