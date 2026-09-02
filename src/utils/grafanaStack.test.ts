@@ -81,6 +81,19 @@ describe('parsePodNamespace / buildLogQL', () => {
     ).toEqual({});
   });
 
+  test("Viktor's table: English stopwords and in-fallback do not become pod names", () => {
+    expect(parsePodNamespace('show failing pods in production')).toEqual({});
+    expect(parsePodNamespace('top issues in the cluster')).toEqual({});
+    expect(parsePodNamespace('which pods are crashlooping in staging')).toEqual({});
+    expect(parsePodNamespace('why is checkout-api CrashLooping in prod?')).toEqual({
+      pod: 'checkout-api',
+    });
+    expect(parsePodNamespace('show logs for pod checkout-api in namespace production')).toEqual({
+      pod: 'checkout-api',
+      namespace: 'production',
+    });
+  });
+
 });
 
 describe('linesFromLokiFrames', () => {
