@@ -613,8 +613,8 @@ describe('runAskOrchestrator', () => {
 
   test('skipStack true does not fetch Grafana stack for grafana-first question', async () => {
     const fetchStack = jest.fn(async () => stackResult());
-    const callTool = jest.fn(async (): Promise<ToolCallResult> => {
-      return { ok: true, status: 200, summary: 'pods listed', raw: {} };
+    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
+      return { ok: true, status: 200, summary: 'pods listed', raw: { packed: text } };
     });
 
     const result = await runAskOrchestrator({
