@@ -44,7 +44,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 |---|---|
 | MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. |
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
-| Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** |
+| Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. Credentials inside *application* logs can appear. |
 | Show context | Show Current, Map, and History on the page. **On by default.** Display-only; independent of Send Grafana evidence. |
 | Send Grafana evidence | `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, Asks do not pack Grafana DS facts. Independent of Show context. |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |

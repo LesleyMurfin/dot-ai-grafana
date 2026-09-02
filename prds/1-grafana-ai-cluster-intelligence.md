@@ -500,7 +500,7 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 - [ ] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
 - [ ] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
 
-Phase 1 original checklist: **shipped in v1** except screenshots and Grafana 10.x (floor is `>=11.0`; CI covers 11.0–13 + nightly). See [As-built v1](#expansion-as-built-v1-this-contribution).
+As-built: M0–M9 cover v1; floor is `grafanaDependency: ">=11.0.0"` (11.4 libs), not 10.x. Original checklist left unchecked. See [As-built v1](#expansion-as-built-v1-this-contribution).
 
 ### Expansion: Phase 1 detail (M0–M9 mapping to the checklist above)
 
@@ -521,7 +521,7 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 - [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
-- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. No Cancel/Retry/elapsed in v1.
+- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. Cancel + Retry shipped in v1; no elapsed timer.
 - [ ] **M7 — Dashboard deep-link.** **Not in v1.**
 
 **Stage 1e — Ship**

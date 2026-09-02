@@ -2,6 +2,7 @@ import { of } from 'rxjs';
 import { getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
+  DASHBOARD_UID_CAP,
   dashboardUidsFromAlertFrames,
   fetchStackContext,
   getDataSourceByType,
@@ -85,6 +86,19 @@ describe('parsePodNamespace / buildLogQL', () => {
     ).toEqual({});
   });
 
+  test("Viktor's table: English stopwords and in-fallback do not become pod names", () => {
+    expect(parsePodNamespace('show failing pods in production')).toEqual({});
+    expect(parsePodNamespace('top issues in the cluster')).toEqual({});
+    expect(parsePodNamespace('which pods are crashlooping in staging')).toEqual({});
+    expect(parsePodNamespace('why is checkout-api CrashLooping in prod?')).toEqual({
+      pod: 'checkout-api',
+    });
+    expect(parsePodNamespace('show logs for pod checkout-api in namespace production')).toEqual({
+      pod: 'checkout-api',
+      namespace: 'production',
+    });
+  });
+
 });
 
 describe('linesFromLokiFrames', () => {
@@ -118,6 +132,21 @@ describe('dashboardUidsFromAlertFrames', () => {
       } as never,
     ]);
     expect(uids).toEqual(['abc12def', 'panel-uid-1']);
+  });
+
+  test('keeps prototype-key UIDs and caps at DASHBOARD_UID_CAP', () => {
+    const proto = dashboardUidsFromAlertFrames([
+      {
+        fields: [{ name: 'dashboardUid', type: 'string', values: ['toString', 'constructor'] }],
+      } as never,
+    ]);
+    expect(proto).toEqual(['toString', 'constructor']);
+
+    const many = Array.from({ length: DASHBOARD_UID_CAP + 3 }, (_, i) => `dashid${i}xx`);
+    const capped = dashboardUidsFromAlertFrames([
+      { fields: [{ name: 'dashboardUid', type: 'string', values: many }] } as never,
+    ]);
+    expect(capped).toHaveLength(DASHBOARD_UID_CAP);
   });
 });
 

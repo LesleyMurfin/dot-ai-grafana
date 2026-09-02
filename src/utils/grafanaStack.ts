@@ -60,7 +60,22 @@ type PromTarget = { refId: string; expr: string; instant?: boolean; format?: str
 type TempoTarget = { refId: string; queryType?: string; query?: string; limit?: number };
 type AlertTarget = { refId: string; expr?: string; queryType?: string };
 
-/** True when s is RFC-1123 DNS label(s); rejects HINT_STOPWORDS. */
+/** Resource-kind / filler words that must never become a pod or namespace. */
+const NAME_DENY: Record<string, true> = {
+  pods: true,
+  issues: true,
+  logs: true,
+  failing: true,
+  crashlooping: true,
+  cluster: true,
+  which: true,
+  what: true,
+  show: true,
+  why: true,
+  in: true,
+};
+
+/** True when s is RFC-1123 DNS label(s); rejects HINT_STOPWORDS and NAME_DENY. */
 function isRfc1123Name(s: string): boolean {
   if (!s || s.length > 253) {
     return false;
@@ -73,14 +88,19 @@ function isRfc1123Name(s: string): boolean {
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(label)) {
       return false;
     }
-    if (HINT_STOPWORDS[label]) {
+    if (HINT_STOPWORDS[label] || NAME_DENY[label]) {
       return false;
     }
   }
   return true;
 }
 
-/** Best-effort pod + namespace from free-text question. */
+/** Workload names in free text almost always contain a hyphen (checkout-api). */
+function looksLikeWorkloadName(s: string): boolean {
+  return s.includes('-') && isRfc1123Name(s);
+}
+
+/** Best-effort pod + namespace from free-text question. Names stored lowercase. */
 export function parsePodNamespace(question: string): PodNamespaceTarget {
   const text = question.trim();
   const out: PodNamespaceTarget = {};
@@ -90,23 +110,36 @@ export function parsePodNamespace(question: string): PodNamespaceTarget {
     /\bpod[/:=\s]+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text) ||
     /\b(?:for|of)\s+pod\s+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text);
   if (podLabeled && isRfc1123Name(podLabeled[1])) {
-    out.pod = podLabeled[1];
+    out.pod = podLabeled[1].toLowerCase();
   }
 
   const nsLabeled =
     /\b(?:namespace|ns)[/:=\s]+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text) ||
     /\bin\s+(?:namespace|ns)\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
   if (nsLabeled && isRfc1123Name(nsLabeled[1])) {
-    out.namespace = nsLabeled[1];
+    out.namespace = nsLabeled[1].toLowerCase();
   }
 
+  // "X in Y" only when X looks like a workload (hyphenated). Rejects
+  // "pods in production" and "crashlooping in staging".
   if (!out.namespace) {
     const inNs = /\b([a-z0-9][a-z0-9.-]{1,60})\s+in\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
-    if (inNs && isRfc1123Name(inNs[1]) && isRfc1123Name(inNs[2])) {
+    if (inNs && looksLikeWorkloadName(inNs[1]) && isRfc1123Name(inNs[2])) {
       if (!out.pod) {
-        out.pod = inNs[1];
+        out.pod = inNs[1].toLowerCase();
       }
-      out.namespace = inNs[2];
+      out.namespace = inNs[2].toLowerCase();
+    }
+  }
+
+  if (!out.pod) {
+    const hyphenated = /\b([a-z0-9][a-z0-9.-]*-[a-z0-9.-]*[a-z0-9])\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = hyphenated.exec(text)) !== null) {
+      if (isRfc1123Name(m[1])) {
+        out.pod = m[1].toLowerCase();
+        break;
+      }
     }
   }
 
@@ -281,7 +314,7 @@ function fieldGet(values: unknown, index: number): unknown {
 /** Flatten string-ish DataFrame fields into plain lines (shared for Loki/AM). */
 export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] {
   const lines: string[] = [];
-  const seen: Record<string, true> = {};
+  const seen = new Set<string>();
   for (const frame of frames) {
     const fields = frame.fields ?? [];
     const preferred =
@@ -295,10 +328,10 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
       const line = String(fieldGet(preferred.values, i) ?? '')
         .replace(/\s+/g, ' ')
         .trim();
-      if (!line || seen[line]) {
+      if (!line || seen.has(line)) {
         continue;
       }
-      seen[line] = true;
+      seen.add(line);
       lines.push(line);
     }
   }
@@ -307,19 +340,24 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
 
 const DASHBOARD_UID_KEYS = ['dashboardUID', 'dashboardUid', '__dashboardUid__', 'dashboard_uid'];
 
-function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[]) {
-  const s = String(raw ?? '').trim();
-  if (!s || seen[s] || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
+export const DASHBOARD_UID_CAP = 8;
+
+function addDashboardUid(raw: unknown, seen: Set<string>, uids: string[]) {
+  if (uids.length >= DASHBOARD_UID_CAP) {
     return;
   }
-  seen[s] = true;
+  const s = String(raw ?? '').trim();
+  if (!s || seen.has(s) || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
+    return;
+  }
+  seen.add(s);
   uids.push(s);
 }
 
 /** v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search. */
 export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
   const uids: string[] = [];
-  const seen: Record<string, true> = {};
+  const seen = new Set<string>();
   for (const frame of frames) {
     for (const field of frame.fields ?? []) {
       if (DASHBOARD_UID_KEYS.includes(field.name)) {
@@ -393,7 +431,7 @@ export function factsFromPromFrames(frames: DataFrame[]): string[] {
 
 export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
   const out: string[] = [];
-  const seen: Record<string, true> = {};
+  const seen = new Set<string>();
   for (const frame of frames) {
     const fields = frame.fields ?? [];
     const idField = fields.find((f) => /trace/i.test(f.name || '')) ?? fields.find((f) => f.type === 'string');
@@ -403,10 +441,10 @@ export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
     const len = fieldLength(idField.values);
     for (let i = 0; i < len && out.length < TEMPO_TRACE_CAP; i++) {
       const id = String(fieldGet(idField.values, i) ?? '').trim();
-      if (!id || seen[id]) {
+      if (!id || seen.has(id)) {
         continue;
       }
-      seen[id] = true;
+      seen.add(id);
       out.push(`trace ${id}`);
     }
   }

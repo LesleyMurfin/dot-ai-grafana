@@ -23,6 +23,6 @@ This plugin communicates with the dot-ai MCP server via HTTP REST endpoints:
 
 - **Text-only responses** — No Mermaid diagrams, cards, or rich visualizations. Displays plain text agent responses.
 - **Read-only** — No action execution. Remediate shows analysis only, without the option to proceed to remediation.
-- **Grafana-native** — Leverages Grafana's auth, RBAC, and UI conventions.
+- **Grafana-native** — Grafana session is required to open the app; Configuration is Admin-only; Query/Remediate use the shared configured Bearer (no per-user Grafana role gate).
 - **Plugin ID** — `devopstoolkit-dotai-app` (unsigned load requires allow-list).
 - **Grafana floor** — `grafanaDependency: ">=11.0.0"`; reference host **11.4**; `@grafana/*` libs pinned to 11.4.x for M1.
