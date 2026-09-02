@@ -65,12 +65,15 @@ function DotAIPage() {
         )}
         <form className={styles.form} onSubmit={onSubmit}>
           <Field label="Tool">
-            <Select
-              options={TOOL_OPTIONS}
-              value={TOOL_OPTIONS.find((o) => o.value === tool)}
-              onChange={(v) => setTool((v.value as DotAITool) ?? 'query')}
-              disabled={loading}
-            />
+            <div data-testid={testIds.dotai.tool}>
+              <Select
+                inputId="dotai-tool"
+                options={TOOL_OPTIONS}
+                value={TOOL_OPTIONS.find((o) => o.value === tool)}
+                onChange={(v) => setTool((v.value as DotAITool) ?? 'query')}
+                disabled={loading}
+              />
+            </div>
           </Field>
           <Field label={tool === 'query' ? 'Question' : 'Issue'}>
             <TextArea
