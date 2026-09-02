@@ -203,14 +203,32 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing; ask-log on/off setting |
 
 ```
-  Browser  →  Grafana resource API  →  Go backend (SDK httpclient)
+  Grafana (this plugin)                         dot-ai (unchanged)
+  ─────────────────────                         ─────────────────
+  Dashboards + datasources
+    Loki  Prometheus  Tempo  Alertmanager
+              │
+              ▼
+  Pack Current + Map + question     History on screen only
+  (Query ≤3 hops; Remediate 1 hop)  never POSTed
+              │
+              ▼
+  Go backend  ──ask log──►  /var/lib/grafana/dotai-ask.log
+  Bearer + {intent}|{issue}         (always on; no toggle)
+              │
+              ▼
+                                    POST /api/v1/tools/query
+                                    POST /api/v1/tools/remediate  (analysis)
+                                    POST /api/v1/tools/version
                                               │
                                               ▼
-                                    dot-ai tools REST :3456
-                                    /query  /remediate  /version
+                                    K8s API + LLM
+                                    (query toolLoop inside one Ask)
+
+  Headlamp (not this PR): K8s resource object + execute / operate
 ```
 
-Headlamp remains the operate/execute companion. Grafana v1 is diagnosis only.
+Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent** so Asks see the dashboards the operator is looking at.
 
 ## User Journey
 

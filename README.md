@@ -54,6 +54,22 @@ Grafana plugin resource calls are limited by the plugin host. This plugin uses t
 
 ## How It Works
 
+```
+  Grafana datasources (Loki/Prom/Tempo/AM)
+              │ pack Current+Map + question
+              ▼
+  Plugin page (History on screen only)
+              │ Query ≤3 hops / Remediate 1 hop
+              ▼
+  Go backend ──ask log──► /var/lib/grafana/dotai-ask.log
+              │ Bearer {intent}|{issue}
+              ▼
+  dot-ai  /query  /remediate(analysis)  /version
+              │
+              ▼
+  Kubernetes + LLM
+```
+
 Browser → Grafana plugin resource API → Go backend (`grafana-plugin-sdk-go` `httpclient`) → dot-ai `:3456` tools REST (`/api/v1/tools/query`, `/api/v1/tools/remediate`, `/api/v1/tools/version`).
 
 Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). Auth for this Grafana path is `Authorization: Bearer` (not `X-Dot-AI-Authorization`, which is the Headlamp Kubernetes API proxy header).
