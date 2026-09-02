@@ -6,6 +6,6 @@ apps:
     org_name: 'devopstoolkit'
     disabled: false
     jsonData:
-      apiUrl: http://default-url.com
+      apiUrl: http://dot-ai.dot-ai.svc:3456
     secureJsonData:
-      apiKey: secret-key
+      apiKey: ''
