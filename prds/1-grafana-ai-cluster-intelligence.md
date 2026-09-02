@@ -200,7 +200,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; display-only), **Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; independent of Show context). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
-| Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing |
+| Deferred | **M7 Map/Explore/show-me** → [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) (0.2.x, not this PR). **GitOps execute** → [PRD #2](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) / [PR #18](https://github.com/LesleyMurfin/dot-ai-grafana/pull/18). Also: async 202; generated OpenAPI client; Grafana.com signing |
 
 ```
   Ask
@@ -258,7 +258,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
-**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in **Current** from Alertmanager when send is on. Dashboard-to-open is **not** built (would be Grafana `/apis` dashboards later).
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes are future. Related alerts are already in **Current** from Alertmanager when send is on. Dashboard-to-open / Explore / show-me / markdown Answer are **not** this PR — [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Grafana `/apis` dashboard inventory is later than PRD #3.
 
 **Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
 
@@ -519,7 +519,7 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 
 **Stage 1d — Firefighting UX & dashboard integration**
 - [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. Cancel + Retry shipped in v1; no elapsed timer.
-- [ ] **M7 — Dashboard deep-link.** **Not in v1.**
+- [ ] **M7 — Dashboard deep-link.** **Not in v1.** Owned by [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) (plugin 0.2.x). Do not land on vfarcic#3.
 
 **Stage 1e — Ship**
 - [x] **M8 — Docs & install guide.** Product README: setup, config, unsigned allow-list, 120s timeout. No screenshot set / `changelog.d`.
@@ -587,6 +587,24 @@ Same rule for cheaper senses: registering **`mcp-grafana`** (Prom/Loki/Hubble) i
 
 # Reviewer appendices (not part of the original PRD)
 
+### Expansion: Related PRDs (not this contribution)
+
+Do **not** mix these into vfarcic/dot-ai-grafana#3. Unsigned alpha **0.1.0** is this file only.
+
+```
+  PRD #1  this file / vfarcic#3 / fork #21     v1 0.1.0   analysis-only pack
+  PRD #2  issue #13 / fork #18                  post-v1    GitOps PR execute
+  PRD #3  issue #23 / fork #22                  0.2.x      Map / Explore / show-me
+```
+
+| PRD | GitHub | Owns | Does not own |
+|---|---|---|---|
+| **#1** (this file) | [vfarcic#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) · [fork #21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21) | Query + analysis-only remediate, Current packing, 0.1.0 | Map `/d/uid`, Explore, show-me skip POST, markdown Answer, GitOps execute |
+| **#2** | [issue #13](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) · [PR #18](https://github.com/LesleyMurfin/dot-ai-grafana/pull/18) | GitOps PR execute | M7 Map, v1 packing |
+| **#3** | [issue #23](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) · [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) | Map `/d/<uid>`, Explore/Drilldown, show-me skip POST, markdown Answer | GitOps execute, v1 0.1.0 |
+
+Fork [PR #16](https://github.com/LesleyMurfin/dot-ai-grafana/pull/16) (`feat/upstream-plugin` → `main`) is **not** a product split. Do not merge it as v1+M7.
+
 ## Related / prior art (for this revision)
 
 [#1](https://github.com/vfarcic/dot-ai-grafana/issues/1) (this PRD). Core: [vfarcic/dot-ai#354](https://github.com/vfarcic/dot-ai/issues/354), [vfarcic/dot-ai#392](https://github.com/vfarcic/dot-ai/issues/392), [vfarcic/dot-ai#143](https://github.com/vfarcic/dot-ai/issues/143), [vfarcic/dot-ai#358](https://github.com/vfarcic/dot-ai/issues/358), [vfarcic/dot-ai#425](https://github.com/vfarcic/dot-ai/issues/425), [vfarcic/dot-ai#317](https://github.com/vfarcic/dot-ai/issues/317). Headlamp: [vfarcic/dot-ai-headlamp](https://github.com/vfarcic/dot-ai-headlamp). MCP auth: [vfarcic/dot-ai#414](https://github.com/vfarcic/dot-ai/issues/414) → [vfarcic/dot-ai#416](https://github.com/vfarcic/dot-ai/pull/416) → [vfarcic/dot-ai#417](https://github.com/vfarcic/dot-ai/pull/417).
@@ -641,7 +659,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | Error handling and loading states | **M6** (cancel / retry / elapsed / alerts) |
 | Documentation and installation guide | **M8** |
 | Grafana version compatibility testing | **M9** (11.4 must-pass + current 13.x; **floor raised** — see deltas) |
-| *(new in this revision)* | **M7** dashboard→intent deep-link (still analysis-only) |
+| *(new in this revision)* | **M7** dashboard→intent deep-link — **Not in v1**; [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) |
 
 ### Deliberate deltas from the original draft (please confirm or redirect)
 
@@ -712,3 +730,8 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Issue**: Packing restored on this PR for the maintainer to try. Headlamp/core have no Grafana DS Current (resource-scoped `sessionId` / execute only; [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) is evaluate-external-MCP, Low). Ask log has **no enable/disable**.
 - **Action**: As-built Ask-log + vs-Headlamp rows; README progressive-context + ask-log notes.
 - **Prompt**: keep the updated PRD on PR #3 (not a new PR).
+
+### 2026-09-02 — related PRDs named (split)
+
+- **Issue**: M7 extras and GitOps execute had fork PRs but PRD #1 did not point at them, so the split was invisible on vfarcic#3.
+- **Action**: Deferred / M7 / as-built rows now name [PRD #2](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) and [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Related-PRDs table. No Map/Explore/show-me content added here.
