@@ -272,28 +272,12 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </div>
         )}
 
-        {showContext && (activeThread.map || (activeThread.drilldowns && activeThread.drilldowns.length > 0)) && (
+        {showContext && activeThread.map && (
           <div className={styles.context} data-testid={testIds.dotai.map}>
             <h3 className={styles.responseTitle}>Map</h3>
-            {activeThread.drilldowns && activeThread.drilldowns.length > 0 && (
-              <div className={styles.drilldowns} data-testid={testIds.dotai.drilldown}>
-                {activeThread.drilldowns.map((link) => (
-                  <a
-                    key={link.id}
-                    className={styles.drilldownLink}
-                    href={link.href}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {link.label}
-                  </a>
-                ))}
-              </div>
-            )}
-            {activeThread.map && <pre className={styles.pre}>{activeThread.map}</pre>}
+            <pre className={styles.pre}>{activeThread.map}</pre>
           </div>
         )}
-
 
         {showContext && activeThread.history.length > 0 && (
           <div className={styles.history} data-testid={testIds.dotai.history}>
@@ -378,15 +362,6 @@ const getStyles = (theme: GrafanaTheme2) => ({
   responseTitle: css`
     margin: 0 0 ${theme.spacing(1)} 0;
     font-size: ${theme.typography.h5.fontSize};
-  `,
-  drilldowns: css`
-    display: flex;
-    flex-wrap: wrap;
-    gap: ${theme.spacing(1)};
-    margin-bottom: ${theme.spacing(1)};
-  `,
-  drilldownLink: css`
-    color: ${theme.colors.text.link};
   `,
   pre: css`
     margin: 0;

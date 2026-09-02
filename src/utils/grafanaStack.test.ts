@@ -13,9 +13,7 @@ import {
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
-  config: { appSubUrl: '', apps: {}, bootData: { user: { orgId: 1 } } },
 }));
-
 
 const mockGet = jest.fn();
 const mockGetList = jest.fn();
@@ -173,9 +171,9 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('none linked on firing alerts');
     expect(result.mapHint).toMatch(/Loki/);
     expect(result.mapHint).toMatch(/Prometheus/);
+    expect(result.mapHint).toMatch(/Tempo/);
+    expect(result.mapHint).toMatch(/Alertmanager/);
     expect(result.mapHint).toMatch(/dashboards: none linked on firing alerts/);
-    expect(result.drilldowns.some((l) => l.id === 'explore-logs')).toBe(true);
-    expect(result.drilldowns.some((l) => l.href.startsWith('/explore?'))).toBe(true);
 
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/P8E80F9AEF21F6940/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/datasources\/proxy/);

@@ -8,8 +8,6 @@ import {
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
 import { lastValueFrom, Observable } from 'rxjs';
-import { buildDrilldownLinks, DrilldownLink } from './grafanaExplore';
-
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
@@ -37,9 +35,7 @@ export type StackContextResult = {
   alertLines: string[];
   /** True when every stack block is an empty/missing note (no evidence lines). */
   currentEmpty: boolean;
-  drilldowns: DrilldownLink[];
 };
-
 
 /** Cluster-wide LogQL when the question has no pod/ns — recent error-ish lines. */
 export const CLUSTER_LOGQL =
@@ -606,19 +602,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       alertNote = `no alerts (${e instanceof Error ? e.message : 'Alertmanager query failed'})`;
     }
   }
+
   const currentEmpty = isStackCurrentEmpty({ logLines, promLines, tempoLines, alertLines });
   mapHint = `${mapHint}, ${dashboardHintFromUids(dashboardUids)}`;
-  const tempoSearch = target.pod || target.namespace || question.slice(0, 80);
-  const drilldowns = buildDrilldownLinks({
-    lokiUid: loki?.settings?.uid,
-    promUid: prom?.settings?.uid,
-    tempoUid: tempo?.settings?.uid,
-    logql,
-    promql,
-    tempoSearch,
-    traceIds: tempoLines.map((line) => line.replace(/^trace\s+/i, '').trim()).filter(Boolean),
-    dashboardUids,
-  });
 
   return {
     logLines,
@@ -626,7 +612,6 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     tempoLines,
     alertLines,
     currentEmpty,
-    drilldowns,
     current: formatCurrent({
       target,
       logLines,
@@ -641,4 +626,5 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     }),
     mapHint,
   };
+
 }
