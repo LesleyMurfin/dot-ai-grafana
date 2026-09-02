@@ -590,4 +590,33 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool.mock.calls[0][1]).toContain('Loki last 15m');
     expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
   });
+
+  test('sendGrafanaEvidence false hides consent and skips stack fetch', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: '3 pods failing',
+      raw: {},
+    });
+
+    render(<DotAIPage sendGrafanaEvidence={false} />);
+    expect(screen.queryByTestId(testIds.dotai.consent)).not.toBeInTheDocument();
+
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalled();
+    });
+    expect(mockFetchStackContext).not.toHaveBeenCalled();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
+  });
+
+  test('sendGrafanaEvidence default shows consent banner', () => {
+    render(<DotAIPage />);
+    expect(screen.getByTestId(testIds.dotai.consent)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(
+      'Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.'
+    );
+  });
 });

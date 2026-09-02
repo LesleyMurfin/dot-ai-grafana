@@ -1212,13 +1212,25 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts_http_example_invalid_at_parse_layer", func(t *testing.T) {
-		base, err := validateAPIURL("http://example.invalid")
-		if err != nil {
-			t.Fatal(err)
+	t.Run("rejects_http_example_invalid_at_parse_layer", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.invalid")
+		if err == nil {
+			t.Fatal("expected error for http://example.invalid")
 		}
-		if base != "http://example.invalid" {
-			t.Fatalf("base=%q", base)
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
+		}
+	})
+
+	t.Run("rejects_public_http_example_com", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.com")
+		if err == nil {
+			t.Fatal("expected error for http://example.com")
+		}
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
 		}
 	})
 
@@ -1229,6 +1241,26 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 		if base != "https://dot-ai.example.com/v1" {
 			t.Fatalf("base=%q", base)
+		}
+	})
+
+	t.Run("accepts_http_loopback_rfc1918_incluster", func(t *testing.T) {
+		cases := []string{
+			"http://dot-ai.dot-ai.svc:3456",
+			"http://127.0.0.1:3456",
+			"http://10.43.0.10:3456",
+		}
+		for _, raw := range cases {
+			raw := raw
+			t.Run(raw, func(t *testing.T) {
+				base, err := validateAPIURL(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if base != raw {
+					t.Fatalf("base=%q", base)
+				}
+			})
 		}
 	})
 }

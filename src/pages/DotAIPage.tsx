@@ -26,9 +26,10 @@ type Threads = Record<DotAITool, ToolThread>;
 
 type DotAIPageProps = {
   showContext?: boolean;
+  sendGrafanaEvidence?: boolean;
 };
 
-function DotAIPage({ showContext = true }: DotAIPageProps) {
+function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPageProps) {
   const styles = useStyles2(getStyles);
   const abortRef = useRef<AbortController | null>(null);
   const [tool, setTool] = useState<DotAITool>('query');
@@ -67,6 +68,7 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
         question: trimmed,
         thread,
         signal: ac.signal,
+        skipStack: !sendGrafanaEvidence,
       });
       if (ac.signal.aborted) {
         setError(ASK_CANCELLED_MESSAGE);
@@ -159,6 +161,15 @@ function DotAIPage({ showContext = true }: DotAIPageProps) {
   return (
     <PluginPage>
       <div className={styles.wrap} data-testid={testIds.dotai.container}>
+        {sendGrafanaEvidence && (
+          <Alert
+            title="Grafana evidence"
+            severity="info"
+            data-testid={testIds.dotai.consent}
+          >
+            Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.
+          </Alert>
+        )}
         {tool === 'remediate' && (
           <Alert title="Analysis only" severity="info">
             Remediate never executes changes. For operate/execute, use the Headlamp plugin.

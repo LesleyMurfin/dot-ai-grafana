@@ -137,6 +137,7 @@ async function fetchResource(
     }
   }
   const response = getBackendSrv().fetch({
+    // Plugin SDK CallResource — not Grafana dashboard/folder HTTP (/api vs /apis).
     url: `/api/plugins/${pluginJson.id}/resources/${tool}`,
     method: 'POST',
     data,

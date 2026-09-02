@@ -9,6 +9,12 @@ import {
 import { getDataSourceSrv } from '@grafana/runtime';
 import { lastValueFrom, Observable } from 'rxjs';
 
+// Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
+// GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
+// Stack reads go through getDataSourceSrv + ds.query (Explore path). If we later
+// add "open this dashboard", use Grafana 12+ Dashboard /apis only.
+
+
 export const LOG_LINE_CAP = 30;
 export const WINDOW_MS = 15 * 60 * 1000;
 export const PROM_SERIES_CAP = 8;

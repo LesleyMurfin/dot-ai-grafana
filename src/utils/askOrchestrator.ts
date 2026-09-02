@@ -271,6 +271,7 @@ export async function runAskOrchestrator(args: {
   fetchStack?: (q: string) => Promise<StackContextResult>;
   callTool?: (tool: DotAITool, text: string, meta?: AskMeta) => Promise<ToolCallResult>;
   signal?: AbortSignal;
+  skipStack?: boolean;
 }): Promise<OrchestratorResult> {
   const question = args.question.trim();
   const fetchStack = args.fetchStack ?? fetchStackContext;
@@ -346,6 +347,9 @@ export async function runAskOrchestrator(args: {
   let currentEmpty = !args.thread.current.trim();
 
   const loadStack = async (q: string) => {
+    if (args.skipStack) {
+      return;
+    }
     try {
       const stack = await fetchStack(q);
       stackSnapshot = stack.current;

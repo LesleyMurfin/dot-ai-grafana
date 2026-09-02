@@ -164,6 +164,7 @@ describe('Components/AppConfig', () => {
       apiUrl: 'http://dot-ai:3456',
       debugLog: false,
       showContext: true,
+      sendGrafanaEvidence: true,
     });
     expect(call![0].data.secureJsonData).toBeUndefined();
 
@@ -249,6 +250,46 @@ describe('Components/AppConfig', () => {
       apiUrl: 'http://dot-ai:3456',
       debugLog: true,
       showContext: false,
+      sendGrafanaEvidence: true,
+    });
+  });
+
+  test('submit persists Send Grafana evidence off', async () => {
+    mockFetch.mockReturnValue(of({ data: {} }));
+    const reloadMock = jest.fn();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { reload: reloadMock },
+    });
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        id: 'sample-app',
+        enabled: true,
+        pinned: false,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.click(within(screen.getByTestId(testIds.appConfig.sendGrafanaEvidence)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
+    expect(call).toBeDefined();
+    expect(call![0].data.jsonData).toEqual({
+      apiUrl: 'http://dot-ai:3456',
+      debugLog: false,
+      showContext: true,
+      sendGrafanaEvidence: false,
     });
   });
 

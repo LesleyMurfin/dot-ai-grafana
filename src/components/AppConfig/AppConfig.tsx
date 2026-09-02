@@ -10,6 +10,7 @@ export type AppPluginSettings = {
   apiUrl?: string;
   debugLog?: boolean;
   showContext?: boolean;
+  sendGrafanaEvidence?: boolean;
 };
 
 type State = {
@@ -18,6 +19,7 @@ type State = {
   apiKey: string;
   debugLog: boolean;
   showContext: boolean;
+  sendGrafanaEvidence: boolean;
 };
 
 type TestStatus =
@@ -94,6 +96,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     isApiKeySet: Boolean(secureJsonFields?.apiKey),
     debugLog: Boolean(jsonData?.debugLog),
     showContext: jsonData?.showContext !== false,
+    sendGrafanaEvidence: jsonData?.sendGrafanaEvidence !== false,
   });
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
 
@@ -127,6 +130,7 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         apiUrl: state.apiUrl,
         debugLog: state.debugLog,
         showContext: state.showContext,
+        sendGrafanaEvidence: state.sendGrafanaEvidence,
       },
       // This cannot be queried later by the frontend.
       // We don't want to override it in case it was set previously and left untouched now.
@@ -238,6 +242,21 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
               value={state.showContext}
               onChange={(event) => {
                 setState({ ...state, showContext: event.currentTarget.checked });
+              }}
+            />
+          </span>
+        </Field>
+
+        <Field
+          label="Send Grafana evidence"
+          description="When on, Query packs Loki/Prometheus/Tempo/Alertmanager into the Ask. Off = question text only. On by default."
+          className={s.marginTop}
+        >
+          <span data-testid={testIds.appConfig.sendGrafanaEvidence}>
+            <Switch
+              value={state.sendGrafanaEvidence}
+              onChange={(event) => {
+                setState({ ...state, sendGrafanaEvidence: event.currentTarget.checked });
               }}
             />
           </span>

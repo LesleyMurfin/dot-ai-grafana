@@ -7,6 +7,7 @@ export const testIds = {
     testStatus: 'data-testid ac-test-status',
     debugLog: 'data-testid ac-debug-log',
     showContext: 'data-testid ac-show-context',
+    sendGrafanaEvidence: 'data-testid ac-send-evidence',
   },
   dotai: {
     container: 'data-testid dotai-container',
@@ -23,5 +24,6 @@ export const testIds = {
     analyzeThis: 'data-testid dotai-analyze-this',
     retry: 'data-testid dotai-retry',
     cancel: 'data-testid dotai-cancel',
+    consent: 'data-testid dotai-consent',
   },
 };

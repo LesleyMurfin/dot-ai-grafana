@@ -8,10 +8,11 @@ const DotAIPage = React.lazy(() => import('../../pages/DotAIPage'));
 
 function App(props: AppRootProps<AppPluginSettings>) {
   const showContext = props.meta.jsonData?.showContext !== false;
+  const sendGrafanaEvidence = props.meta.jsonData?.sendGrafanaEvidence !== false;
   return (
     <Suspense fallback={<LoadingPlaceholder text="Loading…" />}>
       <Routes>
-        <Route path="*" element={<DotAIPage showContext={showContext} />} />
+        <Route path="*" element={<DotAIPage showContext={showContext} sendGrafanaEvidence={sendGrafanaEvidence} />} />
       </Routes>
     </Suspense>
   );

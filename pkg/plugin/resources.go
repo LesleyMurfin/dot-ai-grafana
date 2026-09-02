@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -435,6 +436,7 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 }
 
 // validateAPIURL requires an absolute http(s) URL with a non-empty host.
+// http is allowed only for loopback, RFC1918, or in-cluster DNS (https-except-cluster-local).
 // It returns a trimmed base (no trailing slash) suitable for path join.
 // Call before any outbound dial so file://, javascript:, and host-less values never hit the network.
 func validateAPIURL(apiURL string) (string, error) {
@@ -456,7 +458,26 @@ func validateAPIURL(apiURL string) (string, error) {
 	if u.Host == "" {
 		return "", fmt.Errorf("apiUrl must include a host")
 	}
+	if scheme == "http" && !allowPlainHTTPHost(u.Hostname()) {
+		return "", fmt.Errorf("http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https")
+	}
 	return base, nil
+}
+
+// allowPlainHTTPHost reports whether host may use plaintext http.
+// Loopback, RFC1918/private IPs, and in-cluster DNS are allowed; public hosts require https.
+func allowPlainHTTPHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	if strings.HasSuffix(h, ".svc") || strings.Contains(h, ".svc.") || strings.HasSuffix(h, ".cluster.local") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate()
+	}
+	return false
 }
 
 func versionURL(apiURL string) string {

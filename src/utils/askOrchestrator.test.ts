@@ -611,6 +611,28 @@ describe('runAskOrchestrator', () => {
     expect(callTool).toHaveBeenCalled();
   });
 
+  test('skipStack true does not fetch Grafana stack for grafana-first question', async () => {
+    const fetchStack = jest.fn(async () => stackResult());
+    const callTool = jest.fn(async (): Promise<ToolCallResult> => {
+      return { ok: true, status: 200, summary: 'pods listed', raw: {} };
+    });
+
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show failing pods',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+      skipStack: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchStack).not.toHaveBeenCalled();
+    expect(callTool).toHaveBeenCalled();
+    expect(callTool.mock.calls[0][1]).toContain('show failing pods');
+    expect(callTool.mock.calls[0][1]).not.toContain('Loki last 15m');
+  });
+
   test('aborted signal returns cancelled without calling the tool', async () => {
     const ac = new AbortController();
     ac.abort();

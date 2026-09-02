@@ -194,10 +194,10 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Tools | Query (`intent`) + Remediate analysis-only (`issue` / mapped `intent`). No execute / operate / recommend UI |
 | Client | Thin Grafana SDK `httpclient` for query, remediate, version only. **No** generated OpenAPI client (full schema includes mutation tools) |
 | Timeouts | Probe/version **15s**; query/remediate **120s** blocking. **No** async `202` + job poll |
-| UI | Tool select, intent box, Ask/Analyze, **Cancel** while in flight, spinner, error `Alert` with **Retry** (intent preserved). Titles: timeout / 401 / 403 / 404 / unreachable / cancelled. Analysis-only banner on Remediate. Current/Map/History gated by Show context. Packing always on. |
+| UI | Tool select, intent box, Ask/Analyze, **Cancel** while in flight, spinner, error `Alert` with **Retry** (intent preserved). Titles: timeout / 401 / 403 / 404 / unreachable / cancelled. Analysis-only banner on Remediate. Current/Map/History gated by Show context (display-only). Packing gated by **Send Grafana evidence** (default on). Consent info Alert on Ask when send is on. |
 | Ask log | **Debug Log** (`jsonData.debugLog`, off by default): JSONL ask log. Failed tool calls also go to Grafana plugin **error log** (`log.DefaultLogger.Error`, no tokens/body). |
 | vs Headlamp / core | Headlamp Query = box → one POST. Resource-detail passes the **K8s object** into remediate/operate. `sessionId` is the **execute** round-trip, not Grafana DS packing. No Loki/Prom/Tempo/AM in `dot-ai-headlamp`. Closest core plan: [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) (Low, draft — evaluate external monitoring MCP). This packing is Grafana-host glue |
-| Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; packing still runs when off). Test connection = `POST /api/v1/tools/version` |
+| Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; display-only), **Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; independent of Show context). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
 | Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing |
@@ -212,7 +212,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
          |
          v
       Read Grafana DS: Loki, Prometheus, Tempo, Alertmanager
-      (no hardcoded uids; cluster-wide if no pod/ns; never skip)
+      (no hardcoded uids; types via getDataSourceSrv().getList({type}); skip when sendGrafanaEvidence is false)
          |
          v
       Current + Map     History stays on screen — never POSTed
@@ -258,6 +258,8 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in **Current** from Alertmanager when send is on. Dashboard-to-open is **not** built (would be Grafana `/apis` dashboards later).
+
 **Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
 
 ```
@@ -283,19 +285,28 @@ Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafa
   POST /api/v1/tools/query | /remediate | /version
 ```
 
-Settings (Admin): Grafana plugin `jsonData` / `secureJsonData` (URL, token, Debug Log, Show context).
+Settings (Admin): Grafana plugin `jsonData` / `secureJsonData` (URL, token, Debug Log, Show context, Send Grafana evidence).
 Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic/dot-ai#463).
 
-**Grafana 12+ `/apis` HTTP structure** ([docs](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis/)): Grafana 12 adds Kubernetes-style `/apis/<group>/<version>/namespaces/<ns>/<resource>`. Grafana 13 **deprecates** some legacy `/api` HTTP APIs (dashboards, folders, playlists, …). **This plugin does not call those APIs.** Stack reads go through `getDataSourceSrv` / `ds.query` (Explore path). Asks go through the **plugin resource** contract `POST /api/plugins/<id>/resources/*` and settings `POST /api/plugins/<id>/settings` — Grafana plugin SDK, not dashboard HTTP. CI Playwright already runs Grafana **11.0–13 + nightly**. We do not use removed Grafana 12 UI-extension APIs (`getPluginExtensions`, etc.). Tool dropdown stays `@grafana/ui` `Select` because `Combobox` landed in 11.5 and our libs are pinned **11.4.0** for the 11.4 floor; migrate to Combobox when the floor rises.
+**Grafana 12+ `/apis` HTTP structure** ([docs](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis/), [migration](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis-migration/)): Grafana 12 adds Kubernetes-style `/apis/<group>/<version>/namespaces/<ns>/<resource>`. Grafana 13 **deprecates** legacy `/api` HTTP APIs (they stay up but stop receiving updates). **This plugin does not call those Grafana resource HTTP APIs.** Stack reads go through `getDataSourceSrv` / `ds.query` (Explore path). Asks go through the **plugin resource** contract `POST /api/plugins/<id>/resources/*` and settings `POST /api/plugins/<id>/settings` — Grafana plugin SDK, not dashboard HTTP. CI Playwright already runs Grafana **11.0–13 + nightly**. We do not use removed Grafana 12 UI-extension APIs (`getPluginExtensions`, etc.). Tool dropdown stays `@grafana/ui` `Select` because `Combobox` landed in 11.5 and our libs are pinned **11.4.0** for the 11.4 floor; migrate to Combobox when the floor rises.
+
+**Future-proof (do not regress):**
+
+- Never `GET /api/search` — Folder/Dashboard Search **will not be migrated**.
+- Never Grafana Data source HTTP (`/api/datasources`) — deprecated; we already use `getDataSourceSrv`.
+- Never Alerting Provisioning HTTP for “related alerts” — we already query Alertmanager via `ds.query`.
+- If we add “which dashboard to open”: Grafana 12+ **Dashboard `/apis`** only (`dashboard.grafana.app`), not `/api/dashboards` or `/api/search`.
+- Plugin `/api/plugins/<id>/resources/*` and `/settings` stay until Grafana publishes a plugin-SDK replacement; they are not the dashboard `/api` deprecation.
+
 
 ### Expansion: By Design (as-built honesty)
 
 | Pillar | Verdict | What we did | Gap |
 |---|---|---|---|
 | **Reliability** | Partial | Fail-fast config + Test connection; hop cap 3; Cancel; Retry; stack DS throw isolated; 120s classified timeout | No async 202 — long remediate can still hit 120s |
-| **Security** | Partial | Token in `secureJsonData` (backend only); remediate allowlist (no execute); 401/403 → 502 no secret leak; no generated OpenAPI client; Debug Log off by default | `http` allowed for in-cluster; shared Bearer (any user who can open the plugin); Current/logs go to the LLM |
-| **Privacy** | Partial | History never POSTed; error log has no body/token; Debug Log opt-in | Packing still sends Grafana DS facts to dot-ai even if Show context is off |
-| **Consent** | Partial | Admin configures; user clicks Ask; Debug Log opt-in; analysis-only banner | Grafana users share one token; no per-user consent that dashboard data leaves Grafana |
+| **Security** | Partial | Token in `secureJsonData` (backend only); remediate allowlist (no execute); 401/403 → 502 no secret leak; no generated OpenAPI client; Debug Log off by default; public `http` rejected | `http` only for loopback, RFC1918, or in-cluster DNS (`*.svc` / `*.cluster.local`); shared Bearer (any user who can open the plugin); Current/logs go to the LLM when send is on |
+| **Privacy** | Partial | History never POSTed; error log has no body/token; Debug Log opt-in; **Send Grafana evidence** opt-out | Show context is still display-only (does not stop packing) |
+| **Consent** | Partial | Admin configures; user clicks Ask; Debug Log opt-in; analysis-only banner; info Alert on Ask when send is on (Asks send Grafana DS facts to the configured dot-ai server); banner hidden when send is off | Grafana users share one token; no per-user consent / OAuth |
 
 ## User Journey
 
@@ -342,10 +353,11 @@ Grafana admin configures via plugin settings:
 ### Expansion: Plugin configuration (as-built)
 
 Grafana admin configures via plugin settings:
-- **MCP Server URL** — `jsonData.apiUrl` (absolute http(s) base, no `/api/v1` suffix)
+- **MCP Server URL** — `jsonData.apiUrl` (absolute http(s) base, no `/api/v1` suffix). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Public `http` is rejected.
 - **Auth Token** — `secureJsonData.apiKey` (Bearer; stored encrypted)
 - **Debug Log** — `jsonData.debugLog` enable/disable the JSONL ask log (`/var/lib/grafana/dotai-ask.log`). **Off by default.** Tokens never written; hop meta stripped before upstream.
-- **Show context** — `jsonData.showContext` show Current, Map, and History on the page. **On by default.** Packing and hops still run when this is off.
+- **Show context** — `jsonData.showContext` show Current, Map, and History on the page. **On by default.** Display-only; independent of Send Grafana evidence.
+- **Send Grafana evidence** — `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, do not pack Grafana DS facts into Asks. Independent of Show context.
 
 ### UI Components
 
