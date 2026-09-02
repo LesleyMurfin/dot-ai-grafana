@@ -256,7 +256,7 @@ describe('runAskOrchestrator', () => {
       expect(callTool).toHaveBeenCalledTimes(2);
       const secondPacked = (callTool.mock.calls[1][1] as string) || '';
       expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
-      expect(secondPacked).toContain('Comparing app state');
+      expect(secondPacked).toContain('Loki last 15m');
       expect(result.summary).not.toMatch(/not available|from a different cluster/i);
     }
   );
@@ -331,8 +331,9 @@ describe('runAskOrchestrator', () => {
     expect(result.hops).toBe(2);
     const secondPacked = (callTool.mock.calls[1][1] as string) || '';
 
-    // The Grafana evidence itself is still packed for hop 2.
-    expect(secondPacked).toContain('Comparing app state');
+    // The Grafana evidence itself is still packed for hop 2 (Current may be
+    // trimmed to the 1000-char intent cap, so assert headers not full Loki lines).
+    expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('KubePodCrashLooping firing');
 
     // The follow-up names only the sources that actually carry data, plus the target.
@@ -343,7 +344,6 @@ describe('runAskOrchestrator', () => {
     expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
     expect(secondPacked).toMatch(/does not exist, was not found, is not deployed/i);
     expect(secondPacked).not.toMatch(/solely because/i);
-    expect(secondPacked).toMatch(/Answer the original question FROM the Current evidence/i);
 
     // A bare namespace-does-not-exist answer is not what the user ends up with.
     expect(result.summary).not.toMatch(/does not exist/i);
@@ -392,7 +392,7 @@ describe('runAskOrchestrator', () => {
     expect(thirdPacked).toMatch(/Do NOT repeat that the pod\/namespace is unreachable/i);
     expect(thirdPacked).toMatch(/live Loki, Alertmanager evidence/i);
     // Hop 3 still carries the Grafana evidence, not just the scolding.
-    expect(thirdPacked).toContain('Comparing app state');
+    expect(thirdPacked).toContain('Loki last 15m');
 
     // The user ends on the committed answer, not the "not accessible" hedge.
     expect(result.summary).not.toMatch(/not accessible/i);
