@@ -1523,7 +1523,7 @@ func TestAskLogFile(t *testing.T) {
 	}))
 	defer bad.Close()
 	inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
