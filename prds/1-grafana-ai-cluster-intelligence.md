@@ -195,10 +195,12 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 | Client | Thin Grafana SDK `httpclient` for query, remediate, version only. **No** generated OpenAPI client (full schema includes mutation tools) |
 | Timeouts | Probe/version **15s**; query/remediate **120s** blocking. **No** async `202` + job poll |
 | UI | Tool select, intent box, Ask/Analyze, spinner, error `Alert`, text response. Analysis-only banner on Remediate. **Current/Map** packed from Grafana DS into `{intent}`/`{issue}`; **History** display-only (never POSTed); Clear thread / Analyze this. Query ≤3 hops. No cluster-context chip, no raw-response toggle, no dashboard deep-link |
+| Ask log | Always on — **no plugin enable/disable**. JSONL `/var/lib/grafana/dotai-ask.log`, rotate 1MiB. One line per hop (truncated body head+tail, status, summary, `hop`/`hops`/`first_hop`/`branch`/`current_empty`). Tokens never logged; hop meta stripped before upstream. Grafana `GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug` is separate (create-plugin docker only) |
+| vs Headlamp / core | Headlamp Query = box → one POST. Resource-detail passes the **K8s object** into remediate/operate. `sessionId` is the **execute** round-trip, not Grafana DS packing. No Loki/Prom/Tempo/AM in `dot-ai-headlamp`. Closest core plan: [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) (Low, draft — evaluate external monitoring MCP). This packing is Grafana-host glue |
 | Config | Admin: MCP Server URL (`http(s)` absolute) + Bearer token in encrypted settings. Test connection = `POST /api/v1/tools/version` |
 | Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
 | Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
-| Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing |
+| Deferred | M7 deep-link; async 202; generated OpenAPI client; Grafana.com signing; ask-log on/off setting |
 
 ```
   Browser  →  Grafana resource API  →  Go backend (SDK httpclient)
@@ -600,3 +602,8 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Action**: Status → Implemented (Phase 1 v1). Added as-built table; marked M0–M6/M8–M9 done with honest gaps; M7 open. Recorded answers for open questions 2–6.
 - **Prompt**: update PRD #1 on the upstream plugin PR.
 
+### 2026-09-02 — progressive context + ask log
+
+- **Issue**: Packing restored on this PR for the maintainer to try. Headlamp/core have no Grafana DS Current (resource-scoped `sessionId` / execute only; [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) is evaluate-external-MCP, Low). Ask log has **no enable/disable**.
+- **Action**: As-built Ask-log + vs-Headlamp rows; README progressive-context + ask-log notes.
+- **Prompt**: keep the updated PRD on PR #3 (not a new PR).
