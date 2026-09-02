@@ -629,8 +629,8 @@ describe('runAskOrchestrator', () => {
     expect(result.ok).toBe(true);
     expect(fetchStack).not.toHaveBeenCalled();
     expect(callTool).toHaveBeenCalled();
-    expect(callTool.mock.calls[0][1]).toContain('show failing pods');
-    expect(callTool.mock.calls[0][1]).not.toContain('Loki last 15m');
+    expect((callTool.mock.calls[0] as unknown as [string, string])[1]).toContain('show failing pods');
+    expect((callTool.mock.calls[0] as unknown as [string, string])[1]).not.toContain('Loki last 15m');
   });
 
   test('aborted signal returns cancelled without calling the tool', async () => {

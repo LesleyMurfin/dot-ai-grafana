@@ -291,13 +291,16 @@ describe('Pages/DotAIPage', () => {
 
   test('Cancel aborts an in-flight Ask', async () => {
     mockCallDotAITool.mockImplementation((_tool, _text, _meta, signal?: AbortSignal) => {
-      const { promise, reject } = Promise.withResolvers<{
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<{
         ok: boolean;
         status: number;
         summary: string;
         raw: unknown;
         errorMessage?: string;
-      }>();
+      }>((_resolve, r) => {
+        reject = r;
+      });
       const fail = () => {
         const err = new Error('Ask cancelled.');
         err.name = 'AbortError';

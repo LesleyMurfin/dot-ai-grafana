@@ -4,6 +4,7 @@ import {
   extractResourceHints,
   MAX_CURRENT_CHARS,
   MAX_HISTORY_TURNS,
+  MAX_INTENT_CHARS,
   mergeMap,
   rewriteCurrent,
   stablePreamble,
@@ -60,6 +61,84 @@ describe('progressiveContext', () => {
     expect(text).toContain('Issue:');
     expect(text).toContain('analyze crash');
     expect(text).not.toMatch(/\bHistory\b/i);
+  });
+
+  test('buildRequestText packs huge Current to ≤ MAX_INTENT_CHARS', () => {
+    const lokiLines = Array.from({ length: 80 }, (_, i) => `error-line-${i} ${'x'.repeat(40)}`).join('\n');
+    const current = [
+      'Loki last 15m (pod/checkout-api ns/prod):',
+      lokiLines,
+      '',
+      'Prometheus last 15m:',
+      'pod/checkout-api ns/prod restarts=12',
+      '',
+      'Tempo last 15m:',
+      Array.from({ length: 20 }, (_, i) => `trace ${'a'.repeat(32)}${i}`).join('\n'),
+      '',
+      'Alertmanager:',
+      'KubePodCrashLooping firing',
+    ].join('\n');
+    const map =
+      'Loki Loki, Prometheus Prometheus, Tempo Tempo, Alertmanager Alertmanager, pod/checkout-api, ns/prod';
+
+    expect(current.length).toBeGreaterThan(MAX_INTENT_CHARS);
+
+    const text = buildRequestText({
+      tool: 'query',
+      current,
+      map,
+      box: 'why is checkout-api crashing?',
+    });
+
+    expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(text).toContain('Question:');
+    expect(text).toContain('why is checkout-api crashing?');
+    // Map dropped first when over budget
+    expect(text).not.toContain('\nMap:\n');
+  });
+
+  test('buildRequestText drops Tempo before trimming below budget', () => {
+    const lokiBody = Array.from({ length: 12 }, (_, i) => `log-${i}-${'y'.repeat(30)}`).join('\n');
+    const tempoBody = Array.from({ length: 30 }, (_, i) => `trace-${i}-${'z'.repeat(40)}`).join('\n');
+    const current = [
+      'Loki last 15m:',
+      lokiBody,
+      '',
+      'Prometheus last 15m:',
+      'restarts=1',
+      '',
+      'Tempo last 15m:',
+      tempoBody,
+      '',
+      'Alertmanager:',
+      'no alerts',
+    ].join('\n');
+    const map = 'x'.repeat(200);
+
+    const text = buildRequestText({
+      tool: 'query',
+      current,
+      map,
+      box: 'status?',
+    });
+
+    expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(text).not.toMatch(/Tempo last 15m/i);
+    expect(text).toContain('Loki last 15m');
+    expect(text).toContain('Prometheus last 15m');
+  });
+
+  test('MAX_CURRENT_CHARS cannot overflow packed intent alone', () => {
+    const hugeAnswer = 'fact '.repeat(500);
+    const current = rewriteCurrent('', 'q', hugeAnswer);
+    expect(current.length).toBeLessThanOrEqual(MAX_CURRENT_CHARS);
+    const packed = buildRequestText({
+      tool: 'query',
+      current,
+      map: 'm'.repeat(MAX_CURRENT_CHARS),
+      box: 'follow up on the crash',
+    });
+    expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
   });
 
   test('rewriteCurrent replaces with capped block including resources and next', () => {

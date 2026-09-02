@@ -60,6 +60,23 @@ describe('parsePodNamespace / buildLogQL', () => {
       '{namespace="prod",pod=~"checkout-api.*"}'
     );
   });
+
+  test('show logs for pod checkout-api in namespace prod still works', () => {
+    expect(parsePodNamespace('show logs for pod checkout-api in namespace prod')).toEqual({
+      pod: 'checkout-api',
+      namespace: 'prod',
+    });
+  });
+
+  test('does not invent pods from which/what questions', () => {
+    expect(parsePodNamespace('which pods are not ready')).toEqual({});
+    expect(parsePodNamespace('what pods exist')).toEqual({});
+  });
+
+  test('rejects stopword and non-RFC1123 captures', () => {
+    expect(parsePodNamespace('pod are in namespace prod').pod).toBeUndefined();
+    expect(parsePodNamespace('pod _bad in namespace prod').pod).toBeUndefined();
+  });
 });
 
 describe('linesFromLokiFrames', () => {

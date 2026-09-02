@@ -8,7 +8,7 @@ import {
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
 import { lastValueFrom, Observable } from 'rxjs';
-
+import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
 // Stack reads go through getDataSourceSrv + ds.query (Explore path). If we later
@@ -56,28 +56,49 @@ type PromTarget = { refId: string; expr: string; instant?: boolean; format?: str
 type TempoTarget = { refId: string; queryType?: string; query?: string; limit?: number };
 type AlertTarget = { refId: string; expr?: string; queryType?: string };
 
+/** True when s is RFC-1123 DNS label(s); rejects HINT_STOPWORDS. */
+function isRfc1123Name(s: string): boolean {
+  if (!s || s.length > 253) {
+    return false;
+  }
+  const labels = s.toLowerCase().split('.');
+  for (const label of labels) {
+    if (label.length === 0 || label.length > 63) {
+      return false;
+    }
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(label)) {
+      return false;
+    }
+    if (HINT_STOPWORDS[label]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Best-effort pod + namespace from free-text question. */
 export function parsePodNamespace(question: string): PodNamespaceTarget {
   const text = question.trim();
   const out: PodNamespaceTarget = {};
 
+  // Singular "pod" only — "which pods are not ready" must not capture filler words.
+  const podLabeled =
+    /\bpod[/:=\s]+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text) ||
+    /\b(?:for|of)\s+pod\s+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text);
+  if (podLabeled && isRfc1123Name(podLabeled[1])) {
+    out.pod = podLabeled[1];
+  }
+
   const nsLabeled =
     /\b(?:namespace|ns)[/:=\s]+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text) ||
     /\bin\s+(?:namespace|ns)\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
-  if (nsLabeled) {
+  if (nsLabeled && isRfc1123Name(nsLabeled[1])) {
     out.namespace = nsLabeled[1];
-  }
-
-  const podLabeled =
-    /\bpod[s]?[/:=\s]+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text) ||
-    /\b(?:for|of)\s+pod\s+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text);
-  if (podLabeled) {
-    out.pod = podLabeled[1];
   }
 
   if (!out.namespace) {
     const inNs = /\b([a-z0-9][a-z0-9.-]{1,60})\s+in\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
-    if (inNs) {
+    if (inNs && isRfc1123Name(inNs[1]) && isRfc1123Name(inNs[2])) {
       if (!out.pod) {
         out.pod = inNs[1];
       }
