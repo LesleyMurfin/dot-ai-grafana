@@ -11,10 +11,10 @@
 ## Current State
 
 - **Goal now**: Finish the `dot-ai-grafana` Grafana app plugin as a usable product surface — **thread integrity, honest wait, ship/docs** — without stealing PRD #6 Map/markdown/show-me scope or PRD #7 pre-flight/verify scope.
-- **Collision found (2026-09-03):** This draft was written without knowledge of [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / PR #22. Milestones **M-C** (readable answer / markdown) and **M-E** (act from the answer / drilldowns / 0-hop) overlap **PRD #6** directly. They are **not deleted** — they live under **Deferred to PRD #6** below with Outcome/Demo/Budget preserved.
+- **Collision found (2026-09-03):** This draft was written without knowledge of [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6). Milestones **M-C** (readable answer / markdown) and **M-E** (act from the answer / drilldowns / 0-hop) overlap **PRD #6** directly. They are **not deleted** — they live under **Deferred to PRD #6** below with Outcome/Demo/Budget preserved.
 - **Established split (owner, authoritative):**
   ```
-  PRD #1  v1 0.1.0        — analysis-only, pack Current       — vfarcic#3 / prior working branch
+  PRD #1  v1 0.1.0        — analysis-only, pack Current       — vfarcic/dot-ai-grafana#3
   PRD #5  GitOps execute  — issue #5                          — propose → GitOps PR only
   PRD #6  M7 Map          — issue #6                          — 0.2.x
   PRD #7  Evidence safety — issue #7 / prds/7-evidence-grounded-change-safety.md
@@ -75,7 +75,7 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 
 | id | title | owner | justification / note |
 |----|-------|-------|----------------------|
-| I-001 | Ship Grafana Cloud edge path | out-of-scope | OUT-OF-SCOPE (self-managed track; PRD #1 DD10) |
+| I-001 | Ship Grafana Cloud edge path | out-of-scope | OUT-OF-SCOPE (self-managed track; PRD #1 design choice) |
 | I-002 | Enforce SSRF egress allowlist | this-PRD | — |
 | I-003 | Forward Grafana user identity | this-PRD | — |
 | I-004 | Wire shared-server dual surface | this-PRD | — |
@@ -92,7 +92,7 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 | I-015 | Async 202 job-poll remediate | this-PRD | D4 |
 | I-016 | Position against Grafana Assistant | this-PRD | F1 |
 | I-017 | Own optional Cloud follow-on | out-of-scope | OUT-OF-SCOPE (optional follow-on; not this track) |
-| I-018 | Keep Kubeshark in core | out-of-scope | OUT-OF-SCOPE (confirmed core-owned; DD11) |
+| I-018 | Keep Kubeshark in core | out-of-scope | OUT-OF-SCOPE (confirmed core-owned; design choice) |
 | I-019 | Finish install docs and screenshots | this-PRD | F1 |
 | I-020 | Run multi-version Grafana matrix | this-PRD | F2 |
 | I-021 | Document no-apply vs PR tokens | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
@@ -149,7 +149,7 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 | I-072 | Detect cross-cluster managed workloads | this-PRD | — |
 | I-073 | Connect dot-ai to host KRO namespaces | out-of-scope | OPEN |
 | I-074 | Refresh stale capability scan index | out-of-scope | OPEN |
-| I-075 | Stay orchestrator-neutral in plugin | this-PRD | KILLED (deliberate — orchestrator-neutral by design; PRD #1 DD11 thin-client boundary) |
+| I-075 | Stay orchestrator-neutral in plugin | this-PRD | KILLED (deliberate — orchestrator-neutral by design; PRD #1 design choice thin-client boundary) |
 | I-076 | Leave detail-page actions to Headlamp | out-of-scope | OUT-OF-SCOPE (Headlamp owns; vfarcic/dot-ai-headlamp src/index.tsx) |
 | I-077 | Leave Recommend wizard to Headlamp | PRD-7-new | Recorded on PRD #7 as Considered-and-deferred (Headlamp owns day-2 lifecycle; not Grafana Build/Update) |
 | I-078 | Consider Knowledge Base on Grafana | this-PRD | — |
@@ -229,7 +229,7 @@ Verdict:  KEEP
 ### 3. Exactly two legal exits per slice — never a third
 
 - **`SHIPPED`** — demo passes, tests added to lock the behaviour, PR opened, merged.
-- **`PARKED`** — budget spent, one-line learning recorded, idea returned to the register with disposition `PARKED (why)`.
+- **`PARKED`** — budget spent, one-line learning recorded, idea returned to the register with status `PARKED (why)`.
 
 No "in progress forever". **PARKED is a success state** — it is the mechanism that stops one vertical eating a milestone. Slice **D4** (async 202 + job-poll) is the document's worked example: if its budget spends, it exits PARKED and escalates to a core `vfarcic/dot-ai` PRD rather than expanding this one.
 
@@ -274,10 +274,10 @@ flowchart TD
 **Explicitly NOT in this PRD**
 
 - **GitOps-PR remediate execute** → [`prds/5-gitops-pr-remediate.md`](./5-gitops-pr-remediate.md) (I-006, I-021–I-025, I-079). Do not duplicate.
-- **Grafana Map / Explore / show-me / markdown Answer (M7)** → PRD #6 on [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / PR #22. Deferred slices preserved below.
+- **Grafana Map / Explore / show-me / markdown Answer (M7)** → PRD #6 on [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6). Deferred slices preserved below.
 - **Evidence-grounded change safety (pre-flight + post-merge verify)** → [`prds/7-evidence-grounded-change-safety.md`](./7-evidence-grounded-change-safety.md).
 - **Day-2 Build/Update object lifecycle** → Headlamp (see PRD #7 Considered and deferred). Not this fence.
-- **Phase-3 core-engine work** (I-007–I-010, I-018) stays on `vfarcic/dot-ai`. Thin REST client (PRD #1 DD11).
+- **Phase-3 core-engine work** (I-007–I-010, I-018) stays on `vfarcic/dot-ai`. Thin REST client (PRD #1 design choice).
 
 ---
 
@@ -285,7 +285,7 @@ flowchart TD
 
 **Fence:** De-risking, not design. Commit and PR the uncommitted usability work in reviewable chunks with tests. May split commits/PRs; may not invent new UX behaviour beyond what already exists in the working tree (wiring half-built toggles counts as landing, not inventing).
 
-**Status (milestone):** **DONE** — usability delta committed on `working branch` in the 10 product commits after the de-number docs commit (see Work Log). Product *ownership* of markdown / Explore / show-me still sits with PRD #6 (issue #6 / PR #22); this milestone only de-risked the working tree.
+**Status (milestone):** **DONE** — usability delta committed on `working branch` in the 10 product commits after the de-number docs commit (see Work Log). Product *ownership* of markdown / Explore / show-me still sits with PRD #6 (issue #6); this milestone only de-risked the working tree.
 
 **Integration demo:** From a clean clone of the PR branch: `git status` clean for the usability set, CI green, plugin loads in Grafana, Ask returns a GFM-rendered answer, Map shows Explore/drilldown links, a forced error shows a structured title — and AppConfig `showContext` / `sendGrafanaEvidence` toggles affect the page.
 
@@ -418,7 +418,7 @@ flowchart TD
 
 - **Outcome:** Multi-minute remediate survives Grafana resource deadlines via **202 + jobId + UI poll**, **or** this slice exits **PARKED** with a one-line learning and an explicit escalation owner on `vfarcic/dot-ai` — without expanding this PRD's fence.
 - **Demo (SHIPPED path):** Trigger a long remediate; observe 202 + poll updates; final analysis renders without a 120s hard fail.
-- **Demo (PARKED path):** After budget loops, register row disposition `PARKED (needs core job API)`; link or name the core PRD/issue owner; plugin still documents the 120s ceiling honestly.
+- **Demo (PARKED path):** After budget loops, register row status `PARKED (needs core job API)`; link or name the core PRD/issue owner; plugin still documents the 120s ceiling honestly.
 - **Budget:** 3 loops — **do not raise the budget to "finish" this**. Spent budget → PARKED.
 - **Status:** NOT STARTED
 - **Evidence:** Viktor open point #3; I-015, I-029; `docs/test-loop.md:30`; PRD #1 OQ5
@@ -445,7 +445,7 @@ flowchart TD
 #### F2 — Grafana version compatibility matrix
 
 - **Outcome:** Published matrix of tested Grafana versions and the supported floor (I-013, I-020).
-- **Demo:** Docs table lists must-pass 11.4 and other CI matrix versions with pass/fail; floor policy matches PRD #1 DD6 (≥11.0).
+- **Demo:** Docs table lists must-pass 11.4 and other CI matrix versions with pass/fail; floor policy matches PRD #1 design choice (≥11.0).
 - **Budget:** 3 loops
 - **Status:** NOT STARTED
 - **Evidence:** I-013, I-020; `docs/test-loop.md` B1 notes
@@ -453,11 +453,11 @@ flowchart TD
 
 #### F3 — Plugin identity / slug resolution with Viktor
 
-- **Outcome:** Canonical plugin id is **`devopstoolkit-dotai-app`** everywhere (I-012 RESOLVED with PRD #1 DD5/OQ2; Viktor open point 5 closed on identity).
+- **Outcome:** Canonical plugin id is **`devopstoolkit-dotai-app`** everywhere (I-012 RESOLVED with PRD #1 design choice/OQ2; Viktor open point 5 closed on identity).
 - **Demo:** `plugin.json` / package id / README / deep links / unsigned allow-list all use **`devopstoolkit-dotai-app`** (matches upstream PR #3 and reviewed `plugin working branch`). Retired fork drift slug `retired-personal-dotai-app` must not reappear.
 - **Budget:** 3 loops
 - **Status:** DONE (identity resolution landed; remaining install-doc polish is F4)
-- **Evidence:** I-012 RESOLVED; PRD #1 DD5/OQ2 RESOLVED; IdentityFix; upstream PR #3 / `src/plugin.json` / `pkg/main.go`
+- **Evidence:** I-012 RESOLVED; PRD #1 design choice/OQ2 RESOLVED; IdentityFix; upstream PR #3 / `src/plugin.json` / `pkg/main.go`
 - **Loop log:** *(identity closed 2026-09-03 — canonical `devopstoolkit-dotai-app`; retired `retired-personal-dotai-app`)*
 
 #### F4 — Unsigned-loading documentation
@@ -466,7 +466,7 @@ flowchart TD
 - **Demo:** A reader following only the unsigned section can load the plugin; docs state catalog signing is later.
 - **Budget:** 2 loops
 - **Status:** NOT STARTED
-- **Evidence:** I-014, I-048; PRD #1 DD7 / OQ4; `README.md:32`
+- **Evidence:** I-014, I-048; PRD #1 design choice / OQ4; `README.md:32`
 - **Loop log:** *(empty)*
 
 #### F5 — Land the stack on `vfarcic/dot-ai-grafana`
@@ -523,7 +523,7 @@ flowchart TD
 - **Demo:** After a successful Ask, toggle **Show raw response**; raw JSON/envelope (or full tool payload) appears; toggle back to summary markdown.
 - **Budget:** 3 loops
 - **Status:** NOT STARTED
-- **Evidence:** `docs/test-loop.md:37`; PRD #1 DD1 / Validation #5; I-031
+- **Evidence:** `docs/test-loop.md:37`; PRD #1 design choice / Validation #5; I-031
 - **Loop log:** *(empty)*
 
 #### C3 — Copy answer
@@ -673,9 +673,9 @@ A topology view is also where the abstraction problem already documented in this
 1. **Append-only.** Never delete a row. Wrong ideas keep their id forever.
 2. **New ideas get the next id.** **I-086–I-090 were opened on PRD #7** — next id after any local add is **I-091** (check PRD #7 register first). Do not reuse ids.
 3. **Each row has a `title` and a `description`.** `title` is a short imperative label (about 3–8 words) for scanning. `description` is **2–4 full sentences of plain prose written for an outside reader** who was not in the authoring session. Stand alone: what it is, why it matters, what visibly changes. Expand shorthand; name real artifacts. Never "as discussed".
-4. **Disposition** is one of: `OPEN` | `SCHEDULED` | `PARKED` | `KILLED` | `OUT-OF-SCOPE`.
+4. **Status** is one of: `OPEN` | `SCHEDULED` | `PARKED` | `KILLED` | `OUT-OF-SCOPE`.
 5. **SCHEDULED** rows must name a slice id (`A1`, `B1`, …).
-6. **KILLED / PARKED / OUT-OF-SCOPE** rows must keep a short why in the disposition cell.
+6. **KILLED / PARKED / OUT-OF-SCOPE** rows must keep a short why in the status cell.
 7. Mid-loop brainwave → add a row, **keep working** the current slice. Triage at milestone close.
 8. Completeness beats brevity. Factory/harness ideas stay as `OUT-OF-SCOPE` so they are not forgotten — they are not plugin work.
 9. **Moves:** When an idea changes PRD owner, keep a **stub** here (`MOVED → PRD #N`) and the full row in the owning PRD. Never drop the id.
@@ -692,9 +692,9 @@ A topology view is also where the abstraction problem already documented in this
 | **Rows across both files** | **85 + 7 = 92** | 85 here + 2 moved full + 5 new on PRD #7 |
 | **Unique ids across both** | **90** | 85 + 5 new |
 
-| id | title | description | source | origin | disposition | slice |
+| id | title | description | source | origin | status | slice |
 |----|-------|-------------|--------|--------|-------------|-------|
-| I-001 | Ship Grafana Cloud edge path | Provide a Cloud-reachable HTTPS edge path to the customer's dot-ai and the packaging path Grafana Cloud would require (catalog/signing, install policy). Without a public `apiUrl`, Cloud-hosted Grafana cannot reach private in-cluster dot-ai. This track is explicitly not planned for the self-managed contribution in PRD #1 Design Decision 10. | `prds/1-grafana-ai-cluster-intelligence.md:296-298` | PRD1-openq | OUT-OF-SCOPE (self-managed track; PRD #1 DD10) | — |
+| I-001 | Ship Grafana Cloud edge path | Provide a Cloud-reachable HTTPS edge path to the customer's dot-ai and the packaging path Grafana Cloud would require (catalog/signing, install policy). Without a public `apiUrl`, Cloud-hosted Grafana cannot reach private in-cluster dot-ai. This track is explicitly not planned for the self-managed contribution in PRD #1 Design Decision 10. | `prds/1-grafana-ai-cluster-intelligence.md:296-298` | PRD1-openq | OUT-OF-SCOPE (self-managed track; PRD #1 design choice) | — |
 | I-002 | Enforce SSRF egress allowlist | Make the Go plugin backend fail closed when `apiUrl` targets link-local metadata (`169.254.169.254`), loopback, plain `http://`, or non-allowlisted RFC1918 addresses. A misconfigured or hostile admin setting must not turn the plugin into an open proxy from Grafana. Visible change: rejected config/test-connection with a clear SSRF error instead of an outbound fetch. | `prds/1-grafana-ai-cluster-intelligence.md:306` | PRD1-phase2 | OPEN | — |
 | I-003 | Forward Grafana user identity | Pass the signed-in Grafana user identity on outbound calls so dot-ai audit logs can attribute analysis requests to a person, not only a shared service token. Today Design Decision 4 accepts a single shared token with no per-user attribution. Visible change: a documented identity header (or equivalent) on `/query` and `/remediate` proxy traffic. | `prds/1-grafana-ai-cluster-intelligence.md:182,309` | PRD1-phase2 | OPEN | — |
 | I-004 | Wire shared-server dual surface | Document and verify one dot-ai deployment serving both this Grafana plugin (analysis-only token) and `vfarcic/dot-ai-headlamp` (resource-scoped, can use apply where intended). Operators today risk config drift between the two companions. Done when install/runbook shows both UIs against one REST base without conflicting auth. | `prds/1-grafana-ai-cluster-intelligence.md:420` | PRD1-phase2 | OPEN | — |
@@ -705,13 +705,13 @@ A topology view is also where the abstraction problem already documented in this
 | I-009 | Ingest predictive hardware metrics | Feed predictive hardware exporter metrics into the engine (exporters to Prometheus to dot-ai) so diagnosis can cite hardware trends. Scope is diagnosis-only with no autonomous hardware mutation path. Owned by core `vfarcic/dot-ai`, not this companion repo. | `prds/1-grafana-ai-cluster-intelligence.md:455` | PRD1-phase3 | OUT-OF-SCOPE (core `vfarcic/dot-ai`) | — |
 | I-010 | Render evidence-tier fields | After core evidence tools land, optionally polish the Grafana UI to show new structured fields such as which evidence tier the server used. Still no Kubeshark client and no new privileges in the plugin. Visible only if server responses grow fields worth presenting beyond plain `summary`. | `prds/1-grafana-ai-cluster-intelligence.md:456` | PRD1-phase3 | OUT-OF-SCOPE (after core evidence lands) | — |
 | I-011 | Document read-analyze RBAC role | Publish a recommended dot-ai RBAC role (or equivalent policy) for read plus analyze without the `apply` verb, so install docs can cite a concrete no-apply token. Without it, operators guess scopes and may over-privilege the plugin. Visible change: README/setup cites the role and verification steps. | `prds/1-grafana-ai-cluster-intelligence.md:558` | PRD1-openq | OPEN | — |
-| I-012 | Finalize plugin id and home | **RESOLVED:** canonical Grafana plugin id is **`devopstoolkit-dotai-app`** (upstream PR #3 body; reviewed head `plugin working branch` `src/plugin.json`; `pkg/main.go`). Fork drift slug **`retired-personal-dotai-app` is retired** — do not reintroduce. Visible change: one id everywhere in `plugin.json`, package metadata, README, and `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`. Aligns PRD #1 DD5/OQ2 RESOLVED. | `prds/1-grafana-ai-cluster-intelligence.md` DD5/OQ2; IdentityFix | PRD1-openq | RESOLVED (canonical `devopstoolkit-dotai-app`; retired `retired-personal-dotai-app`) | F3 |
+| I-012 | Finalize plugin id and home | **RESOLVED:** canonical Grafana plugin id is **`devopstoolkit-dotai-app`** (upstream PR #3 body; reviewed head `plugin working branch` `src/plugin.json`; `pkg/main.go`). Fork drift slug **`retired-personal-dotai-app` is retired** — do not reintroduce. Visible change: one id everywhere in `plugin.json`, package metadata, README, and `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS`. Aligns PRD #1 design choice/OQ2 RESOLVED. | `prds/1-grafana-ai-cluster-intelligence.md` design choice/OQ2; IdentityFix | PRD1-openq | RESOLVED (canonical `devopstoolkit-dotai-app`; retired `retired-personal-dotai-app`) | F3 |
 | I-013 | Set Grafana version floor | Confirm `grafanaDependency: ">=11.0"` with Grafana 11.4 as the must-pass reference host and matching `@grafana/*` library pins. Wrong pins break runtime on the adopter's 11.4 stack even if CI builds on newer scaffolds. Visible change: written floor policy plus CI matrix expectations. | `prds/1-grafana-ai-cluster-intelligence.md:560` | PRD1-openq | SCHEDULED | F2 |
 | I-014 | Plan catalog signing path | Establish when and how the plugin moves from unsigned/private install to Grafana catalog signing and review. Until then operators must allow-list the plugin id. Slice F4 documents the unsigned path now; catalog remains the later distribution milestone from Design Decision 7. | `prds/1-grafana-ai-cluster-intelligence.md:561` | PRD1-openq | SCHEDULED | F4 |
 | I-015 | Async 202 job-poll remediate | Implement async `202 + jobId` with UI polling of `/status/{jobId}` so multi-minute remediate survives Grafana resource-call deadlines instead of dying on the ~120s blocking ceiling. Cancel abandons the poll. Slice D4 is budget-capped; PARKED with core escalation is a success exit if the gateway contract is missing. | `prds/1-grafana-ai-cluster-intelligence.md:562` | PRD1-openq | SCHEDULED | D4 |
 | I-016 | Position against Grafana Assistant | Write honest positioning versus Grafana Assistant: lead with live K8s API state, sovereign/self-managed deploy, and (via PRD #5) GitOps remediation — not an NL telemetry-chat clone. Without this, reviewers and buyers misread the plugin as redundant. Visible change: README section readable in about a minute, linking PRD #5 for execute. | `prds/1-grafana-ai-cluster-intelligence.md:563` | PRD1-openq | SCHEDULED | F1 |
 | I-017 | Own optional Cloud follow-on | Define a later Grafana Cloud deployment track (public edge proxy to dot-ai, catalog install path) only if someone volunteers to own it. PRD #1 Design Decision 10 keeps Cloud out of this contribution's delivery. No Cloud CI or Cloud install docs on the self-managed track. | `prds/1-grafana-ai-cluster-intelligence.md:564` | PRD1-openq | OUT-OF-SCOPE (optional follow-on; not this track) | — |
-| I-018 | Keep Kubeshark in core | Confirm Kubeshark/evidence connectivity is owned by a core `vfarcic/dot-ai` PRD plus platform install MOP, while this companion only presents server output. Rejects growing a privileged packet client inside `dot-ai-grafana`. Matches Design Decision 11 companion-vs-core ownership. | `prds/1-grafana-ai-cluster-intelligence.md:565` | PRD1-openq | OUT-OF-SCOPE (confirmed core-owned; DD11) | — |
+| I-018 | Keep Kubeshark in core | Confirm Kubeshark/evidence connectivity is owned by a core `vfarcic/dot-ai` PRD plus platform install MOP, while this companion only presents server output. Rejects growing a privileged packet client inside `dot-ai-grafana`. Matches Design Decision 11 companion-vs-core ownership. | `prds/1-grafana-ai-cluster-intelligence.md:565` | PRD1-openq | OUT-OF-SCOPE (confirmed core-owned; design choice) | — |
 | I-019 | Finish install docs and screenshots | Complete end-to-end README install, configuration, read-only token guidance, and current UI screenshots so a stranger can reach first successful Ask without undocumented steps. `src/plugin.json` still has empty `screenshots`. This is the M8 docs ship gap, not new Ask behaviour. | `prds/1-grafana-ai-cluster-intelligence.md:403` | PRD1-phase2 | SCHEDULED | F1 |
 | I-020 | Run multi-version Grafana matrix | Execute and publish compatibility proof across the agreed Grafana matrix (11.4 must-pass; current 13.x; original draft also mentioned 10.x). Pins alone do not prove runtime. Visible change: docs table of pass/fail plus CI jobs that match the floor policy. | `prds/1-grafana-ai-cluster-intelligence.md:404` | PRD1-phase2 | SCHEDULED | F2 |
 | I-021 | Document no-apply vs PR tokens | Document the credential split between the forever no-apply analysis token and separate GitOps PR-create (or bot) credentials. Analysis must keep working when execute credentials are absent or denied. Owned by `prds/5-gitops-pr-remediate.md`, not **PRD #8**. | `prds/5-gitops-pr-remediate.md:23,37` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
@@ -736,12 +736,12 @@ A topology view is also where the abstraction problem already documented in this
 | I-040 | Allowlist read-only git in harness | Expand the main-seat read-only command allowlist so harness delegates may run `git status` and `git diff` safely. Prevents unnecessary escalation for inspection. Not plugin product work. | loop-notes (harness) | loop-notes | OUT-OF-SCOPE (harness — not plugin) | — |
 | I-041 | Separate fact reads from mutations | Teach the delegate guard to distinguish read-only fact collection from state-mutating commands. Reduces false blocks on investigation. Harness policy only. | loop-notes (harness) | loop-notes | OUT-OF-SCOPE (harness — not plugin) | — |
 | I-042 | Default worktree-first edits | Make worktree-first the default edit mode for agents so shared checkouts are not dirtied. Process/harness default, not a plugin feature. | loop-notes (harness) | loop-notes | OUT-OF-SCOPE (harness — not plugin) | — |
-| I-043 | Render GFM answer markdown | Render Ask answers as sanitized GitHub-flavored markdown via Grafana `renderMarkdown` in `src/components/ResponseMarkdown.tsx` (headings, lists, tables, code) instead of a raw preformatted string. Operators can scan structured diagnosis. Uncommitted module plus tests; locked by slices A1/A2/C1. | working-tree `ResponseMarkdown.tsx` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED A1,A2,C1) | — |
-| I-044 | Build Explore drilldown URLs | Ship `src/utils/grafanaExplore.ts` helpers (`exploreUrl`, `dashboardUrl`, `drilldownAppUrl`, `buildDrilldownLinks`) that build Grafana Explore and drilldown-app URLs from discovered datasource UIDs. Without them, stack hits cannot become one-click evidence navigation. Uncommitted utility covered by A1/A2 and consumed by E1. | working-tree `grafanaExplore.ts` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED A1,A2,E1) | — |
-| I-045 | Attach drilldowns on stack hits | When Grafana stack evidence hits, attach `DrilldownLink[]` on the tool thread (UI-only; never POSTed) so the answer UI and the Map block — the progressive-context resource-chip line in `src/utils/progressiveContext.ts` — can expose Logs/Metrics/Traces/Dashboard targets. Bridges `grafanaStack.ts` reads to `grafanaExplore.ts` links. Part of the uncommitted usability delta. | working-tree orchestrator+explore | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED A1,E1) | — |
-| I-046 | Classify pure navigation asks | Detect pure navigation asks with `isShowMeOnly()` in `src/utils/grafanaExplore.ts` so prompts like "show me logs" can take the 0-hop fast path: the route that answers from Grafana datasources and navigation alone without calling the dot-ai LLM at all. Diagnosis words still go to dot-ai. Classifier exists; full navigation UX is E2. | working-tree `isShowMeOnly` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED A1,E2) | — |
+| I-043 | Render GFM answer markdown | Render Ask answers as sanitized GitHub-flavored markdown via Grafana `renderMarkdown` in `src/components/ResponseMarkdown.tsx` (headings, lists, tables, code) instead of a raw preformatted string. Operators can scan structured diagnosis. Uncommitted module plus tests; locked by slices A1/A2/C1. | working-tree `ResponseMarkdown.tsx` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED A1,A2,C1) | — |
+| I-044 | Build Explore drilldown URLs | Ship `src/utils/grafanaExplore.ts` helpers (`exploreUrl`, `dashboardUrl`, `drilldownAppUrl`, `buildDrilldownLinks`) that build Grafana Explore and drilldown-app URLs from discovered datasource UIDs. Without them, stack hits cannot become one-click evidence navigation. Uncommitted utility covered by A1/A2 and consumed by E1. | working-tree `grafanaExplore.ts` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED A1,A2,E1) | — |
+| I-045 | Attach drilldowns on stack hits | When Grafana stack evidence hits, attach `DrilldownLink[]` on the tool thread (UI-only; never POSTed) so the answer UI and the Map block — the progressive-context resource-chip line in `src/utils/progressiveContext.ts` — can expose Logs/Metrics/Traces/Dashboard targets. Bridges `grafanaStack.ts` reads to `grafanaExplore.ts` links. Part of the uncommitted usability delta. | working-tree orchestrator+explore | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED A1,E1) | — |
+| I-046 | Classify pure navigation asks | Detect pure navigation asks with `isShowMeOnly()` in `src/utils/grafanaExplore.ts` so prompts like "show me logs" can take the 0-hop fast path: the route that answers from Grafana datasources and navigation alone without calling the dot-ai LLM at all. Diagnosis words still go to dot-ai. Classifier exists; full navigation UX is E2. | working-tree `isShowMeOnly` | fork-delta | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED A1,E2) | — |
 | I-047 | Structure Ask error taxonomy | Add `src/utils/askErrors.ts` so failures show specific titles/messages (auth, timeout, cancelled, upstream) instead of a generic Alert string. Speeds firefighting when config or network breaks. Uncommitted module plus tests in A1/A2. | working-tree `askErrors.ts` | fork-delta | SCHEDULED | A1,A2 |
-| I-048 | Document unsigned plugin allow-list | Document `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app` (and grafana.ini equivalent) as a required private/alpha install step, including persistence on Deployment/Helm values. Use the **canonical** id only; retired slug `retired-personal-dotai-app` must not appear in install copy. F4 makes the unsigned section sufficient alone. | `README.md` unsigned section; PRD #1 DD7 | fork-delta | SCHEDULED | F4 |
+| I-048 | Document unsigned plugin allow-list | Document `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app` (and grafana.ini equivalent) as a required private/alpha install step, including persistence on Deployment/Helm values. Use the **canonical** id only; retired slug `retired-personal-dotai-app` must not appear in install copy. F4 makes the unsigned section sufficient alone. | `README.md` unsigned section; PRD #1 design choice | fork-delta | SCHEDULED | F4 |
 | I-049 | Capture current UI screenshots | Produce screenshots that match the live Ask UI for README and `plugin.json` `screenshots`. Stale or empty screenshots fail catalog/review and first-run trust. Complements I-019 in slice F1. | `src/plugin.json` `screenshots: []` | fork-delta | SCHEDULED | F1 |
 | I-050 | Honor AppConfig privacy toggles | Wire saved `jsonData.showContext` and `jsonData.sendGrafanaEvidence` from `AppConfig.tsx` through `App.tsx` into `DotAIPage` so they control the four progressive-context UI blocks in `src/utils/progressiveContext.ts` — Stable (tool preamble), Current (rewritten facts), Map (resource chips), and History (prior turns) — and whether Grafana evidence is packed into Ask. The toggles save today but do not fully drive runtime yet. Demo: toggle off, reload, confirm Network intent and UI blocks. | `AppConfig.tsx` `showContext`/`sendGrafanaEvidence`; `App.tsx:10-15` | usability-gap | SCHEDULED | A3 |
 | I-051 | Send condensed History to dot-ai | Include condensed prior turn(s) inside the packed intent under `MAX_INTENT_CHARS` so follow-ups like "describe the first one" resolve. The client-side packer in `src/utils/progressiveContext.ts` has four named blocks: Stable (fixed tool preamble), Current (rewritten facts after each answer), Map (short resource-chip line), and History (prior You/Answer turns shown on screen). Today History is display-only — `HistoryTurn` is never POSTed — while `buildRequestText` packs only Stable, Current, and Map. | `progressiveContext.ts:4-5,85-89`; `DotAIPage.tsx` pack path | usability-gap | SCHEDULED | B1 |
@@ -753,8 +753,8 @@ A topology view is also where the abstraction problem already documented in this
 | I-057 | Show multi-hop progress phases | Replace static "Waiting for dot-ai…" (`DotAIPage.tsx:253-254`) with phase text from the orchestrator hop loop (for example querying Grafana evidence, then dot-ai hop 1 of N). Multi-hop Asks feel hung without progress. Visible change: loading label tracks `askOrchestrator.ts` phases. | `DotAIPage.tsx:253-254`; `askOrchestrator.ts` hop loop | usability-gap | SCHEDULED | D1 |
 | I-058 | Explain extra hops with badges | Surface `AskMeta` hop badges (`hop`, `hops`, `first_hop`, `branch`, `current_empty` in `askOrchestrator.ts`) so operators understand why a follow-up hop ran (unscoped search, conflict between the Current facts block and the model answer, hedge). Meta is computed; UI explanation is incomplete. | `askOrchestrator.ts:27-32`; hop loop | usability-gap | SCHEDULED | D2 |
 | I-059 | Preserve raw Grafana evidence | Keep raw Grafana evidence available for display/debug instead of only the rewritten Current facts block (`rewriteCurrent` in `src/utils/progressiveContext.ts` collapses to Resources/Asked/What's true now). Operators need to verify what Loki/Prom/Tempo/Alertmanager actually returned. Visible change: expandable raw evidence beside the Current block. | `progressiveContext.ts:231-241` | usability-gap | SCHEDULED | D3 |
-| I-060 | Drilldowns as clickable chips | Render thread `drilldowns` as interactive chips beside the answer, not only as raw links inside the Map text block. Map is the progressive-context resource-chip line in `src/utils/progressiveContext.ts` packed for the model; chips are the human click path into Explore/drilldown apps from `buildDrilldownLinks()`. This finishes the incomplete drilldown UI that still leaves operators reading link text instead of clicking chips. | `grafanaExplore.ts`; DotAIPage Map/answer UI | usability-gap | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED E1) | — |
-| I-061 | Navigate on pure show-me asks | For `isShowMeOnly` navigation asks, actually take the operator to Explore (or an impossible-to-miss primary navigation CTA) instead of only dumping link text into the Map resource-chip block. 0-hop means the fast path that skips the dot-ai LLM for pure "show me logs/metrics/…" navigation and answers from Grafana datasources alone. Classifier exists; navigation completion is the gap. | `grafanaExplore.ts` `isShowMeOnly`; orchestrator import path | usability-gap | OUT-OF-SCOPE (owned by PRD #6 issue #6 / PR #22; was SCHEDULED E2) | — |
+| I-060 | Drilldowns as clickable chips | Render thread `drilldowns` as interactive chips beside the answer, not only as raw links inside the Map text block. Map is the progressive-context resource-chip line in `src/utils/progressiveContext.ts` packed for the model; chips are the human click path into Explore/drilldown apps from `buildDrilldownLinks()`. This finishes the incomplete drilldown UI that still leaves operators reading link text instead of clicking chips. | `grafanaExplore.ts`; DotAIPage Map/answer UI | usability-gap | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED E1) | — |
+| I-061 | Navigate on pure show-me asks | For `isShowMeOnly` navigation asks, actually take the operator to Explore (or an impossible-to-miss primary navigation CTA) instead of only dumping link text into the Map resource-chip block. 0-hop means the fast path that skips the dot-ai LLM for pure "show me logs/metrics/…" navigation and answers from Grafana datasources alone. Classifier exists; navigation completion is the gap. | `grafanaExplore.ts` `isShowMeOnly`; orchestrator import path | usability-gap | OUT-OF-SCOPE (owned by PRD #6 issue #6; was SCHEDULED E2) | — |
 | I-062 | Clean Analyze-this handoff | Change **Analyze this** so the Remediate issue box receives a human-editable problem statement rather than the structured Current facts preamble (`Resources: / Asked: / What's true now:` from `rewriteCurrent` in `src/utils/progressiveContext.ts`). Today `onAnalyzeThis` copies `threads.query.current` verbatim into intent. | `DotAIPage.tsx:137-150`; `progressiveContext.ts:231-241` | usability-gap | SCHEDULED | E3 |
 | I-063 | Land stack on upstream repo | Propose/merge the usability stack toward upstream `vfarcic/dot-ai-grafana` (building on open `vfarcic/dot-ai-grafana#3` and fork fix PRs such as `prior working branch`), not only the personal fork. Visible change: upstream PR(s) with CI green and maintainer review requested. | `vfarcic/dot-ai-grafana#3`; working-branch PR trail | process | SCHEDULED | F5 |
 | I-064 | Session handoff skill | Create a `/handoff` skill for session lifecycle (split, boot-verify, claim, parent release) so long agent sessions transfer cleanly. Factory/process tooling, not Grafana plugin runtime. | loop-notes (process) | loop-notes | OUT-OF-SCOPE (process/factory — not plugin) | — |
@@ -768,7 +768,7 @@ A topology view is also where the abstraction problem already documented in this
 | I-072 | Detect cross-cluster managed workloads | Detect when a workload carries an abstraction ownership label or ArgoCD tracking annotation but the owning API group (for example `kro.run`) is absent from the cluster the plugin/engine can see, and say so in the answer instead of presenting an orphan child. Worked example: `app.example.com/managed-by=example-kro-application` on workload-cluster objects while `ResourceGraphDefinition` lives only on the host cluster. Visible change: honest "parent defined on another cluster" copy with children still evidenced. | this PRD §IaC two-cluster finding | iac-abstraction | OPEN | — |
 | I-073 | Connect dot-ai to host KRO namespaces | Give dot-ai visibility of the host cluster's `kro-system` and `gitops` namespaces (multi-cluster reach or scan configuration) so the parent KRO abstraction becomes an observable API object rather than only a label on rendered children. This is platform/engine work, not Grafana plugin code; recorded so the gap is not lost when triage happens. Visible change would be engine-side: parent CR listed in capability/context results. | this PRD §IaC remedy 1; owner host-cluster fact | iac-platform | OPEN | — |
 | I-074 | Refresh stale capability scan index | Refresh dot-ai capability scanning and confirm `CapabilityScanConfig` is live and producing current sessions. Sampled capability records show `analyzedAt` between `2026-08-20` and `2026-08-22` while the `dot-ai` namespace was created `2026-08-24`, and a capabilities `progress` call returned no scan sessions. This is independent of abstraction visibility. Visible change: fresh `analyzedAt` and a non-empty scan progress after re-scan. | this PRD §IaC capability freshness; capability-management docs | iac-platform | OPEN | — |
-| I-075 | Stay orchestrator-neutral in plugin | Adopt no KRO-specific or Crossplane-specific code paths in the Grafana plugin. dot-ai already treats abstractions as generic CRDs, and Headlamp registers detail actions with no kind filter; special-casing orchestrators here would breach the thin-client boundary in PRD #1 Design Decision 11. Visible change: none by design — label/annotation heuristics and plain-English intents only. | this PRD §IaC default position; PRD #1 DD11; capability-management docs | iac-abstraction | KILLED (deliberate — orchestrator-neutral by design; PRD #1 DD11 thin-client boundary) | — |
+| I-075 | Stay orchestrator-neutral in plugin | Adopt no KRO-specific or Crossplane-specific code paths in the Grafana plugin. dot-ai already treats abstractions as generic CRDs, and Headlamp registers detail actions with no kind filter; special-casing orchestrators here would breach the thin-client boundary in PRD #1 Design Decision 11. Visible change: none by design — label/annotation heuristics and plain-English intents only. | this PRD §IaC default position; PRD #1 design choice; capability-management docs | iac-abstraction | KILLED (deliberate — orchestrator-neutral by design; PRD #1 design choice thin-client boundary) | — |
 | I-076 | Leave detail-page actions to Headlamp | Leave resource-detail-page AI action injection to Headlamp. `vfarcic/dot-ai-headlamp` `src/index.tsx` already mounts `RemediateDetailSection` and `OperateDetailSection` on every kind with no filter; duplicating that surface inside Grafana would blur the companion-UI split. Visible change: none in this plugin — operators continue to act from Headlamp detail pages. | `vfarcic/dot-ai-headlamp` `src/index.tsx`; this PRD §IaC findings table | iac-role-split | OUT-OF-SCOPE (Headlamp owns; vfarcic/dot-ai-headlamp src/index.tsx) | — |
 | I-077 | Leave Recommend wizard to Headlamp | MOVED → PRD #7 (prds/7-evidence-grounded-change-safety.md) **Considered and deferred** (not active Build/Update-in-Grafana scope). Full text preserved there. Provenance: vfarcic/dot-ai-headlamp README + src/index.tsx; usability PRD IaC findings table. | vfarcic/dot-ai-headlamp README + src/index.tsx; usability PRD IaC findings table | iac-role-split | OUT-OF-SCOPE (MOVED → PRD #7 considered-and-deferred) | — |
 | I-078 | Consider Knowledge Base on Grafana | Decide whether to adopt Knowledge Base search on the Grafana surface. Headlamp ships it today; this plugin does not. If wanted, it is a product add behind the existing thin-client proxy; if deliberately Headlamp-only, document that in the role split so operators know where to look. Visible change depends on Viktor's call (see Open questions for Viktor #4). | `vfarcic/dot-ai-headlamp` README; this PRD open question 4 | iac-role-split | OPEN | — |
@@ -784,14 +784,14 @@ A topology view is also where the abstraction problem already documented in this
 
 | date | decision | rationale |
 |------|----------|-----------|
-| 2026-09-03 | Grafana plugin stays orchestrator-neutral — no KRO-specific or Crossplane-specific code | PRD #1 DD11 thin-client / companion-vs-core boundary. |
+| 2026-09-03 | Grafana plugin stays orchestrator-neutral — no KRO-specific or Crossplane-specific code | PRD #1 design choice thin-client / companion-vs-core boundary. |
 | 2026-09-03 | Resolving abstractions to child workloads for stack evidence and Explore deep links is in scope | Plugin builds LogQL/PromQL and links from pod/namespace names. |
 | 2026-09-03 | Abstraction-aware evidence demoed via `app.example.com/managed-by=example-kro-application` | Parent→child recoverable without kro.run API or host-cluster access. |
 | 2026-09-03 | Host-cluster KRO visibility is platform/engine work, outside this fence | Must not block plugin-side child evidence packing. |
 | 2026-09-03 | Resource-detail action injection stays with Headlamp | I-076; kind-agnostic detail is Headlamp's surface. |
 | 2026-09-03 | **Viktor demarcation:** no Grafana day-2 operate/Build wizard in this track | Grafana = observability-first + GitOps-PR trigger; Headlamp = object lifecycle. Build/Update ideas deferred on PRD #7, not delivered as Grafana cluster-manager UI. |
 | 2026-09-03 | PRD #7 = evidence-grounded pre-flight + post-merge verify (not Build/Update) | Unowned loop halves that need time-series; only Grafana can close them. Execute trigger remains PRD #5. |
-| 2026-09-03 | M-C and M-E deferred to PRD #6; nothing deleted | Owner split issue #6 / PR #22. Residual C2–C4/E3 stay this-PRD owned inside deferred section. |
+| 2026-09-03 | M-C and M-E deferred to PRD #6; nothing deleted | Owner split issue #6. Residual C2–C4/E3 stay this-PRD owned inside deferred section. |
 | 2026-09-03 | M-A marked DONE on `working branch` | Usability delta committed; Map/markdown/show-me product ownership still PRD #6. |
 
 ## Work Log
@@ -809,5 +809,5 @@ A topology view is also where the abstraction problem already documented in this
 ### 2026-09-03 — Reconcile with PRD #6; stand up PRD #7 (reframed)
 
 - **Issue**: Draft collided with owner split (issue #6). First PRD #7 sketch as Build/Update-in-Grafana was **wrong** vs Viktor: he blesses GitOps-PR execute (PRD #5) and rejects Grafana as second cluster manager; Headlamp keeps day-2 lifecycle.
-- **Action**: Fetched real PRD #6 from PR #22. Boundary map. Deferred M-C/M-E verbatim. Kept M-A/B/D/F + IaC + topology. Created `prds/7-evidence-grounded-change-safety.md` (pre-flight + post-merge verify). I-026/I-077 stubs → PRD #7 considered-and-deferred. I-086–I-090 on PRD #7 active scope.
+- **Action**: Fetched real PRD #6 from . Boundary map. Deferred M-C/M-E verbatim. Kept M-A/B/D/F + IaC + topology. Created `prds/7-evidence-grounded-change-safety.md` (pre-flight + post-merge verify). I-026/I-077 stubs → PRD #7 considered-and-deferred. I-086–I-090 on PRD #7 active scope.
 - **Prompt**: Split usability draft along PRD boundaries; PRD #7 evidence-grounded change safety (not Build/Update).
