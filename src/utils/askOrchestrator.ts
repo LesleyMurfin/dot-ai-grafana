@@ -301,7 +301,7 @@ export async function runAskOrchestrator(args: {
     });
     const meta: AskMeta = {
       hop: 1,
-      hops: 1,
+      hops: 1, // remediate is one planned hop
       current_empty: !args.thread.current.trim(),
       first_hop: 'dot-ai',
       branch: 'initial',
@@ -393,8 +393,8 @@ export async function runAskOrchestrator(args: {
     });
     lastPacked = packed;
     const meta: AskMeta = {
-      hop: hops,
-      hops,
+      hop: hops, // current hop (1-based)
+      hops: MAX_ASK_HOPS, // planned cap — not the same field as hop
       current_empty: currentEmpty,
       first_hop: firstHop,
       branch,

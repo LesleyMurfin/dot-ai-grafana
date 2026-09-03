@@ -1,5 +1,4 @@
 import React from 'react';
-import { BrowserRouter } from 'react-router-dom';
 import { render, screen, waitFor } from '@testing-library/react';
 import App from './App';
 import { testIds } from '../testIds';
@@ -7,15 +6,13 @@ import { testIds } from '../testIds';
 describe('Components/App', () => {
   test('renders the DotAI tools page as default route', async () => {
     render(
-      <BrowserRouter>
-        <App
-          meta={{} as never}
-          basename=""
-          onNavChanged={() => undefined}
-          query={{} as never}
-          path=""
-        />
-      </BrowserRouter>
+      <App
+        meta={{} as never}
+        basename=""
+        onNavChanged={() => undefined}
+        query={{} as never}
+        path=""
+      />
     );
 
     await waitFor(() => {

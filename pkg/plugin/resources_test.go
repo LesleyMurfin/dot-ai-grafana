@@ -138,9 +138,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -294,9 +295,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -349,9 +351,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -581,8 +584,8 @@ func TestTestConnection(t *testing.T) {
 		}
 	})
 
-	t.Run("saved_url_editor_no_admin_gate", func(t *testing.T) {
-		// Acceptance: saved-URL tests without a divergent draft URL must not require Admin.
+	t.Run("saved_url_editor_requires_admin", func(t *testing.T) {
+		// Viktor: non-Admin must not probe the saved apiUrl.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if got := r.Header.Get("Authorization"); got != "Bearer from-settings" {
 				t.Errorf("Authorization=%q", got)
@@ -615,13 +618,13 @@ func TestTestConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
 	})
 
-	t.Run("same_url_as_saved_editor_no_admin_gate", func(t *testing.T) {
-		// Same draft apiUrl as saved settings is not a divergent draft URL.
+	t.Run("same_url_as_saved_editor_requires_admin", func(t *testing.T) {
+		// Same draft apiUrl as saved still requires Admin.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"connected":true}`))
@@ -655,7 +658,7 @@ func TestTestConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
 	})
@@ -915,7 +918,7 @@ func TestProxyBodyLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("empty_body_defaults_to_empty_object", func(t *testing.T) {
+	t.Run("empty_body_requires_intent", func(t *testing.T) {
 		var gotBody []byte
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotBody, _ = io.ReadAll(r.Body)
@@ -946,11 +949,14 @@ func TestProxyBodyLimits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusBadRequest {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
-		if strings.TrimSpace(string(gotBody)) != "{}" {
-			t.Fatalf("expected upstream to receive {}, got %q", string(gotBody))
+		if !strings.Contains(string(resp.Body), "intent is required") {
+			t.Fatalf("want intent required, got %s", string(resp.Body))
+		}
+		if len(gotBody) != 0 {
+			t.Fatalf("upstream must not be dialed without intent, got %q", string(gotBody))
 		}
 	})
 }
@@ -1083,7 +1089,7 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 	})
 
 
-	t.Run("query_still_forwards_extra_fields", func(t *testing.T) {
+	t.Run("query_allowlists_intent_only", func(t *testing.T) {
 		gotPath, gotBody = "", nil
 		payload := []byte(`{"intent":"list pods","execute":true,"mode":"execute"}`)
 		var resp backend.CallResourceResponse
@@ -1111,9 +1117,14 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		if forwarded["intent"] != "list pods" {
 			t.Fatalf("intent=%v body=%s", forwarded["intent"], string(gotBody))
 		}
-		// Query path is unchanged: extra keys are still forwarded.
-		if _, ok := forwarded["execute"]; !ok {
-			t.Fatalf("query should forward execute unchanged, body=%s", string(gotBody))
+		if _, ok := forwarded["execute"]; ok {
+			t.Fatalf("query must not forward execute, body=%s", string(gotBody))
+		}
+		if _, ok := forwarded["mode"]; ok {
+			t.Fatalf("query must not forward mode, body=%s", string(gotBody))
+		}
+		if len(forwarded) != 1 {
+			t.Fatalf("want only intent, got %v", forwarded)
 		}
 	})
 }
@@ -1698,7 +1709,7 @@ func mustJSONString(s string) string {
 }
 
 func TestAskMetaFromBodyReadsBranch(t *testing.T) {
-	body := []byte(`{"hop":3,"hops":3,"current_empty":false,"first_hop":"grafana","branch":"hedge"}`)
+	body := []byte(`{"intent":"list pods","hop":3,"hops":3,"current_empty":false,"first_hop":"grafana","branch":"hedge","execute":true}`)
 	hop, hops, currentEmpty, firstHop, branch := askMetaFromBody(body)
 	if hop != 3 || hops != 3 || firstHop != "grafana" || branch != "hedge" {
 		t.Fatalf("hop=%d hops=%d firstHop=%q branch=%q", hop, hops, firstHop, branch)
@@ -1717,8 +1728,11 @@ func TestAskMetaFromBodyReadsBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strip: %v", err)
 	}
-	if strings.Contains(string(out), "branch") {
-		t.Fatalf("branch forwarded upstream: %s", out)
+	if strings.Contains(string(out), "branch") || strings.Contains(string(out), "execute") {
+		t.Fatalf("extra keys forwarded upstream: %s", out)
+	}
+	if !strings.Contains(string(out), `"intent":"list pods"`) {
+		t.Fatalf("intent dropped: %s", out)
 	}
 	if strings.Contains(askBodyPreview(body), "branch") {
 		t.Fatalf("branch leaked into body preview")

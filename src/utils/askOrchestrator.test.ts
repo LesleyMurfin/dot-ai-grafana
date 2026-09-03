@@ -208,7 +208,7 @@ describe('runAskOrchestrator', () => {
     expect(calls[0].meta).toEqual(
       expect.objectContaining({
         hop: 1,
-        hops: 1,
+        hops: MAX_ASK_HOPS,
         current_empty: false,
         first_hop: 'grafana',
       })
@@ -216,7 +216,7 @@ describe('runAskOrchestrator', () => {
     expect(calls[1].meta).toEqual(
       expect.objectContaining({
         hop: 2,
-        hops: 2,
+        hops: MAX_ASK_HOPS,
         first_hop: 'grafana',
       })
     );

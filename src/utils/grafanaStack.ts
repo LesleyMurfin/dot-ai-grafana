@@ -468,10 +468,12 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   let tempoNote: string | undefined;
   let alertNote: string | undefined;
 
-  const loki = await getDataSourceByType('loki');
-  const prom = await getDataSourceByType('prometheus');
-  const tempo = await getDataSourceByType('tempo');
-  const am = await getDataSourceByType('alertmanager');
+  const [loki, prom, tempo, am] = await Promise.all([
+    getDataSourceByType('loki'),
+    getDataSourceByType('prometheus'),
+    getDataSourceByType('tempo'),
+    getDataSourceByType('alertmanager'),
+  ]);
 
   const mapParts = [
     dsMapToken('Loki', loki?.settings),
@@ -487,79 +489,72 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   }
   const mapHint = mapParts.join(', ');
 
-  // --- Loki (always; cluster-wide when no pod/ns) ---
-  if (!loki?.ds) {
-    lokiNote = 'Loki datasource missing';
-  } else {
+  const queryOne = async (
+    ds: { ds?: { query: (req: DataQueryRequest) => unknown } } | undefined,
+    missing: string,
+    failPrefix: string,
+    run: () => Promise<{ lines: string[]; emptyNote: string }>
+  ): Promise<{ lines: string[]; note?: string }> => {
+    if (!ds?.ds) {
+      return { lines: [], note: missing };
+    }
     try {
+      const { lines, emptyNote } = await run();
+      if (lines.length === 0) {
+        return { lines, note: emptyNote };
+      }
+      return { lines };
+    } catch (e) {
+      return { lines: [], note: `${failPrefix} (${e instanceof Error ? e.message : 'query failed'})` };
+    }
+  };
+
+  const [lokiRes, promRes, tempoRes, amRes] = await Promise.all([
+    queryOne(loki, 'Loki datasource missing', 'no log lines', async () => {
       const resp = await runDsQuery(
-        loki.ds,
+        loki!.ds!,
         baseRequest<LokiTarget>(
           [{ refId: 'A', expr: logql, queryType: 'range', maxLines: LOG_LINE_CAP }],
           'dotai-loki'
         ) as DataQueryRequest
       );
-      logLines = linesFromLokiFrames(framesOf(resp));
-      if (logLines.length === 0) {
-        lokiNote = scoped
+      const lines = linesFromLokiFrames(framesOf(resp));
+      return {
+        lines,
+        emptyNote: scoped
           ? 'no log lines for this pod/namespace in the last 15m'
-          : 'no log lines cluster-wide for error-like events in the last 15m';
-      }
-    } catch (e) {
-      lokiNote = `no log lines (${e instanceof Error ? e.message : 'Loki query failed'})`;
-    }
-  }
-
-  // --- Prometheus (always; cluster-wide restarts when no pod/ns) ---
-  if (!prom?.ds) {
-    promNote = 'Prometheus datasource missing';
-  } else {
-    try {
+          : 'no log lines cluster-wide for error-like events in the last 15m',
+      };
+    }),
+    queryOne(prom, 'Prometheus datasource missing', 'no metric samples', async () => {
       const resp = await runDsQuery(
-        prom.ds,
+        prom!.ds!,
         baseRequest<PromTarget>(
           [{ refId: 'B', expr: promql, instant: true, format: 'table' }],
           'dotai-prometheus'
         ) as DataQueryRequest
       );
-      promLines = factsFromPromFrames(framesOf(resp));
-      if (promLines.length === 0) {
-        promNote = scoped
+      const lines = factsFromPromFrames(framesOf(resp));
+      return {
+        lines,
+        emptyNote: scoped
           ? 'no metric samples for this pod/namespace in the last 15m'
-          : 'no metric samples cluster-wide for restarts in the last 15m';
-      }
-    } catch (e) {
-      promNote = `no metric samples (${e instanceof Error ? e.message : 'Prometheus query failed'})`;
-    }
-  }
-
-  // --- Tempo ---
-  if (!tempo?.ds) {
-    tempoNote = 'Tempo datasource missing';
-  } else {
-    try {
+          : 'no metric samples cluster-wide for restarts in the last 15m',
+      };
+    }),
+    queryOne(tempo, 'Tempo datasource missing', 'no traces', async () => {
       const search = target.pod || target.namespace || question.slice(0, 80);
       const resp = await runDsQuery(
-        tempo.ds,
+        tempo!.ds!,
         baseRequest<TempoTarget>(
           [{ refId: 'C', queryType: 'traceqlSearch', query: search, limit: TEMPO_TRACE_CAP }],
           'dotai-tempo'
         ) as DataQueryRequest
       );
-      tempoLines = tracesFromTempoFrames(framesOf(resp));
-      if (tempoLines.length === 0) {
-        tempoNote = 'no traces for this target in the last 15m';
-      }
-    } catch (e) {
-      tempoNote = `no traces (${e instanceof Error ? e.message : 'Tempo query failed'})`;
-    }
-  }
-
-  // --- Alertmanager (cluster-wide when no pod/ns filter) ---
-  if (!am?.ds) {
-    alertNote = 'Alertmanager datasource missing';
-  } else {
-    try {
+      const lines = tracesFromTempoFrames(framesOf(resp));
+      return { lines, emptyNote: 'no traces for this target in the last 15m' };
+    }),
+    queryOne(am, 'Alertmanager datasource missing', 'no alerts', async () => {
       const exprParts: string[] = [];
       if (target.namespace) {
         exprParts.push(`namespace="${target.namespace}"`);
@@ -569,17 +564,22 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       }
       const expr = exprParts.length > 0 ? `{${exprParts.join(',')}}` : undefined;
       const resp = await runDsQuery(
-        am.ds,
+        am!.ds!,
         baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
       );
-      alertLines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
-      if (alertLines.length === 0) {
-        alertNote = 'no alerts';
-      }
-    } catch (e) {
-      alertNote = `no alerts (${e instanceof Error ? e.message : 'Alertmanager query failed'})`;
-    }
-  }
+      const lines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
+      return { lines, emptyNote: 'no alerts' };
+    }),
+  ]);
+
+  logLines = lokiRes.lines;
+  lokiNote = lokiRes.note;
+  promLines = promRes.lines;
+  promNote = promRes.note;
+  tempoLines = tempoRes.lines;
+  tempoNote = tempoRes.note;
+  alertLines = amRes.lines;
+  alertNote = amRes.note;
 
   const currentEmpty = isStackCurrentEmpty({ logLines, promLines, tempoLines, alertLines });
 
