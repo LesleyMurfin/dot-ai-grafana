@@ -8,7 +8,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 
 - **Query** — Ask questions about your cluster in plain English. Responses are text (`data.result.summary`).
 - **Remediate (analysis only)** — Get AI-powered issue analysis. No execute, apply, or mutation UI.
-- **Progressive context** — On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources (`getDataSourceSrv`, no hardcoded uids) and packs **Current** + **Map** into the same `{intent}` string. **History** is on screen only (last 5 turns) and is never POSTed. No `sessionId`. One Ask may issue up to 3 dot-ai POSTs (unscoped question or answer vs Current). Remediate is one hop and reuses Query Current. JSONL ask log: `/var/lib/grafana/dotai-ask.log` (no tokens; hop meta stripped before upstream).
+- **Progressive context** — On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources (`getDataSourceSrv`, no hardcoded uids) and packs **Current** + **Map** into the same `{intent}` string. A condensed **Prior:** block (up to `MAX_PRIOR_CHARS` = 240 characters, built from recent turns) is also included in the intent inside the unchanged 1000-char budget; under pressure Prior is shed before the hard cap (Map drops first). Full History remains on screen (last 5 turns). No `sessionId`. One Ask may issue up to 3 dot-ai POSTs (unscoped question or answer vs Current). Remediate is one hop and reuses Query Current. JSONL ask log: `/var/lib/grafana/dotai-ask.log` (no tokens; hop meta stripped before upstream).
 
 ## Requirements
 
@@ -142,7 +142,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. |
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
 | Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** JSONL may include packed Current (Loki/Prom lines). Each line records the Grafana user `login` and org `role`; never the user's email or display name. No Grafana tokens. Credentials inside *application* logs can appear. |
-| Show context | Show Current, Map, and History on the page. **On by default.** Display-only; independent of Send Grafana evidence. |
+| Show context | Show Current, Map, and History panels on the page. **On by default.** Toggles on-page display only; independent of Send Grafana evidence. Does not control intent packing (Current/Map/Prior). |
 | Send Grafana evidence | `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, Asks do not pack Grafana DS facts. Independent of Show context. |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |
 
@@ -168,7 +168,7 @@ Grafana plugin resource calls are limited by the plugin host. This plugin uses t
   Ask ── Remediate: pack Query Current + issue ── 1x POST /remediate
     │
     └── Query
-          Read Loki/Prom/Tempo/AM  →  Current + Map  (History never POSTed)
+          Read Loki/Prom/Tempo/AM  →  Current + Map + condensed Prior (≤240 chars in 1000-char budget)
           classifyFirstHop:
             alerts/logs/metrics/traces/"top issues"/default → grafana
             list/show namespaces|pods|…                   → dot-ai
@@ -185,7 +185,7 @@ Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). A
 
 The published OpenAPI document for dot-ai includes execute/operate/recommend. This plugin does **not** generate a client from that full schema — that would pull mutation tools into an analysis-only Grafana app. Outbound HTTP uses the Grafana plugin SDK `httpclient` for the three read paths above.
 
-**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into the same `{intent}` / `{issue}` string. History is display-only. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
+**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into the same `{intent}` / `{issue}` string, plus a condensed **Prior:** block from recent turns (≤ `MAX_PRIOR_CHARS` = 240 chars inside the 1000-char intent budget; shed under pressure before the hard cap). Full History stays on screen. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
 
 ## Ask log (troubleshooting)
 
