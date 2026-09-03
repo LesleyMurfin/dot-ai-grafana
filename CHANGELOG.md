@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.0.0 (Unreleased)
+## 0.1.0 (2026-09-02)
 
-Initial release.
+Unsigned alpha: first usable lesleymurfin-dotai-app build for riley-monitoring Grafana.

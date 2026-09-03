@@ -1,4 +1,4 @@
-module github.com/lesleymurfin/dot-ai
+module github.com/vfarcic/dot-ai-grafana
 
 go 1.26.5
 

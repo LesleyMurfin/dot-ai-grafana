@@ -1,50 +1,16 @@
-<!-- This README file is going to be the one displayed on the Grafana.com website for your plugin. Uncomment and replace the content here before publishing.
+# DevOps AI Toolkit (dot-ai)
 
-Remove any remaining comments before publishing as these may be displayed on Grafana.com -->
-
-# Dot-Ai
-
-<!-- To help maximize the impact of your README and improve usability for users, we propose the following loose structure:
-
-**BEFORE YOU BEGIN**
-- Ensure all links are absolute URLs so that they will work when the README is displayed within Grafana and Grafana.com
-- Be inspired ✨
-  - [grafana-polystat-panel](https://github.com/grafana/grafana-polystat-panel)
-  - [volkovlabs-variable-panel](https://github.com/volkovlabs/volkovlabs-variable-panel)
-
-**ADD SOME BADGES**
-
-Badges convey useful information at a glance for users whether in the Catalog or viewing the source code. You can use the generator on [Shields.io](https://shields.io/badges/dynamic-json-badge) together with the Grafana.com API
-to create dynamic badges that update automatically when you publish a new version to the marketplace.
-
-- For the URL parameter use `https://grafana.com/api/plugins/your-plugin-id`.
-- Example queries:
-  - Downloads: `$.downloads`
-  - Catalog Version: `$.version`
-  - Grafana Dependency: `$.grafanaDependency`
-  - Signature Type: `$.versionSignatureType`
-- Optionally, for the logo parameter use `grafana`.
-
-Full example: ![Dynamic JSON Badge](https://img.shields.io/badge/dynamic/json?logo=grafana&query=$.version&url=https://grafana.com/api/plugins/grafana-polystat-panel&label=Marketplace&prefix=v&color=F47A20)
-
-Consider other [badges](https://shields.io/badges) as you feel appropriate for your project.
-
-## Overview / Introduction
-Provide one or more paragraphs as an introduction to your plugin to help users understand why they should use it.
-
-Consider including screenshots:
-- in [plugin.json](https://grafana.com/developers/plugin-tools/reference/plugin-json#info) include them as relative links.
-- in the README ensure they are absolute URLs.
+AI-powered Kubernetes cluster intelligence inside Grafana — query and analysis-only remediate via the [DevOps AI Toolkit](https://devopstoolkit.ai) REST API.
 
 ## Requirements
-List any requirements or dependencies they may need to run the plugin.
 
-## Getting Started
-Provide a quick start on how to configure and use the plugin.
+- Grafana >= 11.0
+- A reachable dot-ai MCP server (tools REST on port 3456 by default)
 
-## Documentation
-If your project has dedicated documentation available for users, provide links here. For help in following Grafana's style recommendations for technical documentation, refer to our [Writer's Toolkit](https://grafana.com/docs/writers-toolkit/).
+## Getting started
 
-## Contributing
-Do you want folks to contribute to the plugin or provide feedback through specific means? If so, tell them how!
--->
+1. Install the plugin and allow unsigned load if needed: `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app`
+2. As Admin, set **MCP Server URL** and **Auth Token**, then **Test connection**
+3. Open **dot-ai** from the sidebar, choose Query or Remediate (analysis only), submit a plain-language question
+
+Remediate never executes changes. For operate/execute, use the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp).
