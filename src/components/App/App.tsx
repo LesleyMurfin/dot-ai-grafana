@@ -1,5 +1,4 @@
 import React, { Suspense } from 'react';
-import { Route, Routes } from 'react-router-dom';
 import type { AppRootProps } from '@grafana/data';
 import { LoadingPlaceholder } from '@grafana/ui';
 import type { AppPluginSettings } from '../AppConfig/AppConfig';
@@ -11,9 +10,7 @@ function App(props: AppRootProps<AppPluginSettings>) {
   const sendGrafanaEvidence = props.meta.jsonData?.sendGrafanaEvidence !== false;
   return (
     <Suspense fallback={<LoadingPlaceholder text="Loading…" />}>
-      <Routes>
-        <Route path="*" element={<DotAIPage showContext={showContext} sendGrafanaEvidence={sendGrafanaEvidence} />} />
-      </Routes>
+      <DotAIPage showContext={showContext} sendGrafanaEvidence={sendGrafanaEvidence} />
     </Suspense>
   );
 }

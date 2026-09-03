@@ -4,7 +4,7 @@ export function askErrorTitle(message: string, status = 0): string {
   if (message === ASK_CANCELLED_MESSAGE || /cancelled/i.test(message)) {
     return 'Ask cancelled';
   }
-  if (/120s plugin limit|timed out|timeout|deadline exceeded/i.test(message) || status === 504) {
+  if (/120s limit per hop|120s plugin limit|timed out|timeout|deadline exceeded/i.test(message) || status === 504) {
     return 'Ask timed out';
   }
   if (status === 401 || /HTTP 401|\bunauthori[sz]ed\b|auth token/i.test(message)) {

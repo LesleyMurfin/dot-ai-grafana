@@ -214,21 +214,27 @@ func intFromAny(v any) int {
 	return 0
 }
 
-// stripAskMetaForUpstream drops hop meta before dot-ai.
-// Remediate stays analysis-only allowlist. Query only removes hop meta keys.
+// stripAskMetaForUpstream allowlists fields before dot-ai (query and remediate).
 func stripAskMetaForUpstream(body []byte, toolPath string) ([]byte, error) {
 	if toolPath == "/api/v1/tools/remediate" {
 		return sanitizeRemediateBody(body)
 	}
+	return sanitizeQueryBody(body)
+}
+
+// sanitizeQueryBody allowlists analysis-only query fields. Hop meta and any
+// extra keys (including execute/apply) are dropped so query matches remediate
+// "allowlisted by construction".
+func sanitizeQueryBody(body []byte) ([]byte, error) {
 	var in map[string]any
 	if err := json.Unmarshal(body, &in); err != nil {
-		// Non-JSON query body: forward as-is (legacy).
-		return body, nil
+		return nil, fmt.Errorf("invalid JSON body")
 	}
-	for _, k := range []string{"hop", "hops", "current_empty", "first_hop", "branch"} {
-		delete(in, k)
+	intent, _ := in["intent"].(string)
+	if strings.TrimSpace(intent) == "" {
+		return nil, fmt.Errorf("intent is required")
 	}
-	return json.Marshal(in)
+	return json.Marshal(map[string]any{"intent": intent})
 }
 
 // appendAskLog writes one JSON line for a completed query/remediate call.
@@ -309,6 +315,16 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Configuration is Admin-only; Test connection must not let a Viewer probe
+	// the saved URL with a token they supply.
+	if !isOrgAdmin(req.Context()) {
+		writeJSON(w, http.StatusForbidden, testConnectionResponse{
+			Status:  "error",
+			Message: "Admin role required to test connection",
+		})
+		return
+	}
+
 	apiURL := a.apiURL
 	apiKey := a.apiKey
 
@@ -326,16 +342,7 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 		bodyURL := strings.TrimRight(strings.TrimSpace(body.APIURL), "/")
 		bodyKey := strings.TrimSpace(body.APIKey)
 
-		// Draft URL different from saved settings can only be probed by org Admin.
-		// Saved-URL tests (empty body URL or same as configured) may proceed without Admin.
 		if bodyURL != "" && bodyURL != a.apiURL {
-			if !isOrgAdmin(req.Context()) {
-				writeJSON(w, http.StatusForbidden, testConnectionResponse{
-					Status:  "error",
-					Message: "Admin role required to test a draft apiUrl",
-				})
-				return
-			}
 			apiURL = bodyURL
 			if bodyKey != "" {
 				apiKey = bodyKey

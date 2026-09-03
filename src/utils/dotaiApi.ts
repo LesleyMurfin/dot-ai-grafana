@@ -25,7 +25,8 @@ export type AskCallMeta = {
  * Shown whenever the 120s tool-client ceiling (pkg/plugin newPluginHTTPClient) ends an Ask.
  * One line, actionable; there is no async 202 path to point at.
  */
-export const ASK_TIMEOUT_MESSAGE = 'Ask stopped at the 120s plugin limit; retry or narrow the question.';
+export const ASK_TIMEOUT_MESSAGE =
+  'Ask stopped at the 120s limit per hop (up to 3 hops); retry or narrow the question.';
 
 const TIMEOUT_TEXT = /abort|timed out|timeout|deadline exceeded|gateway time-?out/i;
 

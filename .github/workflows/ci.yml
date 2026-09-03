@@ -16,17 +16,6 @@ permissions:
   contents: read
 
 jobs:
-  public-surface:
-    name: Public surface check
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - name: Forbidden strings and secret markers
-        run: bash scripts/public-surface-check.sh
-
   build:
     name: Build, lint and unit tests
     runs-on: ubuntu-latest

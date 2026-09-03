@@ -166,10 +166,9 @@ Subtests listed for navigation; the contract count is the 13 top-level funcs.
 go test ./pkg/plugin/...
 npm run test:ci
 npm run e2e
-bash scripts/public-surface-check.sh
 ```
 
-CI adds public-surface, build/lint/unit, and multi-version Playwright (enterprise image matrix including 11.x through current majors).
+CI is build/lint/unit and multi-version Playwright (enterprise image matrix including 11.x through current majors). Fork-only `public-surface-check.sh` was dropped from this repo (Viktor: squash-merge for trailer hygiene instead).
 
 ### Envelope note (automation contract)
 

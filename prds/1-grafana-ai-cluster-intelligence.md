@@ -245,7 +245,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
   Go backend (every hop):
     strip hop/branch/first_hop before upstream
-    append JSONL ask log (always on; no tokens)
+    append JSONL ask log if Debug Log on (off by default; no Grafana tokens)
     Authorization: Bearer  -->  dot-ai
 
   dot-ai (unchanged):
@@ -433,7 +433,7 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 
 ## Success Criteria
 
-- Plugin installs cleanly into Grafana (9.x+/10.x/11.x)
+- Plugin installs cleanly into Grafana (`>=11.0`; 11.4 reference)
 - Users can submit natural language queries and receive text responses
 - Users can submit issue descriptions and receive analysis text
 - Configuration via Grafana plugin settings works (MCP URL + auth token)
@@ -449,13 +449,13 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 - Misconfiguration fails fast; specific errors with Retry
 - *(NFR)* plugin proxy < 500 ms overhead vs direct call (excluding model think time)
 
-**Note on version floor:** original success criteria list 9.x+/10.x/11.x; this revision proposes `>=11.0` with **11.4** must-pass (see Open Questions / deliberate deltas).
+**Note on version floor:** original success criteria listed 9.x+/10.x/11.x; **as-built is `>=11.0`** with **11.4** must-pass. 9.x/10.x not claimed.
 
 ## Risks & Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Grafana plugin API changes across versions | Plugin breaks on upgrade | Target Grafana 10.x+ with stable APIs, test across versions |
+| Grafana plugin API changes across versions | Plugin breaks on upgrade | Target Grafana `>=11.0` with stable APIs; CI 11.0–13 + nightly |
 | MCP server authentication complexity | Users can't configure plugin | Clear setup docs, connection test button in settings |
 | Go backend proxy adds latency | Slow responses | Minimal proxy logic, streaming if Grafana supports it |
 | Plugin review process (if publishing to marketplace) | Delayed availability | Start with unsigned/private distribution, publish later |
@@ -472,7 +472,7 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 
 - dot-ai MCP server running and accessible from Grafana instance
 - MCP server exposes `/api/v1/tools/query` and `/api/v1/tools/remediate` endpoints
-- Grafana 10.x or later (for stable app plugin APIs)
+- Grafana `>=11.0` (reference **11.4**; CI 11.0–13 + nightly)
 - `@grafana/create-plugin` toolchain for scaffolding
 
 ### Expansion: Additional dependencies
@@ -487,17 +487,17 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 
 ## Milestones
 
-- [ ] **Plugin scaffolding and build pipeline** — Grafana app plugin project created with `@grafana/create-plugin`, builds successfully, loads in Grafana dev environment
-- [ ] **Plugin configuration page** — Admin can configure MCP server URL and auth token via Grafana plugin settings, with connection test
-- [ ] **Backend proxy (Go)** — Backend plugin component proxies requests to MCP server with configured auth, handles errors gracefully
-- [ ] **Query tool UI** — Users can type natural language queries, submit, and see text responses from the MCP server
-- [ ] **Remediate analysis UI** — Users can describe issues, submit, and see AI-powered analysis text (no execution)
-- [ ] **Tool selector and shared layout** — Dropdown to switch between Query and Remediate, shared input/response layout, context-aware placeholders
-- [ ] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests
-- [ ] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
-- [ ] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
+- [x] **Plugin scaffolding and build pipeline** — Grafana app plugin project created with `@grafana/create-plugin`, builds successfully, loads in Grafana dev environment
+- [x] **Plugin configuration page** — Admin can configure MCP server URL and auth token via Grafana plugin settings, with connection test
+- [x] **Backend proxy (Go)** — Backend plugin component proxies requests to MCP server with configured auth, handles errors gracefully
+- [x] **Query tool UI** — Users can type natural language queries, submit, and see text responses from the MCP server
+- [x] **Remediate analysis UI** — Users can describe issues, submit, and see AI-powered analysis text (no execution)
+- [x] **Tool selector and shared layout** — Dropdown to switch between Query and Remediate, shared input/response layout, context-aware placeholders
+- [x] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests; Cancel + Retry in v1
+- [x] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
+- [x] **Grafana version compatibility testing** — CI Playwright on Grafana **11.0–13 + nightly** (floor `>=11.0.0`, 11.4 libs). Not 9.x/10.x.
 
-As-built: M0–M9 cover v1; floor is `grafanaDependency: ">=11.0.0"` (11.4 libs), not 10.x. Original checklist left unchecked. See [As-built v1](#expansion-as-built-v1-this-contribution).
+As-built: M0–M6/M8–M9 cover v1; M7 not in v1. Floor is `grafanaDependency: ">=11.0.0"` (11.4 libs), not 10.x. See [As-built v1](#expansion-as-built-v1-this-contribution).
 
 ### Expansion: Phase 1 detail (M0–M9 mapping to the checklist above)
 
