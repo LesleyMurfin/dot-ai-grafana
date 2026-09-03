@@ -1,0 +1,11 @@
+apiVersion: 1
+
+apps:
+  - type: 'devopstoolkit-dotai-app'
+    org_id: 1
+    org_name: 'devopstoolkit'
+    disabled: false
+    jsonData:
+      apiUrl: http://127.0.0.1:3456
+    secureJsonData:
+      apiKey: 'dev-token'

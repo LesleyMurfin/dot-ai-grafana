@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/grafana/grafana/main/docs/sources/developers/plugins/plugin.schema.json",
+  "type": "app",
+  "name": "dot-ai",
+  "id": "devopstoolkit-dotai-app",
+  "backend": true,
+  "executable": "gpx_dot_ai",
+  "info": {
+    "keywords": [
+      "app",
+      "kubernetes",
+      "ai",
+      "dot-ai"
+    ],
+    "description": "AI-powered Kubernetes cluster intelligence (query + analysis-only remediate) via dot-ai REST.",
+    "author": {
+      "name": "DevOps Toolkit",
+      "url": "https://devopstoolkit.ai"
+    },
+    "logos": {
+      "small": "img/logo.svg",
+      "large": "img/logo.svg"
+    },
+    "links": [
+      {
+        "name": "Website",
+        "url": "https://devopstoolkit.ai"
+      },
+      {
+        "name": "GitHub",
+        "url": "https://github.com/vfarcic/dot-ai-grafana"
+      }
+    ],
+    "screenshots": [],
+    "version": "%VERSION%",
+    "updated": "%TODAY%"
+  },
+  "includes": [
+    {
+      "type": "page",
+      "name": "dot-ai",
+      "path": "/a/%PLUGIN_ID%/",
+      "addToNav": true,
+      "defaultNav": true
+    },
+    {
+      "type": "page",
+      "icon": "cog",
+      "name": "Configuration",
+      "path": "/plugins/%PLUGIN_ID%",
+      "role": "Admin",
+      "addToNav": true
+    }
+  ],
+  "dependencies": {
+    "grafanaDependency": ">=11.0.0",
+    "plugins": []
+  }
+}
