@@ -82,7 +82,7 @@ describe('parsePodNamespace / buildLogQL', () => {
     ).toEqual({});
   });
 
-  test("Viktor's table: English stopwords and in-fallback do not become pod names", () => {
+  test('English stopwords and in-fallback do not become pod names', () => {
     expect(parsePodNamespace('show failing pods in production')).toEqual({});
     expect(parsePodNamespace('top issues in the cluster')).toEqual({});
     expect(parsePodNamespace('which pods are crashlooping in staging')).toEqual({});
@@ -95,7 +95,7 @@ describe('parsePodNamespace / buildLogQL', () => {
     });
   });
 
-  test("Viktor's table: generated LogQL never uses invented pod/ns labels", () => {
+  test('generated LogQL never uses invented pod/ns labels', () => {
     expect(buildLogQL(parsePodNamespace('show failing pods in production'))).toBe(CLUSTER_LOGQL);
     expect(buildLogQL(parsePodNamespace('top issues in the cluster'))).toBe(CLUSTER_LOGQL);
     expect(buildLogQL(parsePodNamespace('which pods are crashlooping in staging'))).toBe(CLUSTER_LOGQL);

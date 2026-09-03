@@ -585,7 +585,7 @@ func TestTestConnection(t *testing.T) {
 	})
 
 	t.Run("saved_url_editor_requires_admin", func(t *testing.T) {
-		// Viktor: non-Admin must not probe the saved apiUrl.
+		// Non-Admin must not probe the saved apiUrl.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if got := r.Header.Get("Authorization"); got != "Bearer from-settings" {
 				t.Errorf("Authorization=%q", got)

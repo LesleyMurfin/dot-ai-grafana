@@ -168,7 +168,7 @@ npm run test:ci
 npm run e2e
 ```
 
-CI is build/lint/unit and multi-version Playwright (enterprise image matrix including 11.x through current majors). Fork-only `public-surface-check.sh` was dropped from this repo (Viktor: squash-merge for trailer hygiene instead).
+CI is build/lint/unit and multi-version Playwright (enterprise image matrix including 11.x through current majors). Fork-only `public-surface-check.sh` was dropped from this repo (squash-merge for trailer hygiene instead).
 
 ### Envelope note (automation contract)
 

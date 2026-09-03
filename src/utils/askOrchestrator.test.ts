@@ -52,7 +52,7 @@ describe('isUnscopedQuestion / answerConflictsWithCurrent', () => {
     expect(isUnscopedQuestion('app=argocd status')).toBe(false);
   });
 
-  test("Viktor's table: bogus English pods do not block hop-2 across", () => {
+  test('bogus English pods do not block hop-2 across', () => {
     expect(isUnscopedQuestion('show failing pods in production')).toBe(true);
     expect(isUnscopedQuestion('top issues in the cluster')).toBe(true);
     expect(isUnscopedQuestion('which pods are crashlooping in staging')).toBe(true);
@@ -223,7 +223,7 @@ describe('runAskOrchestrator', () => {
     expect(result.summary).toContain('error boom');
   });
 
-  test('Viktor item 4: 30×145-char Loki dump still packs every hop ≤ 1000', async () => {
+  test('30×145-char Loki dump still packs every hop ≤ 1000', async () => {
     const lokiLines = Array.from({ length: 30 }, (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`);
     const current = [
       'Loki last 15m (pod/checkout-api ns/prod):',

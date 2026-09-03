@@ -11,7 +11,7 @@ import {
 } from './progressiveContext';
 
 describe('progressiveContext', () => {
-  test('Viktor item 4: packed intent contract is 1000 chars', () => {
+  test('packed intent contract is 1000 chars', () => {
     expect(MAX_INTENT_CHARS).toBe(1000);
     expect(MAX_CURRENT_CHARS).toBe(700);
   });
