@@ -59,22 +59,35 @@ export function drilldownAppUrl(pluginId: string): string | undefined {
 }
 
 /**
- * True when the Ask is only "show me/open/display logs|alerts|traces|metrics|dashboards".
- * "show logs for pod X" still goes to dot-ai. Diagnosis words still go to dot-ai.
+ * True when the Ask is only a pure navigation phrase:
+ * `(show me|open|display) the? (logs|alerts|traces|metrics|dashboards)`.
+ * Diagnosis tokens force POST (show-me does not skip). False positives on the
+ * 0-hop skip are dangerous — when ambiguous, return false so the engine runs.
  */
 export function isShowMeOnly(question: string): boolean {
-
-  const q = question.toLowerCase().replace(/\s+/g, ' ').trim();
+  // Lowercase; collapse whitespace; strip only surrounding .?! (keep interior).
+  const q = question
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[.?!]+|[.?!]+$/g, '')
+    .trim();
   if (!q) {
     return false;
   }
-  if (/\b(why|how|fix|remediat|improve|root cause|because|issue|issues|crash|failing|unhealthy)\b/.test(q)) {
+  // Diagnosis wins. Contract six: why|error|crash|failing|analyze|remediate.
+  // Keep extras (how, improve, root cause, because, issue(s), unhealthy): they
+  // bias toward POST, the safe direction when the 0-hop skip would otherwise fire.
+  if (
+    /\b(why|error|crash|failing|analyze|remediate|how|improve|root cause|because|issue|issues|unhealthy)\b/.test(
+      q
+    )
+  ) {
     return false;
   }
 
-  return /^(please\s+)?((show me|open|display)\s+(the\s+)?(logs?|alerts?|traces?|metrics?|dashboards?)(\s+for\b.*)?)$/.test(
-    q
-  );
+  // Strict complete-phrase match of the written production — no "for <resource>" tail.
+  return /^(show me|open|display)( the)? (logs|alerts|traces|metrics|dashboards)$/.test(q);
 }
 
 
