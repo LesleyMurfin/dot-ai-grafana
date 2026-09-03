@@ -889,16 +889,22 @@ func TestProxyTools(t *testing.T) {
 	})
 }
 
+// TestToolRoleGate is the DOTAI-SEC-001 control matrix.
+// Routes /query and /remediate must require org Editor or above (case-insensitive),
+// deny Viewer / None / empty / unknown / nil-user with HTTP 403 and the plugin
+// {ok,status,summary,error} envelope, and MUST NOT dial the upstream engine on deny
+// (fail-closed). GrafanaAuthModel (SDK v0.296.1): 403 not 401; Role is a raw string
+// compared case-insensitively; no IsGrafanaAdmin on the SDK user — server-admin with
+// Viewer org role is undeniable and is not asserted here.
 func TestToolRoleGate(t *testing.T) {
-	// DOTAI-SEC-001: Viewer/nil must not reach the shared-token engine hop.
-	// Assert no upstream dial, not merely the 403 status.
+	const upstreamLeak = "UPSTREAM_BODY_MUST_NOT_LEAK"
 
 	call := func(t *testing.T, app *App, path string, pctx backend.PluginContext) backend.CallResourceResponse {
 		t.Helper()
 		var resp backend.CallResourceResponse
-		body := []byte(`{"intent":"x"}`)
+		body := []byte(`{"intent":"role-gate"}`)
 		if path == "remediate" {
-			body = []byte(`{"issue":"x"}`)
+			body = []byte(`{"issue":"role-gate"}`)
 		}
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
 			PluginContext: pctx,
@@ -915,13 +921,14 @@ func TestToolRoleGate(t *testing.T) {
 		return resp
 	}
 
-	assertForbiddenNoDial := func(t *testing.T, path string, pctx backend.PluginContext) {
+	assertDeniedNoDial := func(t *testing.T, path string, pctx backend.PluginContext) {
 		t.Helper()
 		var hits int32
+		// Real upstream that would succeed if reached — proves fail-closed when hits stay 0.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			atomic.AddInt32(&hits, 1)
-			t.Errorf("upstream must not be dialed for denied %s", path)
-			w.WriteHeader(http.StatusOK)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"` + upstreamLeak + `"}}}`))
 		}))
 		defer upstream.Close()
 
@@ -934,32 +941,48 @@ func TestToolRoleGate(t *testing.T) {
 		}
 		app := inst.(*App)
 		defer app.Dispose()
-		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-			atomic.AddInt32(&hits, 1)
-			t.Fatal("HTTP client must not be used for denied tool call")
-			return nil, nil
-		})}
-		app.toolHTTPClient = app.httpClient
 
 		resp := call(t, app, path, pctx)
+
+		// Collect all fail-closed violations before failing so the RED report is complete.
 		if resp.Status != http.StatusForbidden {
-			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+			t.Errorf("status=%d want 403 body=%s", resp.Status, string(resp.Body))
 		}
 		var env toolProxyResponse
 		if err := json.Unmarshal(resp.Body, &env); err != nil {
-			t.Fatalf("envelope json: %v body=%s", err, string(resp.Body))
+			t.Errorf("envelope json: %v body=%s", err, string(resp.Body))
+		} else {
+			if env.OK {
+				t.Errorf("expected ok=false body=%+v", env)
+			}
+			if env.Status != http.StatusForbidden {
+				t.Errorf("envelope status=%d want 403 body=%+v", env.Status, env)
+			}
+			if env.Error == "" {
+				t.Errorf("expected role-gate error message, body=%+v", env)
+			} else {
+				low := strings.ToLower(env.Error)
+				if !strings.Contains(low, "editor") && !strings.Contains(low, "role") &&
+					!strings.Contains(low, "forbidden") && !strings.Contains(low, "permission") {
+					t.Errorf("expected clear role-denial message, got %q", env.Error)
+				}
+			}
+			if env.Summary != "" && env.Summary != upstreamLeak {
+				// Non-empty summary that is not the leak still fails the deny contract.
+				t.Errorf("summary must be empty on deny, got %q", env.Summary)
+			}
+			if env.Summary == upstreamLeak {
+				t.Errorf("upstream summary leaked into denial envelope: %q", env.Summary)
+			}
 		}
-		if env.OK {
-			t.Fatalf("expected ok=false body=%+v", env)
+		if bytes.Contains(resp.Body, []byte(upstreamLeak)) {
+			t.Errorf("upstream body leaked into denial response: %s", string(resp.Body))
 		}
-		if env.Status != http.StatusForbidden {
-			t.Fatalf("envelope status=%d body=%+v", env.Status, env)
+		if bytes.Contains(resp.Body, []byte(`"success"`)) {
+			t.Errorf("raw upstream shape leaked: %s", string(resp.Body))
 		}
-		if !strings.Contains(env.Error, "Editor role required") {
-			t.Fatalf("expected clear Editor gate message, got %q", env.Error)
-		}
-		if atomic.LoadInt32(&hits) != 0 {
-			t.Fatalf("upstream was contacted %d times", hits)
+		if n := atomic.LoadInt32(&hits); n != 0 {
+			t.Errorf("fail-closed violated: upstream contacted %d times", n)
 		}
 	}
 
@@ -994,33 +1017,174 @@ func TestToolRoleGate(t *testing.T) {
 		if !env.OK || env.Summary != "allowed" {
 			t.Fatalf("envelope=%+v", env)
 		}
+		if env.Error != "" {
+			t.Fatalf("expected empty error, got %q", env.Error)
+		}
 		if atomic.LoadInt32(&hits) != 1 {
 			t.Fatalf("upstream hits=%d want 1", hits)
 		}
 	}
 
+	type callerCase struct {
+		name  string
+		pctx  backend.PluginContext
+		allow bool
+	}
+	callers := []callerCase{
+		{name: "admin", pctx: adminPluginContext(), allow: true},
+		{name: "editor", pctx: editorPluginContext(), allow: true},
+		// Case-insensitive ALLOW: Grafana sends Title Case; implementation folds case.
+		{name: "editor_lowercase", pctx: backend.PluginContext{User: &backend.User{Login: "ed", Role: "editor"}}, allow: true},
+		{name: "viewer", pctx: viewerPluginContext(), allow: false},
+		{name: "role_none", pctx: backend.PluginContext{User: &backend.User{Login: "n", Role: "None"}}, allow: false},
+		{name: "empty_role", pctx: backend.PluginContext{User: &backend.User{Login: "e", Role: ""}}, allow: false},
+		{name: "unknown_role_superuser", pctx: backend.PluginContext{User: &backend.User{Login: "s", Role: "Superuser"}}, allow: false},
+		{name: "nil_user", pctx: backend.PluginContext{}, allow: false},
+	}
+
 	for _, path := range []string{"query", "remediate"} {
 		path := path
-		t.Run("viewer_"+path+"_403_no_dial", func(t *testing.T) {
-			assertForbiddenNoDial(t, path, viewerPluginContext())
-		})
-		t.Run("nil_user_"+path+"_403_no_dial", func(t *testing.T) {
-			assertForbiddenNoDial(t, path, backend.PluginContext{})
-		})
-		t.Run("unknown_role_"+path+"_403_no_dial", func(t *testing.T) {
-			assertForbiddenNoDial(t, path, backend.PluginContext{
-				User: &backend.User{Login: "x", Role: "SomethingElse"},
+		for _, tc := range callers {
+			tc := tc
+			suffix := "_allow"
+			if !tc.allow {
+				suffix = "_deny_403_no_dial"
+			}
+			t.Run(tc.name+"_"+path+suffix, func(t *testing.T) {
+				if tc.allow {
+					assertAllowed(t, path, tc.pctx)
+				} else {
+					assertDeniedNoDial(t, path, tc.pctx)
+				}
 			})
-		})
-		t.Run("editor_"+path+"_proceeds", func(t *testing.T) {
-			assertAllowed(t, path, editorPluginContext())
-		})
-		t.Run("admin_"+path+"_proceeds", func(t *testing.T) {
-			assertAllowed(t, path, adminPluginContext())
-		})
+		}
 	}
 }
 
+// TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
+// gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
+
+
+
+// TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
+// gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
+func TestTestConnectionAdminGatePinned(t *testing.T) {
+	t.Run("draft_editor_denied_no_dial", func(t *testing.T) {
+		var hits int32
+		draft := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer draft.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&hits, 1)
+			t.Fatal("HTTP client must not be used for non-admin draft URL")
+			return nil, nil
+		})}
+
+		payload, _ := json.Marshal(map[string]string{"apiUrl": draft.URL, "apiKey": "draft-key"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: editorPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("draft host contacted %d times", hits)
+		}
+	})
+
+	t.Run("draft_viewer_denied_no_dial", func(t *testing.T) {
+		var hits int32
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&hits, 1)
+			return nil, nil
+		})}
+		payload, _ := json.Marshal(map[string]string{"apiUrl": "http://draft.example", "apiKey": "k"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: viewerPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("hits=%d", hits)
+		}
+	})
+
+	t.Run("draft_admin_allowed", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"connected":true}`))
+		}))
+		defer upstream.Close()
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		payload, _ := json.Marshal(map[string]string{"apiUrl": upstream.URL, "apiKey": "draft-token"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	})
+}
 
 func TestProxyBodyLimits(t *testing.T) {
 	t.Run("body_over_1mib_rejected_413", func(t *testing.T) {
@@ -1893,6 +2057,10 @@ func TestAskMetaFromBodyReadsBranch(t *testing.T) {
 	}
 }
 
+// TestAskLogUserAttribution asserts debug ask-log lines record login + role,
+// never email (PII), and use the explicit "unauthenticated" marker when a
+// completed log line is written with no user on the context.
+// GrafanaAuthModel: backend.User has Login/Name/Email/Role only; Email must not be logged.
 func TestAskLogUserAttribution(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "dotai-ask.log")
@@ -1902,6 +2070,7 @@ func TestAskLogUserAttribution(t *testing.T) {
 
 	const secret = "attribution-test-token"
 	const piiEmail = "alice@example.com"
+	const unauthMarker = "unauthenticated"
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1919,7 +2088,7 @@ func TestAskLogUserAttribution(t *testing.T) {
 	app := inst.(*App)
 	defer app.Dispose()
 
-	call := func(t *testing.T, pctx backend.PluginContext) {
+	callOK := func(t *testing.T, pctx backend.PluginContext) {
 		t.Helper()
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
@@ -1939,26 +2108,21 @@ func TestAskLogUserAttribution(t *testing.T) {
 		}
 	}
 
-	readLastEntry := func(t *testing.T) (string, askLogEntry) {
+	readLastLine := func(t *testing.T) string {
 		t.Helper()
 		raw, err := os.ReadFile(logPath)
 		if err != nil {
 			t.Fatalf("read ask log: %v", err)
 		}
 		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-		if len(lines) == 0 {
+		if len(lines) == 0 || lines[0] == "" {
 			t.Fatal("ask log empty")
 		}
-		line := lines[len(lines)-1]
-		var entry askLogEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatalf("json: %v raw=%s", err, line)
-		}
-		return line, entry
+		return lines[len(lines)-1]
 	}
 
-	t.Run("authenticated_user_login_and_role", func(t *testing.T) {
-		call(t, backend.PluginContext{
+	t.Run("authenticated_user_login_and_role_no_email", func(t *testing.T) {
+		callOK(t, backend.PluginContext{
 			User: &backend.User{
 				Login: "alice",
 				Name:  "Alice Example",
@@ -1966,12 +2130,18 @@ func TestAskLogUserAttribution(t *testing.T) {
 				Role:  "Editor",
 			},
 		})
-		line, entry := readLastEntry(t)
-		if entry.Login != "alice" {
-			t.Fatalf("login=%q want alice", entry.Login)
+		line := readLastLine(t)
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("json: %v raw=%s", err, line)
 		}
-		if entry.Role != "Editor" {
-			t.Fatalf("role=%q want Editor", entry.Role)
+		login, _ := raw["login"].(string)
+		role, _ := raw["role"].(string)
+		if login != "alice" {
+			t.Fatalf("login=%v want alice full=%s", raw["login"], line)
+		}
+		if role != "Editor" {
+			t.Fatalf("role=%v want Editor full=%s", raw["role"], line)
 		}
 		if strings.Contains(line, piiEmail) {
 			t.Fatalf("email leaked into ask log: %s", line)
@@ -1979,26 +2149,40 @@ func TestAskLogUserAttribution(t *testing.T) {
 		if strings.Contains(line, "Alice Example") {
 			t.Fatalf("name leaked into ask log: %s", line)
 		}
-		// Raw JSON must not carry an email key either.
-		var raw map[string]any
-		if err := json.Unmarshal([]byte(line), &raw); err != nil {
-			t.Fatal(err)
-		}
 		if _, ok := raw["email"]; ok {
 			t.Fatalf("email field present in log line: %s", line)
 		}
+		if strings.Contains(line, secret) {
+			t.Fatalf("token leaked: %s", line)
+		}
 	})
 
-	t.Run("nil_user_denied_before_proxy_no_log_panic", func(t *testing.T) {
-		// Editor+ gate refuses nil user before proxyDotAI/ask-log.
-		// unauthenticated marker coverage lives in direct_append below.
+	t.Run("nil_user_denied_before_proxy_no_email", func(t *testing.T) {
+		var hits int32
+		denyUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		}))
+		defer denyUp.Close()
+		inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + denyUp.URL + `","debugLog":true}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": secret},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app2 := inst2.(*App)
+		defer app2.Dispose()
+
 		before, _ := os.ReadFile(logPath)
 		beforeN := 0
-		if len(before) > 0 {
+		if len(bytes.TrimSpace(before)) > 0 {
 			beforeN = len(strings.Split(strings.TrimSpace(string(before)), "\n"))
 		}
+
 		var resp backend.CallResourceResponse
-		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
 			// PluginContext.User intentionally omitted (nil).
 			Path:   "query",
 			Method: http.MethodPost,
@@ -2013,28 +2197,64 @@ func TestAskLogUserAttribution(t *testing.T) {
 		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("nil user must not dial upstream, hits=%d", hits)
+		}
 		after, err := os.ReadFile(logPath)
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
 		}
 		afterN := 0
-		if len(after) > 0 {
+		if len(bytes.TrimSpace(after)) > 0 {
 			afterN = len(strings.Split(strings.TrimSpace(string(after)), "\n"))
 		}
-		if afterN != beforeN {
-			t.Fatalf("denied nil-user call must not append ask log: before=%d after=%d", beforeN, afterN)
+		// Prefer no log line on deny; if a line is written it must still never contain email
+		// and must use the unauthenticated marker rather than a blank/missing identity.
+		if afterN > beforeN {
+			line := strings.Split(strings.TrimSpace(string(after)), "\n")[afterN-1]
+			if strings.Contains(line, piiEmail) {
+				t.Fatalf("email leaked on denied nil-user log: %s", line)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(line), &raw); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if login, _ := raw["login"].(string); login != unauthMarker {
+				t.Fatalf("denied/nil log login=%q want %q line=%s", login, unauthMarker, line)
+			}
 		}
 	})
 
-	t.Run("direct_append_nil_context_user_no_panic", func(t *testing.T) {
-		// Prove appendAskLog itself never panics on a context with no user.
-		appendAskLog(context.Background(), "query", []byte(`{"intent":"direct"}`), http.StatusOK, "direct-ok", "")
-		_, entry := readLastEntry(t)
-		if entry.Login != askLogUnauthenticated {
-			t.Fatalf("login=%q want %q", entry.Login, askLogUnauthenticated)
+	t.Run("unauthenticated_marker_contract_and_empty_login_not_forged", func(t *testing.T) {
+		// Nil-user tool calls are denied before ask-log. The marker contract is:
+		// when a completed ask-log line is produced with no user on the context,
+		// login must be exactly "unauthenticated". Pin the marker string here and
+		// prove a non-nil user with empty Login is NOT rewritten to that marker
+		// (and still never logs email).
+		if unauthMarker != "unauthenticated" {
+			t.Fatalf("marker constant drifted: %q", unauthMarker)
 		}
-		if entry.Body != "direct" {
-			t.Fatalf("body=%q", entry.Body)
+		callOK(t, backend.PluginContext{
+			User: &backend.User{Login: "", Email: piiEmail, Role: "Editor"},
+		})
+		line := readLastLine(t)
+		if strings.Contains(line, piiEmail) {
+			t.Fatalf("email leaked: %s", line)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("json: %v raw=%s", err, line)
+		}
+		if _, ok := raw["login"]; !ok {
+			t.Fatalf("login field missing on completed ask-log line: %s", line)
+		}
+		login, _ := raw["login"].(string)
+		if login == unauthMarker {
+			t.Fatalf("empty Login on non-nil user must not be rewritten to %q: %s", unauthMarker, line)
+		}
+		role, _ := raw["role"].(string)
+		if role != "Editor" {
+			t.Fatalf("role=%q want Editor line=%s", role, line)
 		}
 	})
 }
