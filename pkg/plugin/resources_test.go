@@ -51,9 +51,10 @@ func TestCallResource(t *testing.T) {
 	t.Run("query_unconfigured", func(t *testing.T) {
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -83,6 +84,12 @@ func adminPluginContext() backend.PluginContext {
 func editorPluginContext() backend.PluginContext {
 	return backend.PluginContext{
 		User: &backend.User{Login: "editor", Role: "Editor"},
+	}
+}
+
+func viewerPluginContext() backend.PluginContext {
+	return backend.PluginContext{
+		User: &backend.User{Login: "viewer", Role: "Viewer"},
 	}
 }
 
@@ -708,9 +715,10 @@ func TestProxyTools(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			var resp backend.CallResourceResponse
 			err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-				Path:   tc.path,
-				Method: http.MethodPost,
-				Body:   []byte(`{"intent":"test"}`),
+				PluginContext: editorPluginContext(),
+				Path:          tc.path,
+				Method:        http.MethodPost,
+				Body:          []byte(`{"intent":"test"}`),
 			}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 				resp = *r
 				return nil
@@ -758,9 +766,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -810,9 +819,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -855,9 +865,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`{"issue":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"issue":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -877,6 +888,139 @@ func TestProxyTools(t *testing.T) {
 		}
 	})
 }
+
+func TestToolRoleGate(t *testing.T) {
+	// DOTAI-SEC-001: Viewer/nil must not reach the shared-token engine hop.
+	// Assert no upstream dial, not merely the 403 status.
+
+	call := func(t *testing.T, app *App, path string, pctx backend.PluginContext) backend.CallResourceResponse {
+		t.Helper()
+		var resp backend.CallResourceResponse
+		body := []byte(`{"intent":"x"}`)
+		if path == "remediate" {
+			body = []byte(`{"issue":"x"}`)
+		}
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: pctx,
+			Path:          path,
+			Method:        http.MethodPost,
+			Body:          body,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	assertForbiddenNoDial := func(t *testing.T, path string, pctx backend.PluginContext) {
+		t.Helper()
+		var hits int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			t.Errorf("upstream must not be dialed for denied %s", path)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&hits, 1)
+			t.Fatal("HTTP client must not be used for denied tool call")
+			return nil, nil
+		})}
+		app.toolHTTPClient = app.httpClient
+
+		resp := call(t, app, path, pctx)
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		var env toolProxyResponse
+		if err := json.Unmarshal(resp.Body, &env); err != nil {
+			t.Fatalf("envelope json: %v body=%s", err, string(resp.Body))
+		}
+		if env.OK {
+			t.Fatalf("expected ok=false body=%+v", env)
+		}
+		if env.Status != http.StatusForbidden {
+			t.Fatalf("envelope status=%d body=%+v", env.Status, env)
+		}
+		if !strings.Contains(env.Error, "Editor role required") {
+			t.Fatalf("expected clear Editor gate message, got %q", env.Error)
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("upstream was contacted %d times", hits)
+		}
+	}
+
+	assertAllowed := func(t *testing.T, path string, pctx backend.PluginContext) {
+		t.Helper()
+		var hits int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"allowed"}}}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		resp := call(t, app, path, pctx)
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		var env toolProxyResponse
+		if err := json.Unmarshal(resp.Body, &env); err != nil {
+			t.Fatal(err)
+		}
+		if !env.OK || env.Summary != "allowed" {
+			t.Fatalf("envelope=%+v", env)
+		}
+		if atomic.LoadInt32(&hits) != 1 {
+			t.Fatalf("upstream hits=%d want 1", hits)
+		}
+	}
+
+	for _, path := range []string{"query", "remediate"} {
+		path := path
+		t.Run("viewer_"+path+"_403_no_dial", func(t *testing.T) {
+			assertForbiddenNoDial(t, path, viewerPluginContext())
+		})
+		t.Run("nil_user_"+path+"_403_no_dial", func(t *testing.T) {
+			assertForbiddenNoDial(t, path, backend.PluginContext{})
+		})
+		t.Run("unknown_role_"+path+"_403_no_dial", func(t *testing.T) {
+			assertForbiddenNoDial(t, path, backend.PluginContext{
+				User: &backend.User{Login: "x", Role: "SomethingElse"},
+			})
+		})
+		t.Run("editor_"+path+"_proceeds", func(t *testing.T) {
+			assertAllowed(t, path, editorPluginContext())
+		})
+		t.Run("admin_"+path+"_proceeds", func(t *testing.T) {
+			assertAllowed(t, path, adminPluginContext())
+		})
+	}
+}
+
 
 func TestProxyBodyLimits(t *testing.T) {
 	t.Run("body_over_1mib_rejected_413", func(t *testing.T) {
@@ -900,9 +1044,10 @@ func TestProxyBodyLimits(t *testing.T) {
 		oversized := []byte(`{"intent":"` + strings.Repeat("x", (1<<20)+1) + `"}`)
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   oversized,
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          oversized,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -939,9 +1084,10 @@ func TestProxyBodyLimits(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(``),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(``),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -995,9 +1141,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		}`)
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   payload,
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          payload,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1038,9 +1185,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		gotPath, gotBody = "", nil
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`not-json`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`not-json`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1060,9 +1208,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		gotPath, gotBody = "", nil
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1094,9 +1243,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		payload := []byte(`{"intent":"list pods","execute":true,"mode":"execute"}`)
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   payload,
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          payload,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1372,9 +1522,10 @@ func TestRejectsUnsafeAPIURLBeforeDial(t *testing.T) {
 
 				var resp backend.CallResourceResponse
 				err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-					Path:   path,
-					Method: http.MethodPost,
-					Body:   []byte(`{"intent":"x"}`),
+					PluginContext: editorPluginContext(),
+					Path:          path,
+					Method:        http.MethodPost,
+					Body:          []byte(`{"intent":"x"}`),
 				}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 					resp = *r
 					return nil
@@ -1440,9 +1591,10 @@ func TestAskLogFile(t *testing.T) {
 		t.Helper()
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   path,
-			Method: http.MethodPost,
-			Body:   body,
+			PluginContext: editorPluginContext(),
+			Path:          path,
+			Method:        http.MethodPost,
+			Body:          body,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1544,9 +1696,10 @@ func TestAskLogFile(t *testing.T) {
 	defer app2.Dispose()
 	var resp backend.CallResourceResponse
 	err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-		Path:   "query",
-		Method: http.MethodPost,
-		Body:   []byte(`{"intent":"fail please"}`),
+		PluginContext: editorPluginContext(),
+		Path:          "query",
+		Method:        http.MethodPost,
+		Body:          []byte(`{"intent":"fail please"}`),
 	}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 		resp = *r
 		return nil
@@ -1608,9 +1761,10 @@ func TestAskLogDisabledByDefault(t *testing.T) {
 	defer app.Dispose()
 
 	err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-		Path:   "query",
-		Method: http.MethodPost,
-		Body:   []byte(`{"intent":"list pods"}`),
+		PluginContext: editorPluginContext(),
+		Path:          "query",
+		Method:        http.MethodPost,
+		Body:          []byte(`{"intent":"list pods"}`),
 	}, callResourceResponseSenderFunc(func(*backend.CallResourceResponse) error { return nil }))
 	if err != nil {
 		t.Fatal(err)
@@ -1835,15 +1989,40 @@ func TestAskLogUserAttribution(t *testing.T) {
 		}
 	})
 
-	t.Run("nil_user_unauthenticated_marker_no_panic", func(t *testing.T) {
-		// PluginContext.User intentionally omitted (nil).
-		call(t, backend.PluginContext{})
-		_, entry := readLastEntry(t)
-		if entry.Login != askLogUnauthenticated {
-			t.Fatalf("login=%q want %q", entry.Login, askLogUnauthenticated)
+	t.Run("nil_user_denied_before_proxy_no_log_panic", func(t *testing.T) {
+		// Editor+ gate refuses nil user before proxyDotAI/ask-log.
+		// unauthenticated marker coverage lives in direct_append below.
+		before, _ := os.ReadFile(logPath)
+		beforeN := 0
+		if len(before) > 0 {
+			beforeN = len(strings.Split(strings.TrimSpace(string(before)), "\n"))
 		}
-		if entry.Role != "" {
-			t.Fatalf("role=%q want empty for nil user", entry.Role)
+		var resp backend.CallResourceResponse
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			// PluginContext.User intentionally omitted (nil).
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   []byte(`{"intent":"who am i"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		after, err := os.ReadFile(logPath)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		afterN := 0
+		if len(after) > 0 {
+			afterN = len(strings.Split(strings.TrimSpace(string(after)), "\n"))
+		}
+		if afterN != beforeN {
+			t.Fatalf("denied nil-user call must not append ask log: before=%d after=%d", beforeN, afterN)
 		}
 	})
 
