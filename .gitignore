@@ -52,6 +52,8 @@ scripts/t0*.txt
 scripts/t1*.txt
 scripts/golden-ask-results.json
 specs/.tmp*
+.tmp/
+
 
 
 # Editor
