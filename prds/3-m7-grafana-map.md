@@ -2,10 +2,33 @@
 
 **Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/23
 **Priority**: High (follows PRD #1 ship)
-**Status**: Draft
-**Updated**: 2026-09-02
+**Status**: Mostly implemented on `ai/quality-review` — remaining: show-me contract gaps + 0.2.x ship
+**Updated**: 2026-09-03
 
 Plugin **0.2.x** of `devopstoolkit-dotai-app`. Unsigned alpha **0.1.0** stays PRD #1 / [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3).
+
+## Current State
+
+This is **PRD #3** (Map / Explore / show-me / markdown Answer). An upstream comment on [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) briefly mis-numbered this work as **PRD #5**; that comment is being corrected separately (sibling `UpstreamComment`). Repo numbering stands: Map = **#3**, evidence-grounded change safety = **#4**, plugin usability = **#5**.
+
+The original parked commits (`85de5d4` dashboard `/d/<uid>`, `da65c76` Explore/Drilldown + show-me, `a64e7df` markdown Answer + collapsed Current) were **re-implemented on `ai/quality-review`**, not restored by reverting the park PR ([LesleyMurfin#21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21)). They are **not** on this branch (`feat/prd3-m7-grafana-map` @ `81cfb31`).
+
+| Capability | Where it lives now (branch `ai/quality-review`) | Commit |
+|------------|--------------------------------------------------|--------|
+| `dashboardUrl` + alert `dashboardUid` → Map `/d/<uid>` | `src/utils/grafanaExplore.ts` (`dashboardUrl`), `src/utils/grafanaStack.ts` (`dashboardUidsFromAlertFrames`) | `73d8adc` |
+| Explore panes + Drilldown apps | `src/utils/grafanaExplore.ts` (`exploreUrl`, `drilldownAppUrl`, `buildDrilldownLinks`) | `73d8adc` |
+| show-me skip POST (0-hop) | `isShowMeOnly` in `grafanaExplore.ts`; gate in `askOrchestrator.ts` | `73d8adc` / `e66e2a6` |
+| markdown Answer | `src/components/ResponseMarkdown.tsx` | `66a736a` |
+| Current collapsed by default | `src/pages/DotAIPage.tsx` (`currentOpen` default `false` + `Collapse`) | `57b6d36` |
+
+**To get this code onto this branch (or a release line):** merge or cherry-pick the `ai/quality-review` Map stack (`66a736a`, `73d8adc`, `e66e2a6`, `57b6d36` and dependents), or land via whatever PR path ships `ai/quality-review` and close this PRD against that. Do **not** re-restore the parked SHAs by replaying the old reverts — the quality-review re-implementation is the body of work.
+
+**What still remains for PRD #3** (see milestones + contract audit):
+
+1. Close **show-me contract gaps** on `isShowMeOnly` (punctuation strip; tighten `for …` so resource nouns like `pod api-7f` still POST; add missing diagnosis token `analyze`; tests).
+2. **Ship 0.2.x** on the fork once the Map stack is on a release line (`package.json` is still `0.1.0` on `ai/quality-review`). Do not target `vfarcic` until PRD #1 / upstream PR #3 merges.
+
+Genuinely remaining product surface is small. This PRD still warrants a separate tracking doc until those two items close and the quality-review code is on a shippable branch; it does **not** warrant re-planning the four Map capabilities as greenfield.
 
 ## Problem
 
@@ -15,7 +38,7 @@ PRD #1 v1 packs Loki / Prometheus / Tempo / Alertmanager into **Current** and PO
 - Ask “show me the logs|alerts|traces|metrics|dashboards” without a wasted dot-ai POST
 - Read GFM answers (v1 dumps the summary in `<pre>`)
 
-These four landed **after** Viktor reviewed [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) at `7af77b3`, then were **parked** off that PR ([LesleyMurfin#21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21)) so v1 stays thin. PRD #1 **M7 stays Not in v1**. This file owns M7.
+These four landed **after** Viktor reviewed [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) at `7af77b3`, then were **parked** off that PR ([LesleyMurfin#21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21)) so v1 stays thin. PRD #1 **M7 stays Not in v1**. This file owns M7. Re-implementation now exists on `ai/quality-review` (see Current State).
 
 ## Solution
 
@@ -34,9 +57,9 @@ Ask
 
 Map links:
 
-1. `/d/<uid>` when a firing alert carries `dashboardUid` (`85de5d4`)
-2. Grafana **11+ Explore panes URL** + Drilldown apps **if installed** (`da65c76`): `grafana-lokiexplore-app`, `grafana-metricsdrilldown-app`, `grafana-exploretraces-app`
-3. Answer as sanitized GFM; collapse Current (`a64e7df`) — presentation only
+1. `/d/<uid>` when a firing alert carries `dashboardUid` (originally `85de5d4`; now `dashboardUrl` / `dashboardUidsFromAlertFrames` on `ai/quality-review` @ `73d8adc`)
+2. Grafana **11+ Explore panes URL** + Drilldown apps **if installed** (originally `da65c76`; now `exploreUrl` / `buildDrilldownLinks` @ `73d8adc`): `grafana-lokiexplore-app`, `grafana-metricsdrilldown-app`, `grafana-exploretraces-app`
+3. Answer as sanitized GFM; collapse Current (originally `a64e7df`; now `ResponseMarkdown` @ `66a736a` + `DotAIPage` Collapse @ `57b6d36`) — presentation only
 
 Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/plugins/<id>/resources/*`.
 
@@ -79,11 +102,22 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 ## Milestones
 
 - [x] PRD GitHub issue filed on `LesleyMurfin/dot-ai-grafana` (#23)
-- [ ] `dashboardUid` → Map `/d/<uid>` (restore `85de5d4`)
-- [ ] Explore panes + Drilldown Map links if apps installed (restore `da65c76`)
-- [ ] show-me skip POST; keep Current; open Map links
-- [ ] markdown Answer; collapse Current (restore `a64e7df`)
-- [ ] 0.2.x on fork; no vfarcic target until PR #3 merges
+- [x] `dashboardUid` → Map `/d/<uid>` — **DONE** on `ai/quality-review` (not this branch): `dashboardUrl` `src/utils/grafanaExplore.ts:50`, `dashboardUidsFromAlertFrames` `src/utils/grafanaStack.ts:320`, wired via `buildDrilldownLinks` `…:152–157` and stack pack `…:601`; commit `73d8adc` (re-impl of parked `85de5d4`). **Bring-up:** land that commit’s tree onto the ship line.
+- [x] Explore panes + Drilldown Map links if apps installed — **DONE** on `ai/quality-review`: `exploreUrl` `grafanaExplore.ts:24`, `drilldownAppUrl` `…:54`, `buildDrilldownLinks` `…:81`, `hasApp` via `config.apps`; tests in `grafanaExplore.test.ts`; commit `73d8adc` (re-impl of parked `da65c76`).
+- [ ] show-me skip POST; keep Current; open Map links — **PARTIAL** on `ai/quality-review`: `isShowMeOnly` `grafanaExplore.ts:65`, 0-hop gate `askOrchestrator.ts:445` (`hops: 0`, keeps Current + drilldowns), covered by `askOrchestrator.test.ts` (“show me the logs skips dot-ai…”) and partial `grafanaExplore.test.ts`. Commits `73d8adc` / `e66e2a6`. **Remaining:** enforce the matching contract below (punctuation strip; complete-phrase / no over-match on `for pod …`; diagnosis token `analyze`; unit tests per clause). See Work Log 2026-09-03 contract audit.
+- [x] markdown Answer; collapse Current — **DONE** on `ai/quality-review`: `ResponseMarkdown` `src/components/ResponseMarkdown.tsx:11` (`renderMarkdown`, sanitized GFM) @ `66a736a`; page wire `DotAIPage.tsx:276`; Current `Collapse` default closed `currentOpen = false` `DotAIPage.tsx:42` + `…:304–308` @ `57b6d36` (re-impl of parked `a64e7df`).
+- [ ] 0.2.x on fork; no vfarcic target until PR #3 merges — **NOT STARTED**: `package.json` / plugin version still **0.1.0** on `ai/quality-review`; no 0.2.x release cut. Keep fork-first; do not target `vfarcic` until PRD #1 / upstream PR #3 merges.
+
+### Verdict table (2026-09-03 reconciliation against `ai/quality-review`)
+
+| # | Milestone | Verdict | Evidence |
+|---|-----------|---------|----------|
+| 1 | Issue #23 filed | **DONE** | https://github.com/LesleyMurfin/dot-ai-grafana/issues/23 |
+| 2 | `dashboardUid` → `/d/<uid>` | **DONE** (code on `ai/quality-review` only) | `dashboardUrl` `grafanaExplore.ts:50`; `dashboardUidsFromAlertFrames` `grafanaStack.ts:320`; `buildDrilldownLinks` dashboard loop `grafanaExplore.ts:152`; `73d8adc` |
+| 3 | Explore + Drilldown Map links | **DONE** (code on `ai/quality-review` only) | `exploreUrl` `:24`; `drilldownAppUrl` `:54`; `buildDrilldownLinks` `:81`; `73d8adc` |
+| 4 | show-me skip POST | **PARTIAL** | `isShowMeOnly` `:65`; gate `askOrchestrator.ts:445`; happy path tested; contract gaps remain (below) |
+| 5 | markdown Answer; collapse Current | **DONE** (code on `ai/quality-review` only) | `ResponseMarkdown` `:11` @ `66a736a`; `DotAIPage.tsx:42,276,304` @ `57b6d36` |
+| 6 | 0.2.x ship on fork | **NOT STARTED** | version still `0.1.0` |
 
 ## Decisions
 
@@ -110,3 +144,24 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 
 - **Issue**: CodeRabbit on #22: show-me matching unspecified; `show me dashboards` had no empty state.
 - **Action**: Issue #23 filed. Matching contract + dashboard empty state written here. PRD #1 (fork #21) and PRD #2 (fork #18) now point here.
+
+### 2026-09-03 — Reconcile PRD against re-implemented code
+
+- **Issue**: Milestones still said “restore `85de5d4` / `da65c76` / `a64e7df`” while the same capabilities already exist on `ai/quality-review` (`66a736a` markdown, `73d8adc` Explore/drilldown/`isShowMeOnly`, `e66e2a6` 0-hop orchestration, `57b6d36` page Collapse). Two plans, one body of code. This branch never received that tree.
+- **Action**: Added **Current State**; reticked milestones with `file:line` + commits; left show-me **PARTIAL** and 0.2.x **NOT STARTED**. Preserved Decisions, Out of scope, and the `isShowMeOnly` matching contract verbatim. Confirmed numbering is **PRD #3** (upstream mis-label as #5 corrected elsewhere).
+- **Contract audit** (`isShowMeOnly` @ `ai/quality-review` `src/utils/grafanaExplore.ts:65`, tests `grafanaExplore.test.ts` + orchestrator 0-hop test):
+
+  | Clause | Result | Notes |
+  |--------|--------|-------|
+  | Lowercase the question | **PASS** | `question.toLowerCase()` `:67`. Implicit via other cases; no dedicated case-only test. |
+  | Strip surrounding punctuation (`.?!`) | **FAIL** | No strip. `isShowMeOnly('SHOW ME LOGS.')` → `false` (should skip POST per contract). No covering test. |
+  | Complete phrase `(show me\|open\|display) the? (logs\|…)` | **PARTIAL** | Regex anchors full string but adds optional `(\s+for\b.*)?` (`:75`), which is broader than the written phrase. Tests cover happy phrases + some rejects (`grafanaExplore.test.ts`). |
+  | No partial-word hits | **PASS** | Word-ish alternation; `show logs for pod api` → `false` (needs `me`). Test: diagnosis block. |
+  | Diagnosis tokens beat show-me (`why`, `fix`, `crash`, `failing`, `analyze`, `remediate`) | **PARTIAL** | Impl uses `why\|how\|fix\|remediat\|improve\|root cause\|because\|issue\|issues\|crash\|failing\|unhealthy` (`:71`). Has `why`/`fix`/`crash`/`failing`/`remediat*`. **Missing `analyze`.** Extra tokens beyond the contract list. Tests cover `why`/`how`/`failing` paths, not `analyze`. |
+  | `SHOW ME LOGS.` → skip POST | **FAIL** | Fails punctuation strip (above). No test. |
+  | `show me the logs — why is checkout-api crashing?` → POST | **PASS** | `why` diagnosis → `false`. Covered indirectly (`why are there errors…`). |
+  | `show me dashboards` skip + empty `/d/` when no UID | **PASS** (skip) / **PASS** (empty via no uids fed to `buildDrilldownLinks`) | Skip: test `show me dashboards` → true. Empty `/d/`: dashboard links only for provided `dashboardUids` (`:152`); no `/api/search`. |
+  | **Known gap:** `isShowMeOnly('show me the logs for pod api-7f')` | **STILL TRUE** (gap open) | Still returns `true` and would skip the call — optional `for .*` swallows the pod. **No “no resource noun follows” guard; no failing test.** |
+  | Would the PRD contract have caught the pod gap? | **Yes** | Contract requires a **complete phrase** equal to `(show me\|open\|display) the? (logs\|…)`, with no `for <resource>` production. Strict phrase match rejects trailing `for pod api-7f`. The gap is an **implementation** widening (`for\b.*`), not a missing PRD rule. |
+
+- **Remaining work for this PRD:** (1) fix `isShowMeOnly` to match the contract (strip `.?!`; complete-phrase only or explicit resource-noun reject; add `analyze`); (2) unit tests per failing clause including the pod-name case; (3) land quality-review Map stack on a shippable line; (4) cut **0.2.x** on the fork.
