@@ -1,6 +1,6 @@
 module github.com/vfarcic/dot-ai-grafana
 
-go 1.26
+go 1.26.0
 
 require github.com/grafana/grafana-plugin-sdk-go v0.296.1
 
