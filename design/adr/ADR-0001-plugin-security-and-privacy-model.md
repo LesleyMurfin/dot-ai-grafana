@@ -30,7 +30,7 @@ So **cluster log content becomes prompt content**, and **prompt content reaches 
 | Ask log | Optional (`debugLog`, default off); JSONL on Grafana data path; size rotate 1 MiB → `.1`; preview strips top-level secret **keys** only (not secrets inside log lines); entry had no user/org fields at audit time | `pkg/plugin/app.go:33-54`; `resources.go:60-84`, `132-148`, `236-271` (SecAudit) |
 | Evidence packing | Cluster-wide LogQL when no ns/pod; `textLinesFromFrames` whitespace-collapses only; packed under `Current:` with user text after as `Question:`/`Issue:` | `src/utils/grafanaStack.ts:45-46`, `282-306`; `progressiveContext.ts:97-122` |
 | Evidence opt-out | `sendGrafanaEvidence=false` skips stack fetch; consent banner is informational only | `src/utils/askOrchestrator.ts:356-359`; `src/pages/DotAIPage.tsx:169-176` |
-| UI role gate | Configuration page `role: Admin`; **main page / resource routes have no role** | `src/plugin.json:27-41`; `pkg/plugin/resources.go:766-772` |
+| UI / route role gate | Configuration page `role: Admin`; tool resource routes require Grafana **Editor+** before any engine proxy call (Decision §1; fail closed if no user) | `src/plugin.json:27-41`; role helpers in `pkg/plugin/resources.go` |
 | Drilldowns | Explore links are UI-only; never POSTed | `src/utils/progressiveContext.ts:14-15` |
 
 ### Threat classes in scope
@@ -50,13 +50,13 @@ So **cluster log content becomes prompt content**, and **prompt content reaches 
 
 **v1 decision: shared service token** (honours PRD #1 DD4).
 
-- Operators configure one dot-ai API token in plugin settings (`secureJsonData.apiKey`). The backend attaches it on every `/query` and `/remediate` proxy call.
+- Operators configure one dot-ai API token in plugin settings (`secureJsonData.apiKey`). The backend attaches it on engine proxy calls for the tool routes.
 - The token **must** be a no-`apply` / analysis-capable credential (PRD #1 DD3 layer b). Documented role naming is an upstream question (PRD #1 Open Question 1; §Open questions).
-- **Grafana Viewer may cause the plugin to read cluster state the Viewer could never reach with `kubectl`.** That is true today: `/query` and `/remediate` have no Grafana role check (`resources.go:766-772`) while the engine hop uses the shared token (`resources.go:707`). Datasource ACLs only bound the browser-side evidence hop, not the engine hop (SecAudit finding #1).
+- **Cross-RBAC gap (Grafana vs Kubernetes / dot-ai):** a shared service token means the engine hop is only as constrained as the Grafana role gate in front of it. Datasource ACLs bound the browser-side evidence hop only — not the engine hop. Without an Editor+ (or stricter) gate on the tool routes, lower Grafana roles could invoke engine reach they do not have via `kubectl` (SecAudit finding #1). This ADR requires the gate below; do not ship tool routes ungated.
 
 **v1 mitigation (required, not optional):**
 
-- **Role-gate** `POST` `/query` and `/remediate` so only Grafana **Editor** or **Admin** (org role) may invoke the engine proxy. Reuse the existing `isOrgAdmin` / `UserFromContext` pattern (`resources.go:568-574`). Viewers may still open the page if product wants read-of-UI, but must not trigger engine calls. Exact minimum role: **Editor** (operators who already edit dashboards); Admin-only is acceptable if an adopter is stricter — default ship gate is Editor+.
+- **Role-gate** the tool resource routes so only Grafana **Editor** or **Admin** (org role) may invoke the engine proxy. Reuse the existing `isOrgAdmin` / `UserFromContext` pattern in `pkg/plugin/resources.go`. Deny with 403 before any upstream dial; fail closed when the request has no user. Viewers may still open the page if product wants read-of-UI, but must not trigger engine calls. Exact minimum role: **Editor** (operators who already edit dashboards); Admin-only is acceptable if an adopter is stricter — default ship gate is Editor+.
 - Configuration and draft-URL test-connection remain Admin-only (already true for draft URL and config page).
 
 **Trigger that forces per-user identity (Dex/OAuth):** any of:
@@ -87,11 +87,11 @@ Until then, per-user OAuth/Dex forwarding remains **out of v1 scope** (PRD #1 DD
 
 | Layer | Role | v1 mandate |
 |-------|------|------------|
-| **Client (pack path)** | First cut: redact/mask secret-shaped substrings in evidence lines **before** `buildRequestText`; fence evidence so it cannot forge packet markers | **Required** — earlier, even if bypassable by a crafted direct resource POST |
-| **Backend proxy** | Second cut on `intent`/`issue` body: same secret-shaped redaction; never log raw Authorization; keep envelope-only responses | **Required** — closes the direct-POST bypass of client redaction |
+| **Client (pack path)** | First cut: redact/mask secret-shaped substrings in evidence lines **before** `buildRequestText`; fence evidence so it cannot forge packet markers | **Required** — earlier for honest UI use; not sufficient alone |
+| **Backend proxy** | Second cut on `intent`/`issue` body: same secret-shaped redaction; never log raw Authorization; keep envelope-only responses | **Required** — closes non-UI callers that skip the client pack path |
 | **Engine** | Authoritative long-term redaction, retention, and model-provider policy | **Preferred upstream**; plugin must not assume it exists yet (§Open questions) |
 
-**Why client + backend, not client-only:** client-only is earlier (less data on the wire from honest UI use) but weaker (any caller of the resource API skips it). Backend-only is later (data already left the browser). **Both** for secret-shaped patterns; engine remains the right place for org-wide policy and provider-side guarantees.
+**Why client + backend, not client-only:** client-only is earlier (less data on the wire from honest UI use) but weaker (any non-UI caller of the resource API skips it). Backend-only is later (data already left the browser). **Both** for secret-shaped patterns; engine remains the right place for org-wide policy and provider-side guarantees.
 
 **Evidence is untrusted input** — see §5 Prompt injection. Redaction is not a substitute for injection hardening.
 
@@ -203,13 +203,13 @@ Minimum audit record for an Ask (ask log when enabled; and any future metrics):
 ### Positive
 
 - PRDs #1, #2, and #4 share one security vocabulary; PRs cite this ADR instead of rediscovering threat trade-offs.
-- Viewer→cluster-intelligence hole is named and gated rather than silent.
+- Cross-RBAC privilege gap (Grafana role vs shared engine token) is named and gated rather than silent.
 - Prompt injection is a design input to PRD #2/\#4, not a post-incident surprise.
 - Sovereignty story stays coherent: plugin is a thin client; residency lives with dot-ai + LLM choice (DD9, DD11).
 
 ### Negative / cost
 
-- Editor+ gate is a product behaviour change vs “any logged-in user can Ask.”
+- Editor+ gate is a product behaviour change vs broader authenticated access to Ask.
 - Dual redaction (client + backend) is duplicate logic to maintain.
 - Time-based log retention is new behaviour beyond size rotate.
 - Shared token still cannot give engine-side per-user audit until OAuth work lands.
@@ -225,8 +225,8 @@ Minimum audit record for an Ask (ask log when enabled; and any future metrics):
 |-------------|----------------|
 | **Per-user OAuth/Dex from day one** | Correct end-state for multi-tenant audit; blocked on engine HTTPS/Dex setup and plugin identity forwarding. PRD #1 DD4 already deferred it. Triggers listed above. |
 | **Admin-only Asks** | Safer than Editor+; too narrow for the intended operator workflow (dashboard Editors diagnosing). Adopters may tighten locally. |
-| **Leave Viewer access as-is** | SecAudit HIGH; converts Grafana Viewer into effective cluster reader via dot-ai. Rejected. |
-| **Client-only redaction** | Bypassed by direct resource POST. Insufficient alone. |
+| **Leave tool routes ungated** | SecAudit HIGH; would leave the Grafana↔engine RBAC gap open. Rejected. |
+| **Client-only redaction** | Skipped by non-UI callers of the resource API. Insufficient alone. |
 | **Backend-only redaction** | Honest UI still ships secrets to the browser memory/network path longer than needed. Insufficient alone. |
 | **Block all RFC1918 `apiUrl`** | Matches a strict reading of PRD #1 NFR; breaks default in-cluster Grafana→dot-ai HTTP. NetworkPolicy is the stricter tool. |
 | **Always-on ask log** | Expands PVC sensitive data without operator intent. Keep opt-in. |
@@ -246,7 +246,7 @@ These are **upstream engine / project** decisions. The plugin will not invent an
 
 ## Public-surface check
 
-This ADR was written for a **public upstream repository**. It contains **no** real secrets, tokens, internal hostnames, or internal organisation names. Cites use in-repo paths and public GitHub issue links only. Plugin id `lesleymurfin-dotai-app` appears only as already-published plugin metadata.
+This ADR was written for a **public** repository (and a public fork of upstream). It contains **no** real secrets, tokens, internal hostnames, or internal organisation names. Cites use in-repo paths and public GitHub issue links only. Plugin id `lesleymurfin-dotai-app` appears only as already-published plugin metadata. Describe **required controls**, not step-by-step reproduction of unpatched weaknesses — see `docs/security-disclosure.md`.
 
 ## References
 
