@@ -1634,7 +1634,7 @@ func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	appendAskLog("query", []byte(`{"intent":"after-rotate"}`), http.StatusOK, "rotated-summary", "")
+	appendAskLog(context.Background(), "query", []byte(`{"intent":"after-rotate"}`), http.StatusOK, "rotated-summary", "")
 
 	info, err := os.Stat(logPath)
 	if err != nil {
@@ -1738,3 +1738,125 @@ func TestAskMetaFromBodyReadsBranch(t *testing.T) {
 		t.Fatalf("branch leaked into body preview")
 	}
 }
+
+func TestAskLogUserAttribution(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	const secret = "attribution-test-token"
+	const piiEmail = "alice@example.com"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `","debugLog":true}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	call := func(t *testing.T, pctx backend.PluginContext) {
+		t.Helper()
+		var resp backend.CallResourceResponse
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: pctx,
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"who am i"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	}
+
+	readLastEntry := func(t *testing.T) (string, askLogEntry) {
+		t.Helper()
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("read ask log: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		if len(lines) == 0 {
+			t.Fatal("ask log empty")
+		}
+		line := lines[len(lines)-1]
+		var entry askLogEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("json: %v raw=%s", err, line)
+		}
+		return line, entry
+	}
+
+	t.Run("authenticated_user_login_and_role", func(t *testing.T) {
+		call(t, backend.PluginContext{
+			User: &backend.User{
+				Login: "alice",
+				Name:  "Alice Example",
+				Email: piiEmail,
+				Role:  "Editor",
+			},
+		})
+		line, entry := readLastEntry(t)
+		if entry.Login != "alice" {
+			t.Fatalf("login=%q want alice", entry.Login)
+		}
+		if entry.Role != "Editor" {
+			t.Fatalf("role=%q want Editor", entry.Role)
+		}
+		if strings.Contains(line, piiEmail) {
+			t.Fatalf("email leaked into ask log: %s", line)
+		}
+		if strings.Contains(line, "Alice Example") {
+			t.Fatalf("name leaked into ask log: %s", line)
+		}
+		// Raw JSON must not carry an email key either.
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := raw["email"]; ok {
+			t.Fatalf("email field present in log line: %s", line)
+		}
+	})
+
+	t.Run("nil_user_unauthenticated_marker_no_panic", func(t *testing.T) {
+		// PluginContext.User intentionally omitted (nil).
+		call(t, backend.PluginContext{})
+		_, entry := readLastEntry(t)
+		if entry.Login != askLogUnauthenticated {
+			t.Fatalf("login=%q want %q", entry.Login, askLogUnauthenticated)
+		}
+		if entry.Role != "" {
+			t.Fatalf("role=%q want empty for nil user", entry.Role)
+		}
+	})
+
+	t.Run("direct_append_nil_context_user_no_panic", func(t *testing.T) {
+		// Prove appendAskLog itself never panics on a context with no user.
+		appendAskLog(context.Background(), "query", []byte(`{"intent":"direct"}`), http.StatusOK, "direct-ok", "")
+		_, entry := readLastEntry(t)
+		if entry.Login != askLogUnauthenticated {
+			t.Fatalf("login=%q want %q", entry.Login, askLogUnauthenticated)
+		}
+		if entry.Body != "direct" {
+			t.Fatalf("body=%q", entry.Body)
+		}
+	})
+}
+

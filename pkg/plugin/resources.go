@@ -81,6 +81,23 @@ type askLogEntry struct {
 	CurrentEmpty *bool  `json:"current_empty,omitempty"`
 	FirstHop     string `json:"first_hop,omitempty"`
 	Branch       string `json:"branch,omitempty"`
+	// Login is the Grafana user login. When the request has no user (health
+	// checks, background calls), it is the explicit marker "unauthenticated".
+	// Email is intentionally omitted (PII).
+	Login string `json:"login"`
+	Role  string `json:"role,omitempty"`
+}
+
+// askLogUnauthenticated is written to askLogEntry.Login when PluginContext.User is nil.
+const askLogUnauthenticated = "unauthenticated"
+
+// userAttribution returns Login and Role for ask-log entries. Nil user is safe.
+func userAttribution(ctx context.Context) (login, role string) {
+	u := backend.UserFromContext(ctx)
+	if u == nil {
+		return askLogUnauthenticated, ""
+	}
+	return u.Login, u.Role
 }
 
 func toolNameFromPath(toolPath string) string {
@@ -240,12 +257,14 @@ func sanitizeQueryBody(body []byte) ([]byte, error) {
 // appendAskLog writes one JSON line for a completed query/remediate call.
 // Best-effort: failures to write must not affect the HTTP response.
 // When the log exceeds maxAskLogBytes, it is rotated to path+".1" (replacing any prior .1).
-func appendAskLog(tool string, body []byte, status int, summary, errMsg string) {
+// User attribution (login + role) is taken from ctx; nil user → login "unauthenticated".
+func appendAskLog(ctx context.Context, tool string, body []byte, status int, summary, errMsg string) {
 	path := askLogPath
 	if path == "" {
 		return
 	}
 	hop, hops, currentEmpty, firstHop, branch := askMetaFromBody(body)
+	login, role := userAttribution(ctx)
 	entry := askLogEntry{
 		Time:         time.Now().UTC().Format(time.RFC3339),
 		Tool:         tool,
@@ -258,6 +277,8 @@ func appendAskLog(tool string, body []byte, status int, summary, errMsg string) 
 		CurrentEmpty: currentEmpty,
 		FirstHop:     firstHop,
 		Branch:       branch,
+		Login:        login,
+		Role:         role,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {
@@ -659,7 +680,7 @@ func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath stri
 			log.DefaultLogger.Error("dot-ai tool call failed", "tool", tool, "status", status, "error", errMsg)
 		}
 		if a.debugLog {
-			appendAskLog(tool, reqBody, status, summary, errMsg)
+			appendAskLog(req.Context(), tool, reqBody, status, summary, errMsg)
 		}
 		writeToolProxy(w, httpStatus, status, summary, errMsg)
 	}
