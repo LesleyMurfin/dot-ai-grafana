@@ -16,6 +16,7 @@
 - **Write rule (estate):** dot-ai may read broadly; cluster writes go through **Git** only. Direct apply into KRO-owned namespaces is manufactured drift (ADR-0019, `riley_infrastructure`). Grafana's blessed execute trigger is **PRD #2 propose → GitOps PR**, not live apply.
 - **Surface demarcation (Viktor):** Grafana = observability-first intelligence + GitOps-PR triggering. Headlamp = day-2 object lifecycle and direct resource actions. Do not turn this plugin into a duplicate cluster manager.
 - **Rationale captured (2026-09-03):** Change-safety failure patterns from large-operator field experience, the third capability (**is now a safe time?**), and the bidirectional knowledge loop (`manageKnowledge` read + write-back) are now in this PRD.
+- **Attachment (2026-09-03):** This PRD now attaches to `operate`'s existing change-safety envelope (dry-run → approval → execute → validate; Risk Assessment; `opr-` sessions) rather than inventing a parallel one. Whether telemetry-aware risk and metric-recovery validation land in the **engine** (via PRD #1 M13 `mcp-grafana`) or the **plugin** is an open architectural question for Viktor — see §Where this attaches and §Open architectural question.
 - **Not this PRD:** Map/markdown/show-me (PRD #3); analysis-only v1 packing (PRD #1); PR mechanism internals (PRD #2); thread/wait/ship usability (unnumbered usability PRD); Headlamp Recommend/Operate live wizards.
 
 ## Problem
@@ -73,6 +74,91 @@ Whether `manageKnowledge` supports **incremental write-back of execution evidenc
 ### What this is not
 
 Analysis-only v1 was **sequencing** (Viktor: ship the smaller read-only thing, then a separate PRD for the GitOps-PR path) — not a permanent ban on Grafana participating in change. The execute path he explicitly blessed for Grafana is **GitOps-PR** (**PRD #2**). This PRD does not replace PRD #2 and does not add a Grafana `operate`/Update object-lifecycle wizard.
+
+## Where this attaches: the `operate` tool
+
+This PRD must not invent a second change-safety envelope. The engine already ships one: the **`operate` tool**. What follows is what the public docs already document, the precise gap relative to this PRD's three capabilities, and the extension point the engine itself names. Source for every load-bearing claim in this section: [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate).
+
+### What `operate` already does
+
+Documented eight-step flow ([Operate Guide — How AI-Driven Operations Work](https://devopstoolkit.ai/docs/ai-engine/tools/operate)):
+
+| stage | what `operate` does today | source |
+|-------|---------------------------|--------|
+| 1. Intent analysis | AI understands the operator's natural-language operational goal | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) |
+| 2. Cluster investigation | Inspects current state and discovers relevant resources | same |
+| 3. Context integration | Applies organizational patterns, policies, and cluster capabilities | same; optional patterns/policies via org-data guides |
+| 4. Solution design | Generates an operational plan that satisfies the intent | same |
+| 5. Dry-run validation | Tests every proposed change before it is shown for approval | same; Key Features: "Dry-run validation — All changes tested before proposing" |
+| 6. User approval | Operator reviews proposed changes with full transparency | same |
+| 7. Execution | Executes **exactly** the approved commands | same; Key Features: "Safe execution — Exact approved commands executed with comprehensive validation" |
+| 8. Validation | AI verifies the **operation completed successfully** | same; Key Features: "Iterative validation — Verifies operations completed successfully with AI analysis" |
+
+Documented product features already on the same page (not a wishlist): natural-language operations; cluster-aware decisions; Helm release support; pattern-driven operations; policy enforcement before execution; dry-run validation; safe execution of approved commands; iterative post-execution validation; **MCP server integration** to augment analysis with external MCP tools ([Operate Guide — Key Features](https://devopstoolkit.ai/docs/ai-engine/tools/operate)).
+
+The worked example's analysis output already carries structured fields a change-safety surface needs ([Operate Guide — Complete Workflow Example](https://devopstoolkit.ai/docs/ai-engine/tools/operate)):
+
+| output field | what it already conveys |
+|--------------|-------------------------|
+| Current State | Target object, replica health (e.g. 2/2 running), image, strategy, resources |
+| Proposed Changes | What will change, with rationale |
+| Commands to Execute | Exact commands the operator is asked to approve |
+| Dry-Run Validation | Pass/fail of the proposed change before execution |
+| Patterns Applied | Organizational patterns that shaped the plan (or None) |
+| Capabilities Used | Cluster capabilities the plan relied on |
+| Policies Checked | Governance rules evaluated, with pass/fail |
+| Risk Assessment | Stated risk level plus reasoning |
+| Session ID | `opr-…` session identity for the operation |
+| Visualization (`visualizationUrl`) | Interactive analysis view when `webUI.baseUrl` is configured (`/v/opr-…`) |
+
+Be clear: a great deal of the envelope this PRD cares about **already exists** in core `operate`. This companion work is an **enhancement of that envelope**, not a parallel invention.
+
+### The precise gap
+
+In the docs' own worked example, risk is stated as **LOW RISK** for scaling demo-api from 2 to 4 replicas, with reasoning along the lines of a non-disruptive scale on a deployment whose current state shows healthy replica counts (2/2 running) — paraphrased for the reader as *"LOW RISK — Scaling up from 2 to 4 replicas on healthy deployment"* ([Operate Guide — Complete Workflow Example](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). **"Healthy" there is derived from replica count and cluster state.** It is **not** derived from:
+
+- live traffic / request rate relative to baseline,
+- firing alerts on the blast set or shared dependencies,
+- error-budget burn,
+- whether another change is mid-reconcile.
+
+That is exactly the gap behind this PRD's first capability — **is now a safe time?** — and part of **what will it touch?** when "touch" includes live risk factors, not only graph dependents.
+
+Step 8 is equally precise about what it does **not** do. Documented validation "verifies operations completed successfully" / "Verifies operations completed successfully with AI analysis" ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). That is **operation-completed** validation (did the scale/apply land; does cluster state match the intent), **not** **metric-recovered** validation (did the SLO/error signal the change was meant to move actually move). That is this PRD's third capability — **did it work?** in telemetry terms.
+
+| this PRD capability | what `operate` already covers | what is still missing |
+|---------------------|-------------------------------|------------------------|
+| **Is now a safe time?** | Risk Assessment + Policies Checked + dry-run before approval | Risk grounded in **traffic / alerts / burn / concurrent reconcile**, not replica/cluster health alone |
+| **What will it touch?** | Current State, Proposed Changes, commands, Patterns/Capabilities, graph- and capability-aware plan | Join of blast set with **live** alert/traffic/burn factors (and runbook presence) at decision time |
+| **Did it work?** | Step 8 AI validation that the **operation completed** | Validation that the **metric recovered** (or intended signal moved), bound to the change/`opr-` session |
+
+Read this PRD as **folding evidence into an existing envelope**, not as standing up a second one beside `operate`.
+
+### The extension point already exists
+
+The same Operate Guide lists: **"MCP server integration — Augment analysis with tools from external MCP servers (e.g., Prometheus metrics)"**, with a pointer to MCP Server Integration in the deployment docs ([Operate Guide — Key Features](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). The engine already anticipates telemetry augmentation of analysis.
+
+That extension point is PRD #1's milestone **M13 (`mcp-grafana`)**. PRD #1 marks M13 as **core `vfarcic/dot-ai` work** and explicitly **"Not this companion repo."** If telemetry-aware risk assessment is delivered by registering `mcp-grafana` with the engine, every surface that already calls `operate` (CLI, Web UI, Headlamp, and any Grafana path that reuses the tool) inherits it — see the open architectural question next.
+
+## Open architectural question: engine or plugin?
+
+If telemetry can enter `operate` through engine-side MCP registration, **much of what this PRD wants may be a core-repo concern rather than a Grafana-plugin concern.** That tension must stay visible. Two fair readings:
+
+### Reading A — this belongs in the engine
+
+Register `mcp-grafana` (PRD #1 M13) with the **engine**. Then `operate` and `remediate` can perform telemetry-aware risk assessment and richer post-execution checks for **every** surface at once — CLI, Headlamp, Web UI, and Grafana — with **no** plugin-specific join code. That is consistent with PRD #1 **DD11**'s thin-client boundary and with dot-ai's orchestrator-neutral design: intelligence and safety reasoning stay in the engine; surfaces present and approve. Under Reading A, a large fraction of "is now safe?" and even "did the metric move?" is engine work; the companion repo should not rebuild it client-side.
+
+### Reading B — the plugin still owns something
+
+Even a telemetry-aware engine still leaves a **human** deciding in a **surface**. Estate governance (MOP/CRA STOP triggers, change windows) is exercised by a person watching dashboards and owning go/no-go. The operator who must judge "is now a safe time" is often **already in Grafana**. Post-merge verification is as much a **display and binding** problem (change identity ↔ panels ↔ Explore ↔ evidence artifact) as a reasoning problem. Under Reading B, the engine may supply richer Risk Assessment and validation text, but the plugin still owns presentation at the decision point, STOP-checklist UX, verify-bound-to-PR views, and the human approval context that GitOps-PR (PRD #2) sits inside.
+
+**[INFERENCE] — likely split, not a decision.** Capability-shaped guess for discussion only:
+
+- **Engine (core `vfarcic/dot-ai`, via M13 and `operate`/`remediate` enrichment):** telemetry-augmented **Risk Assessment**; optional post-execution hooks that can assert metric/signal movement when MCP tools are available; shared session fields (`opr-…`, Policies Checked, Patterns Applied) every surface can render.
+- **Plugin (this companion):** human decision UX in the observability surface; pre-flight / safe-time **presentation** joined to PRD #2 propose; post-merge **verify view** bound to PR/session identity with Explore deep links; runbook-beside-alert and evidence artifact UX; surfacing `visualizationUrl` / governance fields at the point of approval. Not a second dry-run engine.
+
+**Viktor decides** the core-versus-companion boundary. PRD #1 DD11 already sets a thin-client line; this PRD must not override it by assertion. Until he answers the questions in §Open questions for Viktor, milestones here stay draft and must not silently assume either Reading A or Reading B as settled product law.
+
 
 ## Solution
 
@@ -161,9 +247,12 @@ The full loop — **is it safe now → what will it touch → propose as a PR �
 - Engine forks; org signal config via existing patterns where possible.
 - Guaranteeing `manageKnowledge` write-back before upstream capability is verified.
 
-## Open questions
+## Open questions for Viktor
 
-- Does `manageKnowledge` support **incremental write-back** of execution evidence (structured append / update of an existing knowledge URI), or only whole-document ingest by URI? **[UNVERIFIED]** — blocks I-094 delivery shape.
+- Does `manageKnowledge` support **incremental write-back** of execution evidence (structured append / update of an existing knowledge URI), or only whole-document ingest by URI? **[UNVERIFIED]** — blocks I-094 delivery shape. (Existing question; **[UNVERIFIED]** flag carried forward — not newly opened here.)
+- Should **telemetry-aware risk assessment** for `operate` and `remediate` be delivered by registering **`mcp-grafana` with the engine** (PRD #1 **M13**) rather than by the Grafana plugin joining telemetry client-side? See §Where this attaches and §Open architectural question.
+- If the engine gains telemetry via M13, what remains **genuinely plugin-side** — is it only presentation, change-identity binding, and the human decision point (Reading B), or does the plugin still own substantive safe-time/verify logic?
+- Does `operate`'s **post-execution validation** step (flow step 8) have any hook today for asserting a **metric recovered**, or is it strictly **cluster-state / operation-completed** validation? **[UNVERIFIED]** against engine internals beyond the public [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) wording.
 - Which live signals reliably mean "another change is in flight" in this estate (ArgoCD app conditions, MOP ticket state, annotation conventions)?
 - Product default: **warn** vs **hard-gate** when safe-time checks fail?
 - Minimum evidence schema for post-change artifacts so write-back stays useful across shifts without becoming a dump of raw frames.
@@ -324,20 +413,22 @@ If product strategy later reverses Viktor's demarcation, reopen these rows with 
 | 2026-09-03 | Third co-equal capability: **is now a safe time?** | Field experience at a large telecom operator: concurrent degradation + invisible baseline; only time-series answers; MOP/CRA STOP triggers need live evaluation |
 | 2026-09-03 | Bidirectional knowledge loop in scope (read + write intent) | Runbooks must surface in Grafana; post-change evidence must travel across shifts; `manageKnowledge` write-back **[UNVERIFIED]** |
 | 2026-09-03 | I-091…I-097 opened | Safe-time, concurrent change, evidence capture/write-back, runbook-beside-alert, STOP-vs-telemetry, shift context |
+| 2026-09-03 | Attach PRD #4 to existing `operate` envelope; engine-vs-plugin open | Operate Guide documents dry-run/approval/validate + Risk Assessment; M13 is the named telemetry extension; Viktor owns core-vs-companion (DD11) |
+| 2026-09-03 | I-098…I-102 opened | Telemetry-enriched operate risk; metric-recovery validation; engine mcp-grafana registration note; opr visualizationUrl in Grafana; Policies/Patterns visible at decision point |
 
 ## Idea register (append-only)
 
 ### Rules
 
-Append-only; never delete ids; full prose. Moved ids keep original numbers. New work continues **I-086+** (I-091… active extensions).
+Append-only; never delete ids; full prose. Moved ids keep original numbers. New work continues **I-086+** (I-091…I-102 active extensions).
 
 ### Arithmetic
 
 | item | count |
 |------|-------|
 | Moved full rows (considered-and-deferred) | 2 (I-026, I-077) |
-| New active-scope rows | 12 (I-086…I-097) |
-| **Register rows in this file** | **14** |
+| New active-scope rows | 17 (I-086…I-102) |
+| **Register rows in this file** | **19** |
 | Usability draft stubs for I-026/I-077 | 2 |
 | Original I-001…I-085 traceable | **85** |
 
@@ -357,6 +448,12 @@ Append-only; never delete ids; full prose. Moved ids keep original numbers. New 
 | I-095 | Surface runbook beside firing alert in Grafana | When an alert fires (or pre-flight shows alert risk), surface the **relevant runbook** next to it in the Grafana plugin via `manageKnowledge` semantic search — not only in Headlamp's Knowledge Base UI. Operators at change time should not leave the observability surface to find "where to look." Visible change: Knowledge/runbook panel or chips bound to alert labels / impacted objects with cited sources. | Headlamp Knowledge search present; Grafana plugin has none; manageKnowledge read path | owner-idea | OPEN | — |
 | I-096 | Evaluate MOP/CRA STOP triggers against live telemetry | Estate change governance already defines STOP triggers re-evaluated after each step; today a human reads dashboards to decide stop/go. Bind the same class of questions to **live Prom/Loki/Alertmanager** (and safe-time checks) so STOP is evidence-backed in the change path. Visible change: STOP checklist items show live pass/fail/inconclusive with links; product chooses warn vs hard-gate. `[INFERENCE]` exact MOP field mapping is estate-specific. | estate MOP/CRA model; this PRD Solution §Is now a safe time | owner-idea | OPEN | — |
 | I-097 | Carry change context across shift handover | Package plan intent, pre-flight snapshot, open risks, and (when present) evidence/runbook links so the executor at 03:00 has what the author knew — without relying on individuals still being online. Visible change: handover summary on the change session (export or pinned panel) that survives ticket reassignment; pairs with I-093/I-094 for durability. Systems failure when context dies at shift end; not a people failure. | large-operator field experience (anonymised); Problem §context does not travel | owner-idea | OPEN | — |
+| I-098 | Enrich `operate` Risk Assessment with live telemetry | Today `operate` already emits **Risk Assessment** with a stated level and reasoning, but the public worked example rates a 2→4 replica scale as **LOW RISK** from replica/cluster health ("healthy" ≈ 2/2 running), not from traffic, firing alerts, error-budget burn, or concurrent reconcile ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Enrich that field with live telemetry so "is now a safe time?" is answered inside the existing envelope rather than beside it. Visible change: Risk Assessment cites Prom/Alertmanager (or MCP-derived) factors alongside graph/cluster state; inconclusive when signals absent — never invent green. Delivery may be engine-side (M13) and/or plugin presentation — ownership open for Viktor. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) Risk Assessment example; this PRD §Where this attaches gap; I-091 | owner-idea | OPEN | — |
+| I-099 | Extend post-execution validation to metric recovered | `operate` step 8 validates that the **operation completed** (iterative AI validation of successful completion per docs), not that the **metric recovered**. Extend validation (engine hook and/or Grafana verify bound to `opr-`/PR identity) so "did it work?" means the intended signal moved. Visible change: recovered / not recovered / inconclusive tied to change session, with Explore links — complements I-087 without inventing a second verifier brand. Hook existence in core today is **[UNVERIFIED]**. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) step 8 / iterative validation; this PRD post-merge capability; I-087 | owner-idea | OPEN | — |
+| I-100 | Register `mcp-grafana` with the engine (core repo) | The Operate Guide already names MCP server integration to augment analysis with external tools, giving Prometheus metrics as the example. PRD #1 **M13 (`mcp-grafana`)** is the natural delivery of that extension point and is marked **core `vfarcic/dot-ai` work, "Not this companion repo."** Registering it with the engine would give `operate`/`remediate` telemetry-aware reasoning on **every** surface (CLI, Headlamp, Web UI, Grafana) without plugin-side reinvention. Visible change: tracked as upstream/core dependency note in this PRD — **no implementation in this companion repo**. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) MCP feature; PRD #1 M13; Reading A | owner-idea | OPEN | — |
+| I-101 | Surface `operate` `visualizationUrl` (`opr-` sessions) in Grafana | `operate` already returns Session ID `opr-…` and a `visualizationUrl` when `webUI.baseUrl` is configured ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Surface those in the Grafana plugin so operators can open the existing analysis view from the observability decision point — mirroring the query-session topology idea already captured elsewhere in the programme. Visible change: deep link / chip from pre-flight or change session to `/v/opr-…` (or documented fallback when Web UI base URL unset). | Operate Guide Session ID + Visualization fields; companion topology/session patterns [INFERENCE] | owner-idea | OPEN | — |
+| I-102 | Show Policies Checked and Patterns Applied at Grafana decision point | `operate` output already includes **Policies Checked** (pass/fail) and **Patterns Applied** in the worked example ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Render those fields in the Grafana change/pre-flight surface so estate governance is **visible where the human decides**, not only in CLI/Headlamp/Web UI transcripts. Visible change: governance chips or checklist beside safe-time/pre-flight; pairs with I-096 STOP evaluation without re-implementing policy engines. | Operate Guide example output fields; Reading B human decision surface; I-096 | owner-idea | OPEN | — |
+
 
 
 ## Work Log
@@ -372,3 +469,9 @@ Append-only; never delete ids; full prose. Moved ids keep original numbers. New 
 - **Issue:** Strongest strategic rationale from large-operator field experience was not yet in the PRD: blind/stale runbooks, context lost across shifts, "where to look" missing, and concurrent degradation invisible at execution time — all **information/systems** failures.
 - **Action:** Strengthen Problem (`### Why change safety fails in practice`); add co-equal **is now a safe time?** capability and time-series rationale; reframe `manageKnowledge` as bidirectional with write-back **[UNVERIFIED]** + Open questions; extend differentiation table (Headlamp act / Assistant observe / neither write-back); register **I-091…I-097**; update Current State one-liner. No edits outside this file. Anonymised — no operator name, no individuals, no identifiable outage.
 - **Prompt:** Parent assignment RunbookInsight — fold product insight into PRD #4 only.
+
+### 2026-09-03 — Fold `operate` envelope + engine-vs-plugin tension
+
+- **Issue:** PRD #4 risked reading as a parallel change-safety system. Public Operate Guide already documents an eight-step envelope (intent → … → dry-run → approval → execute → validate), structured output (Current State, Risk Assessment, `opr-` Session ID, `visualizationUrl`, Policies/Patterns), and MCP telemetry augmentation — while the worked example's LOW RISK and step-8 validation remain cluster/operation-scoped, not traffic/alert/burn or metric-recovered.
+- **Action:** Add §Where this attaches (tables of stages + output fields; precise gap mapped to three capabilities; M13 extension point); add §Open architectural question (Reading A engine / Reading B plugin, `[INFERENCE]` split, Viktor decides); retitle/extend §Open questions for Viktor; register **I-098…I-102**; Current State attachment one-liner. No edits outside this file. Anonymisation preserved.
+- **Prompt:** Parent assignment OperateFold — fold operate docs behaviour into PRD #4 only; commit, do not push.
