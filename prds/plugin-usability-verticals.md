@@ -1,9 +1,12 @@
 # PRD: Plugin usability, shipped in vertical slices
 
-**Issue**: TBD — file on LesleyMurfin/dot-ai-grafana
+**Issue**: TBD — number assigned when filed on LesleyMurfin/dot-ai-grafana
+**PRD**: TBD
 **Priority**: High (finishes the plugin after PRD #1 thin-client + PRD #2 roadmap split)
 **Status**: Draft
 **Updated**: 2026-09-03
+
+> **Numbering:** This PRD is unnumbered until its GitHub issue is filed. When filed, rename this file to `<N>-plugin-usability-verticals.md` to match the issue number.
 
 ## Current State
 
