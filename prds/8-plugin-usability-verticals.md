@@ -2,7 +2,7 @@
 
 **Issue**: https://github.com/vfarcic/dot-ai-grafana/issues/8
 **PRD**: **#8** (free after #1 v1, #5 GitOps-PR execute, #6 M7 Map, #7 evidence-grounded change safety)
-**Priority**: High (finishes the plugin after PRD #1 thin-client + PRD #5 / #3 / #4 roadmap split)
+**Priority**: High (finishes the plugin after PRD #1 thin-client + PRD #5 / #6 / #7 roadmap split)
 **Status**: Draft — **restructured 2026-09-03** after collision with PRD #6
 **Updated**: 2026-09-03
 
@@ -11,12 +11,12 @@
 ## Current State
 
 - **Goal now**: Finish the `dot-ai-grafana` Grafana app plugin as a usable product surface — **thread integrity, honest wait, ship/docs** — without stealing PRD #6 Map/markdown/show-me scope or PRD #7 pre-flight/verify scope.
-- **Collision found (2026-09-03):** This draft was written without knowledge of [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / [PR #22]((prior working-branch PR; not linked)). Milestones **M-C** (readable answer / markdown) and **M-E** (act from the answer / drilldowns / 0-hop) overlap **PRD #6** directly. They are **not deleted** — they live under **Deferred to PRD #6** below with Outcome/Demo/Budget preserved.
+- **Collision found (2026-09-03):** This draft was written without knowledge of [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / PR #22. Milestones **M-C** (readable answer / markdown) and **M-E** (act from the answer / drilldowns / 0-hop) overlap **PRD #6** directly. They are **not deleted** — they live under **Deferred to PRD #6** below with Outcome/Demo/Budget preserved.
 - **Established split (owner, authoritative):**
   ```
   PRD #1  v1 0.1.0        — analysis-only, pack Current       — vfarcic#3 / prior working branch
-  PRD #5  GitOps execute  — issue #13 / GitOps design PR (separate)           — propose → GitOps PR only
-  PRD #6  M7 Map          — issue #6 / fork PR #22           — 0.2.x
+  PRD #5  GitOps execute  — issue #5                          — propose → GitOps PR only
+  PRD #6  M7 Map          — issue #6                          — 0.2.x
   PRD #7  Evidence safety — issue #7 / prds/7-evidence-grounded-change-safety.md
   PRD #8  Usability rest  — issue #8 / this file — M-A (done), M-B, M-D, M-F + IaC/topology notes
   ```
@@ -80,7 +80,7 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 | I-003 | Forward Grafana user identity | this-PRD | — |
 | I-004 | Wire shared-server dual surface | this-PRD | — |
 | I-005 | Codify Grafana vs Headlamp roles | this-PRD | — |
-| I-006 | Surface GitOps-PR remediation | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
+| I-006 | Surface GitOps-PR remediation | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
 | I-007 | Register mcp-grafana senses | out-of-scope | OUT-OF-SCOPE (core `vfarcic/dot-ai`) |
 | I-008 | Add Kubeshark MCP evidence | out-of-scope | OUT-OF-SCOPE (core `vfarcic/dot-ai`) |
 | I-009 | Ingest predictive hardware metrics | out-of-scope | OUT-OF-SCOPE (core `vfarcic/dot-ai`) |
@@ -95,13 +95,13 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 | I-018 | Keep Kubeshark in core | out-of-scope | OUT-OF-SCOPE (confirmed core-owned; DD11) |
 | I-019 | Finish install docs and screenshots | this-PRD | F1 |
 | I-020 | Run multi-version Grafana matrix | this-PRD | F2 |
-| I-021 | Document no-apply vs PR tokens | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
-| I-022 | UI propose GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
-| I-023 | Create PRs via SCM API | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
-| I-024 | Gate who may open PRs | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
-| I-025 | E2E proposal to GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
+| I-021 | Document no-apply vs PR tokens | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
+| I-022 | UI propose GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
+| I-023 | Create PRs via SCM API | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
+| I-024 | Gate who may open PRs | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
+| I-025 | E2E proposal to GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
 | I-026 | Expand operate and recommend | PRD-7-new | Recorded on PRD #7 as Considered-and-deferred (Headlamp owns day-2 lifecycle; not Grafana Build/Update) |
-| I-027 | Rich in-UI diff viewer | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
+| I-027 | Rich in-UI diff viewer | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
 | I-028 | Generate OpenAPI typed client | this-PRD | — |
 | I-029 | Backend 202 status polling | this-PRD | D4 |
 | I-030 | Show 1000-character counter | this-PRD | C4 |
@@ -153,7 +153,7 @@ Source of PRD #6 truth: `prds/6-m7-grafana-map.md` / [issue #6](https://github.c
 | I-076 | Leave detail-page actions to Headlamp | out-of-scope | OUT-OF-SCOPE (Headlamp owns; vfarcic/dot-ai-headlamp src/index.tsx) |
 | I-077 | Leave Recommend wizard to Headlamp | PRD-7-new | Recorded on PRD #7 as Considered-and-deferred (Headlamp owns day-2 lifecycle; not Grafana Build/Update) |
 | I-078 | Consider Knowledge Base on Grafana | this-PRD | — |
-| I-079 | Diff claim not children in GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #13) — do not duplicate |
+| I-079 | Diff claim not children in GitOps PR | PRD-8 | GitOps-PR remediate execute path (issue #5) — do not duplicate |
 | I-080 | Surface existing visualizationUrl | this-PRD | — |
 | I-081 | Embed visualization in-page | this-PRD | — |
 | I-082 | Render topology with Node Graph | this-PRD | — |
@@ -274,7 +274,7 @@ flowchart TD
 **Explicitly NOT in this PRD**
 
 - **GitOps-PR remediate execute** → [`prds/5-gitops-pr-remediate.md`](./5-gitops-pr-remediate.md) (I-006, I-021–I-025, I-079). Do not duplicate.
-- **Grafana Map / Explore / show-me / markdown Answer (M7)** → PRD #6 on [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / [PR #22]((prior working-branch PR; not linked)). Deferred slices preserved below.
+- **Grafana Map / Explore / show-me / markdown Answer (M7)** → PRD #6 on [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6) / PR #22. Deferred slices preserved below.
 - **Evidence-grounded change safety (pre-flight + post-merge verify)** → [`prds/7-evidence-grounded-change-safety.md`](./7-evidence-grounded-change-safety.md).
 - **Day-2 Build/Update object lifecycle** → Headlamp (see PRD #7 Considered and deferred). Not this fence.
 - **Phase-3 core-engine work** (I-007–I-010, I-018) stays on `vfarcic/dot-ai`. Thin REST client (PRD #1 DD11).
@@ -714,13 +714,13 @@ A topology view is also where the abstraction problem already documented in this
 | I-018 | Keep Kubeshark in core | Confirm Kubeshark/evidence connectivity is owned by a core `vfarcic/dot-ai` PRD plus platform install MOP, while this companion only presents server output. Rejects growing a privileged packet client inside `dot-ai-grafana`. Matches Design Decision 11 companion-vs-core ownership. | `prds/1-grafana-ai-cluster-intelligence.md:565` | PRD1-openq | OUT-OF-SCOPE (confirmed core-owned; DD11) | — |
 | I-019 | Finish install docs and screenshots | Complete end-to-end README install, configuration, read-only token guidance, and current UI screenshots so a stranger can reach first successful Ask without undocumented steps. `src/plugin.json` still has empty `screenshots`. This is the M8 docs ship gap, not new Ask behaviour. | `prds/1-grafana-ai-cluster-intelligence.md:403` | PRD1-phase2 | SCHEDULED | F1 |
 | I-020 | Run multi-version Grafana matrix | Execute and publish compatibility proof across the agreed Grafana matrix (11.4 must-pass; current 13.x; original draft also mentioned 10.x). Pins alone do not prove runtime. Visible change: docs table of pass/fail plus CI jobs that match the floor policy. | `prds/1-grafana-ai-cluster-intelligence.md:404` | PRD1-phase2 | SCHEDULED | F2 |
-| I-021 | Document no-apply vs PR tokens | Document the credential split between the forever no-apply analysis token and separate GitOps PR-create (or bot) credentials. Analysis must keep working when execute credentials are absent or denied. Owned by `prds/5-gitops-pr-remediate.md`, not **PRD #8**. | `prds/5-gitops-pr-remediate.md:23,37` | PRD2 | OUT-OF-SCOPE (PRD #5) | — |
-| I-022 | UI propose GitOps PR | From a remediate analysis result in Grafana, let the operator propose and open or link a GitOps pull request (title, body, file diffs) without the plugin writing the cluster. Cluster mutation happens only after human merge and GitOps reconcile. Owned by PRD #5. | `prds/5-gitops-pr-remediate.md:21,36` | PRD2 | OUT-OF-SCOPE (PRD #5) | — |
-| I-023 | Create PRs via SCM API | Integrate an SCM API (or controlled automation) to create the GitOps pull request with manifest or values diffs using credentials distinct from the analysis token. The audit trail is the PR, not an opaque plugin action. Owned by PRD #5. | `prds/5-gitops-pr-remediate.md:21-22` | PRD2 | OUT-OF-SCOPE (PRD #5) | — |
-| I-024 | Gate who may open PRs | Implement RBAC and optional second-approver gates for who may trigger GitOps PR creation from the plugin. Prevents any Grafana editor from opening infrastructure PRs. Owned by PRD #5 milestones. | `prds/5-gitops-pr-remediate.md:24,45` | PRD2 | OUT-OF-SCOPE (PRD #5) | — |
-| I-025 | E2E proposal to GitOps PR | Build end-to-end coverage that a remediate proposal becomes a GitOps PR against a real or fixture repo with no direct cluster mutate from the plugin. Locks the PRD #5 success criterion. | `prds/5-gitops-pr-remediate.md:25,46` | PRD2 | OUT-OF-SCOPE (PRD #5) | — |
-| I-026 | Expand operate and recommend | MOVED → PRD #7 (prds/7-evidence-grounded-change-safety.md) **Considered and deferred** (not active Build/Update-in-Grafana scope). Full text preserved there. Provenance: prds/5-gitops-pr-remediate.md:31. | prds/5-gitops-pr-remediate.md:31 | PRD2 | OUT-OF-SCOPE (MOVED → PRD #7 considered-and-deferred) | — |
-| I-027 | Rich in-UI diff viewer | Render rich side-by-side file diffs inside Grafana before PR submit, beyond reviewable PR content on the SCM host. PRD #5 explicitly excludes marketplace-style rich diff chrome. Kept as a recorded non-goal. | `prds/5-gitops-pr-remediate.md:32` | PRD2 | OUT-OF-SCOPE (explicit non-goal of PRD #5) | — |
+| I-021 | Document no-apply vs PR tokens | Document the credential split between the forever no-apply analysis token and separate GitOps PR-create (or bot) credentials. Analysis must keep working when execute credentials are absent or denied. Owned by `prds/5-gitops-pr-remediate.md`, not **PRD #8**. | `prds/5-gitops-pr-remediate.md:23,37` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
+| I-022 | UI propose GitOps PR | From a remediate analysis result in Grafana, let the operator propose and open or link a GitOps pull request (title, body, file diffs) without the plugin writing the cluster. Cluster mutation happens only after human merge and GitOps reconcile. Owned by PRD #5. | `prds/5-gitops-pr-remediate.md:21,36` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
+| I-023 | Create PRs via SCM API | Integrate an SCM API (or controlled automation) to create the GitOps pull request with manifest or values diffs using credentials distinct from the analysis token. The audit trail is the PR, not an opaque plugin action. Owned by PRD #5. | `prds/5-gitops-pr-remediate.md:21-22` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
+| I-024 | Gate who may open PRs | Implement RBAC and optional second-approver gates for who may trigger GitOps PR creation from the plugin. Prevents any Grafana editor from opening infrastructure PRs. Owned by PRD #5 milestones. | `prds/5-gitops-pr-remediate.md:24,45` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
+| I-025 | E2E proposal to GitOps PR | Build end-to-end coverage that a remediate proposal becomes a GitOps PR against a real or fixture repo with no direct cluster mutate from the plugin. Locks the PRD #5 success criterion. | `prds/5-gitops-pr-remediate.md:25,46` | PRD5 | OUT-OF-SCOPE (PRD #5) | — |
+| I-026 | Expand operate and recommend | MOVED → PRD #7 (prds/7-evidence-grounded-change-safety.md) **Considered and deferred** (not active Build/Update-in-Grafana scope). Full text preserved there. Provenance: prds/5-gitops-pr-remediate.md:31. | prds/5-gitops-pr-remediate.md:31 | PRD5 | OUT-OF-SCOPE (MOVED → PRD #7 considered-and-deferred) | — |
+| I-027 | Rich in-UI diff viewer | Render rich side-by-side file diffs inside Grafana before PR submit, beyond reviewable PR content on the SCM host. PRD #5 explicitly excludes marketplace-style rich diff chrome. Kept as a recorded non-goal. | `prds/5-gitops-pr-remediate.md:32` | PRD5 | OUT-OF-SCOPE (explicit non-goal of PRD #5) | — |
 | I-028 | Generate OpenAPI typed client | Generate a Go/TypeScript client from dot-ai `schema/openapi.json` / `GET /api/v1/openapi` instead of hand-maintained proxy DTOs. `docs/test-loop.md` notes OpenAPI fetch passed in M0 planning but no generated client shipped in the thin-client pass. Reduces envelope drift risk on tool fields. | `docs/test-loop.md:9,20` | docs-gap | OPEN | — |
 | I-029 | Backend 202 status polling | Implement the async job protocol in the Go proxy (`202` + `jobId`, `GET`/`POST` status route) so the UI can poll long remediate without holding one resource call open. `docs/test-loop.md` B3 records that no 202/job-poll path exists today; tools use a 120s host ceiling. Pairs with I-015 / slice D4. | `docs/test-loop.md:34` | docs-gap | SCHEDULED | D4 |
 | I-030 | Show 1000-character counter | Add a live used/remaining character indicator on the intent/issue textarea bound to `MAX_INTENT_CHARS` (1000) in `src/utils/progressiveContext.ts`. Operators currently discover truncation only after pack/submit. `docs/test-loop.md` Group C still marks the counter as not built in the thin-client UI. | `docs/test-loop.md:42` | docs-gap | SCHEDULED | C4 |
