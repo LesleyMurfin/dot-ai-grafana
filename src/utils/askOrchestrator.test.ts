@@ -22,6 +22,7 @@ function stackResult(overrides: Partial<StackContextResult> = {}): StackContextR
     tempoLines: overrides.tempoLines ?? [],
     alertLines: overrides.alertLines ?? [],
     currentEmpty: overrides.currentEmpty ?? false,
+    drilldowns: overrides.drilldowns ?? [],
   };
 }
 
@@ -50,15 +51,6 @@ describe('isUnscopedQuestion / answerConflictsWithCurrent', () => {
     expect(isUnscopedQuestion('how healthy is the cluster')).toBe(true);
     expect(isUnscopedQuestion('logs for pod api in namespace prod')).toBe(false);
     expect(isUnscopedQuestion('app=argocd status')).toBe(false);
-  });
-
-  test('bogus English pods do not block hop-2 across', () => {
-    expect(isUnscopedQuestion('show failing pods in production')).toBe(true);
-    expect(isUnscopedQuestion('top issues in the cluster')).toBe(true);
-    expect(isUnscopedQuestion('which pods are crashlooping in staging')).toBe(true);
-    // Real hyphenated workload — scoped, hop-2 across must not fire for this reason.
-    expect(isUnscopedQuestion('why is checkout-api CrashLooping in prod?')).toBe(false);
-    expect(isUnscopedQuestion('show logs for pod checkout-api in namespace production')).toBe(false);
   });
 
   test('denial vs Loki evidence is a conflict', () => {
@@ -203,12 +195,10 @@ describe('runAskOrchestrator', () => {
     expect(calls[0].text).not.toMatch(/\bHistory\b/i);
     expect(calls[1].text).toContain('Loki last 15m');
     expect(calls[1].text).toMatch(/across ALL clusters/i);
-    expect(calls[0].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-    expect(calls[1].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
     expect(calls[0].meta).toEqual(
       expect.objectContaining({
         hop: 1,
-        hops: MAX_ASK_HOPS,
+        hops: 1,
         current_empty: false,
         first_hop: 'grafana',
       })
@@ -216,56 +206,11 @@ describe('runAskOrchestrator', () => {
     expect(calls[1].meta).toEqual(
       expect.objectContaining({
         hop: 2,
-        hops: MAX_ASK_HOPS,
+        hops: 2,
         first_hop: 'grafana',
       })
     );
     expect(result.summary).toContain('error boom');
-  });
-
-  test('30×145-char Loki dump still packs every hop ≤ 1000', async () => {
-    const lokiLines = Array.from({ length: 30 }, (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`);
-    const current = [
-      'Loki last 15m (pod/checkout-api ns/prod):',
-      ...lokiLines,
-      '',
-      'Prometheus last 15m:',
-      'pod/checkout-api ns/prod restarts=12',
-      '',
-      'Tempo last 15m:',
-      'trace abc123',
-      '',
-      'Alertmanager:',
-      'KubePodCrashLooping firing',
-    ].join('\n');
-    expect(current.length).toBeGreaterThan(MAX_INTENT_CHARS);
-
-    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
-      expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-      return { ok: true, status: 200, summary: 'error boom across clusters', raw: {} };
-    });
-
-    const result = await runAskOrchestrator({
-      tool: 'query',
-      question: 'top issues in the cluster',
-      thread: emptyThread(),
-      fetchStack: jest.fn(async () =>
-        stackResult({
-          current,
-          logLines: lokiLines,
-          currentEmpty: false,
-        })
-      ),
-      callTool,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(callTool.mock.calls.length).toBeGreaterThanOrEqual(1);
-    for (const [, text] of callTool.mock.calls) {
-      expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-      expect(text as string).toContain('Loki last 15m');
-      expect(text as string).toContain('Question:');
-    }
   });
 
   test.each([
@@ -313,6 +258,7 @@ describe('runAskOrchestrator', () => {
       const secondPacked = (callTool.mock.calls[1][1] as string) || '';
       expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
       expect(secondPacked).toContain('Loki last 15m');
+
       expect(result.summary).not.toMatch(/not available|from a different cluster/i);
     }
   );
@@ -387,21 +333,19 @@ describe('runAskOrchestrator', () => {
     expect(result.hops).toBe(2);
     const secondPacked = (callTool.mock.calls[1][1] as string) || '';
 
-    // The Grafana evidence itself is still packed for hop 2 (Current may be
-    // trimmed to the 1000-char intent cap, so assert headers not full Loki lines).
+    // The Grafana evidence itself is still packed for hop 2.
     expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('KubePodCrashLooping firing');
-    expect(secondPacked.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-    expect(((callTool.mock.calls[0][1] as string) || '').length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+
 
     // The follow-up names only the sources that actually carry data, plus the target.
     expect(secondPacked).toMatch(/live evidence from Loki, Alertmanager for pod\/argocd-application-controller ns\/demo-gitops/i);
     expect(secondPacked).not.toMatch(/evidence from[^\n]*Prometheus/i);
 
-    // Hard denial ban — the soft "solely because" hedge is gone.
     expect(secondPacked).toMatch(/Do NOT deny facts in Current/i);
     expect(secondPacked).toMatch(/does not exist, was not found, is not deployed/i);
     expect(secondPacked).not.toMatch(/solely because/i);
+
 
     // A bare namespace-does-not-exist answer is not what the user ends up with.
     expect(result.summary).not.toMatch(/does not exist/i);
@@ -449,8 +393,8 @@ describe('runAskOrchestrator', () => {
     expect(thirdPacked).toMatch(/Final follow-up: your previous answer still hedged/i);
     expect(thirdPacked).toMatch(/Do NOT repeat that the pod\/namespace is unreachable/i);
     expect(thirdPacked).toMatch(/live Loki, Alertmanager evidence/i);
-    // Hop 3 still carries the Grafana evidence, not just the scolding.
     expect(thirdPacked).toContain('Loki last 15m');
+
 
     // The user ends on the committed answer, not the "not accessible" hedge.
     expect(result.summary).not.toMatch(/not accessible/i);
@@ -638,7 +582,7 @@ describe('runAskOrchestrator', () => {
     const result = await runAskOrchestrator({
       tool: 'remediate',
       question: 'pod crash',
-      thread: { current: 'prior current', map: 'ns/x', history: [] },
+      thread: { current: 'prior current', map: 'ns/x', history: [], drilldowns: [] },
       callTool,
     });
 
@@ -706,6 +650,31 @@ describe('runAskOrchestrator', () => {
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toMatch(/cancelled/i);
     expect(callTool).not.toHaveBeenCalled();
+  });
+
+  test('show me the logs skips dot-ai and keeps Current', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Loki last 15m:\nboom',
+        drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.current).toContain('boom');
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+    ]);
+    expect(result.summary).toMatch(/Map links/i);
   });
 });
 

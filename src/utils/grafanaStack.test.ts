@@ -4,6 +4,8 @@ import {
   buildLogQL,
   CLUSTER_LOGQL,
   fetchStackContext,
+  dashboardUidsFromAlertFrames,
+  dashboardHintFromUids,
   getDataSourceByType,
   linesFromLokiFrames,
   LOG_LINE_CAP,
@@ -284,3 +286,33 @@ describe('getDataSourceByType selection', () => {
     expect(picked?.settings?.uid).toBe('loki-a');
   });
 });
+
+describe('dashboardUidsFromAlertFrames', () => {
+  test('reads dashboardUid field and labels; ignores junk', () => {
+    const uids = dashboardUidsFromAlertFrames([
+      {
+        fields: [
+          { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
+          { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
+        ],
+      } as never,
+      {
+        fields: [
+          {
+            name: 'alertname',
+            type: 'string',
+            values: ['Other'],
+            labels: { __dashboardUid__: 'panel-uid-1' },
+          },
+        ],
+      } as never,
+      {
+        fields: [{ name: 'dashboardUid', type: 'string', values: ['no'] }],
+      } as never,
+    ]);
+    expect(uids).toEqual(['abc12def', 'panel-uid-1']);
+    expect(dashboardHintFromUids([])).toContain('none');
+    expect(dashboardHintFromUids(uids)).toContain('/d/abc12def');
+  });
+});
+
