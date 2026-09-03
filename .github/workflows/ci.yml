@@ -213,7 +213,7 @@ jobs:
       - name: Docker logs
         if: ${{ always() && steps.run-tests.outcome == 'failure' }}
         run: |
-          docker logs lesleymurfin-dotai-app >& grafana-server.log
+          docker logs devopstoolkit-dotai-app >& grafana-server.log
 
       - name: Stop grafana docker
         run: docker compose down

@@ -1,7 +1,7 @@
 # Spec: Grafana PRD #1 — M4 Query / Ask path (OrchestrateIterate)
 
 **Depends on:** M3 proxy, progressive context + grafanaStack packing  
-**Plugin id:** `lesleymurfin-dotai-app`  
+**Plugin id:** `devopstoolkit-dotai-app`  
 **Branch / worktree:** featherduster (this plugin worktree)  
 **Role:** **TEST** (ADW) — golden UI Asks + §7 ask-log score + focused jest; fail-closed on hops/current_empty.
 
@@ -17,7 +17,7 @@
 
 Gates: hops≥2 on unscoped top-issues ✓ (≤ MAX_ASK_HOPS=3 ✓); argocd hop1 denial → conflict hop2 ✓; current_empty=false on (1)(2) ✓; list-ns first_hop=dot-ai ✓; no ChunkLoadError / pageErrs on any Ask ✓; branch on every post-restart hop ✓. TEST-filed improvements (see TEST yield, 21:17Z window): (1) 512-rune summary cap makes conflict/hedge triggers unattributable — 45/54 log lines clipped at 513, and Ask 1's hop3 `conflict` has no denial phrase within hop2's visible summary (suspected false positive burning the hop cap, unprovable from the log); (2) conflict follow-up prompt duplicates every directive line verbatim (hop3 body, 21:17:03Z); (3) `extractResourceHints` "X in Y" pattern turned "namespaces are in Active status" into Current chip `are@Active` on the live list-ns thread (src/utils/progressiveContext.ts:73).
 
-**TEST window:** `2026-09-01T20:07:54Z` → `20:09:55Z` via `node scripts/golden-ask.mjs` against `http://10.43.25.61` / plugin `lesleymurfin-dotai-app`. Ask-log: `/var/lib/grafana/dotai-ask.log`. Suite log: `scripts/golden-func.log`. **Verdict: PASS** (no BUILD loop this turn).
+**TEST window:** `2026-09-01T20:07:54Z` → `20:09:55Z` via `node scripts/golden-ask.mjs` against `http://10.43.25.61` / plugin `devopstoolkit-dotai-app`. Ask-log: `/var/lib/grafana/dotai-ask.log`. Suite log: `scripts/golden-func.log`. **Verdict: PASS** (no BUILD loop this turn).
 
 | Ask | hops | current_empty | used_current | first_hop | status | summary snippet |
 |-----|------|---------------|--------------|-----------|--------|-----------------|
@@ -141,4 +141,4 @@ grep -n 'dotai-ask.log' pkg/plugin/resources.go
 - **M8** documents README + points at `docs/grafana-stack-test-plan.md` §7 measures.
 - Combination gate **X1**: fail if answer is generic with **no Grafana data in Current** and **no cluster fact from dot-ai**.
 - Do not treat inventory-only first hop as permission to skip Grafana on a later observability refine.
-- Plugin id stays `lesleymurfin-dotai-app`. Namespace for live Grafana is **`riley-monitoring`** (not `monitoring` README drift).
+- Plugin id stays `devopstoolkit-dotai-app`. Namespace for live Grafana is **`riley-monitoring`** (not `monitoring` README drift).

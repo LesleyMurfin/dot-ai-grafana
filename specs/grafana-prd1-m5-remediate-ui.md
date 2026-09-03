@@ -1,7 +1,7 @@
 # Spec: Grafana PRD #1 — M5 Remediate analysis UI
 
 **Depends on:** M3 proxy + M4 Ask path (orchestrate)  
-**Plugin id:** `lesleymurfin-dotai-app`  
+**Plugin id:** `devopstoolkit-dotai-app`  
 **Role:** BUILD/docs (spec text only) — analysis-only Remediate; no new UI, no execute.
 
 ## Current State

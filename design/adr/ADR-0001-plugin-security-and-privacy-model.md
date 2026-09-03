@@ -246,7 +246,7 @@ These are **upstream engine / project** decisions. The plugin will not invent an
 
 ## Public-surface check
 
-This ADR was written for a **public** repository (and a public fork of upstream). It contains **no** real secrets, tokens, internal hostnames, or internal organisation names. Cites use in-repo paths and public GitHub issue links only. Plugin id `lesleymurfin-dotai-app` appears only as already-published plugin metadata. Describe **required controls**, not step-by-step reproduction of unpatched weaknesses — see `docs/security-disclosure.md`.
+This ADR was written for a **public** repository (and a public fork of upstream). It contains **no** real secrets, tokens, internal hostnames, or internal organisation names. Cites use in-repo paths and public GitHub issue links only. Plugin id `devopstoolkit-dotai-app` appears only as already-published plugin metadata. Describe **required controls**, not step-by-step reproduction of unpatched weaknesses — see `docs/security-disclosure.md`.
 
 ## References
 

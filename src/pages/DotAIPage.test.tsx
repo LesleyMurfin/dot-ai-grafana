@@ -133,6 +133,7 @@ describe('Pages/DotAIPage', () => {
       tempoLines: [],
       alertLines: [],
       currentEmpty: false,
+      drilldowns: [],
     });
     mockCallDotAITool.mockResolvedValue({
       ok: true,

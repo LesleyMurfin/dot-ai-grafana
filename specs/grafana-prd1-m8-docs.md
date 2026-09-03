@@ -1,7 +1,7 @@
 # Spec: Grafana PRD #1 — M8 documentation + stack proof
 
 **Depends on:** M4 Ask path (orchestrate + Grafana pack), M2/M3 config+proxy  
-**Plugin id:** `lesleymurfin-dotai-app`  
+**Plugin id:** `devopstoolkit-dotai-app`  
 **Role:** Docs and test-plan alignment with PRD **as it is now** (K3s + Grafana stack + dot-ai; not Grafana-host-only).
 
 ## Current State
@@ -10,7 +10,7 @@
 - **Ask-log body cap drift (new).** Test-plan §7 still says ask-log `body` is “≤512 runes” (`docs/grafana-stack-test-plan.md:411`) and fail-closed rule 2 still says “512-rune cut” (`:472`), but the code cap is now **4096**: `askBodyPreview` `const max = 4096` (`pkg/plugin/resources.go:110`), asserted by `TestAskBodyPreviewStripsSecrets` expecting 4097 runes incl. ellipsis (`resources_test.go:1596`). `summary`/`error` stay `truncateRunes(…, 512)` (`resources.go:214-215`). M4 records the raise as done — §7’s M5 `used_current` scoring notes are stale and must be corrected in the docs change set.
 - **`docs/progressive-context.md`** documents client-only packing: Stable + Current + Map + box; no `sessionId`; Grafana DS via `getDataSourceSrv` / `ds.query`.
 - **`docs/grafana-stack-test-plan.md`** is the combination proof SSOT: environment facts, Current shape, fixtures, L0–L4 checks, owner gate X1, and **§7 Measures** scored from `/var/lib/grafana/dotai-ask.log`.
-- **PRD** (`prds/1-grafana-ai-cluster-intelligence.md`) binds stack-in-one-Ask, no new UI, analysis-only, plugin id `lesleymurfin-dotai-app`.
+- **PRD** (`prds/1-grafana-ai-cluster-intelligence.md`) binds stack-in-one-Ask, no new UI, analysis-only, plugin id `devopstoolkit-dotai-app`.
 - **`src/plugin.json`** `"screenshots": []` still empty; README Screenshots section defers to M9.
 - **README already has `## Compatibility`** (floor `>=11.0.0`, pins 11.4.0) — not a partial matrix; M9 owns dual-version e2e evidence, not inventing the section.
 
@@ -38,7 +38,7 @@ Keep README + progressive-context truthful to the orchestrated Ask path and stac
 
 2. **README — install**  
    - Replace `monitoring` namespace with **`riley-monitoring`** in kubectl examples (match test-plan §1).  
-   - Keep unsigned allow-list id `lesleymurfin-dotai-app`.  
+   - Keep unsigned allow-list id `devopstoolkit-dotai-app`.  
    - Point “full stack proof” at `docs/grafana-stack-test-plan.md` (including **§7 Measures** and ask-log path).
 
 3. **progressive-context.md**  
@@ -62,7 +62,7 @@ Keep README + progressive-context truthful to the orchestrated Ask path and stac
 ## Verification
 
 ```bash
-grep -E 'Test connection|analysis only|Current|History|lesleymurfin-dotai-app' README.md
+grep -E 'Test connection|analysis only|Current|History|devopstoolkit-dotai-app' README.md
 grep -n 'riley-monitoring' README.md docs/grafana-stack-test-plan.md
 grep -n 'dotai-ask.log\|## 7. Measures\|hops\|first_hop\|used_current\|4096\|512' docs/grafana-stack-test-plan.md
 grep -n 'getDataSourceSrv\|History\|sessionId\|cap' docs/progressive-context.md

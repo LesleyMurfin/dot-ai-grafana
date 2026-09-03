@@ -1,7 +1,7 @@
 # Spec: Grafana PRD #1 — M6 tool selector + shared layout
 
 **Depends on:** M4 Query Ask path, M5 Remediate analysis path  
-**Plugin id:** `lesleymurfin-dotai-app`  
+**Plugin id:** `devopstoolkit-dotai-app`  
 **Role:** BUILD/docs (spec text only) — shared page chrome; **no new UI**.
 
 ## Current State

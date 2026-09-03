@@ -1,9 +1,9 @@
 apiVersion: 1
 
 apps:
-  - type: 'lesleymurfin-dotai-app'
+  - type: 'devopstoolkit-dotai-app'
     org_id: 1
-    org_name: 'lesleymurfin'
+    org_name: 'devopstoolkit'
     disabled: false
     jsonData:
       apiUrl: http://default-url.com

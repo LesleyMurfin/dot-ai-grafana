@@ -68,7 +68,7 @@ test.describe('dot-ai app configuration', () => {
     // Fixture already navigates with an admin session (plugin-e2e).
     void appConfigPage;
 
-    const settingsRes = await page.request.get('/api/plugins/lesleymurfin-dotai-app/settings');
+    const settingsRes = await page.request.get('/api/plugins/devopstoolkit-dotai-app/settings');
 
     // Soft-pass if settings are forbidden and we are not admin in this environment.
     if (settingsRes.status() === 403) {

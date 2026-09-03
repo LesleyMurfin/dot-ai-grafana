@@ -2,7 +2,7 @@
 
 Grafana **App plugin with backend** for AI-powered Kubernetes cluster intelligence via [dot-ai](https://github.com/vfarcic/dot-ai) REST tools (`query`, analysis-only `remediate`).
 
-- **Plugin ID:** `lesleymurfin-dotai-app`
+- **Plugin ID:** `devopstoolkit-dotai-app`
 - **Grafana floor:** `grafanaDependency: ">=11.0.0"` (reference host **11.4**)
 - **Code home:** `LesleyMurfin/dot-ai-grafana` (this fork)
 
@@ -27,17 +27,17 @@ npm run server   # docker compose
 
 ## Install (unsigned / private)
 
-- **Host:** k3s Grafana `kube-prometheus-stack-grafana` in your monitoring namespace — the examples below use `NS=monitoring` (plugin id `lesleymurfin-dotai-app`).
-- **Restart-safe:** Grafana `/var/lib/grafana` is PVC `kube-prometheus-stack-grafana` (longhorn 5Gi) — **not** emptyDir. Plugin dist under `plugins/lesleymurfin-dotai-app` and `grafana.db` survive pod delete/rollout.
+- **Host:** k3s Grafana `kube-prometheus-stack-grafana` in your monitoring namespace — the examples below use `NS=monitoring` (plugin id `devopstoolkit-dotai-app`).
+- **Restart-safe:** Grafana `/var/lib/grafana` is PVC `kube-prometheus-stack-grafana` (longhorn 5Gi) — **not** emptyDir. Plugin dist under `plugins/devopstoolkit-dotai-app` and `grafana.db` survive pod delete/rollout.
 - **Unsigned allow list** (must persist on the Deployment env / helm values):
 
 ```bash
-GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=lesleymurfin-dotai-app
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app
 ```
 
 - **GitOps SoT:** Application CR / Helm values for the Grafana stack (persist in your GitOps repo):
   - `grafana.persistence.enabled=true` (PVC / longhorn / 5Gi)
-  - `grafana.env.GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=lesleymurfin-dotai-app`
+  - `grafana.env.GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app`
   - Live install may already be patched; keep the same keys in Helm values so a future sync does not regress.
 
 - **Deploy/refresh plugin bits:**
@@ -46,9 +46,9 @@ GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=lesleymurfin-dotai-app
 npm run build && mage -v build:linux
 NS=monitoring   # your Grafana namespace
 POD=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=grafana -o jsonpath='{.items[0].metadata.name}')
-tar czf - -C dist . | kubectl -n "$NS" exec -i "$POD" -c grafana -- sh -c 'mkdir -p /var/lib/grafana/plugins/lesleymurfin-dotai-app && cd /var/lib/grafana/plugins/lesleymurfin-dotai-app && tar xzf - && chown -R 472:472 .'
+tar czf - -C dist . | kubectl -n "$NS" exec -i "$POD" -c grafana -- sh -c 'mkdir -p /var/lib/grafana/plugins/devopstoolkit-dotai-app && cd /var/lib/grafana/plugins/devopstoolkit-dotai-app && tar xzf - && chown -R 472:472 .'
 kubectl -n "$NS" delete pod -l app.kubernetes.io/name=grafana
-# prove: GET /api/plugins/lesleymurfin-dotai-app/settings → 200 after new pod Ready
+# prove: GET /api/plugins/devopstoolkit-dotai-app/settings → 200 after new pod Ready
 ```
 
 - Configure **MCP Server URL** (`apiUrl`) + **Auth Token** (encrypted, no-`apply` / analysis-only). **Test connection** → dot-ai `POST /api/v1/tools/version`.

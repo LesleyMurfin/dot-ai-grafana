@@ -1,7 +1,7 @@
 # Spec: Grafana PRD #1 — M7 errors and loading
 
 **Depends on:** M4/M5/M6 shared DotAI page + resource proxy  
-**Plugin id:** `lesleymurfin-dotai-app`  
+**Plugin id:** `devopstoolkit-dotai-app`  
 **Role:** BUILD/docs (spec text only) — loading lock + single error Alert; no new UI.
 
 ## Current State

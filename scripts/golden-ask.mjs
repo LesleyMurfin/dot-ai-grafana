@@ -265,7 +265,7 @@ async function runAsks() {
     const t0 = Date.now();
     const pageErrs = [];
     page.on('pageerror', (e) => pageErrs.push(String(e)));
-    await page.goto(base + '/a/lesleymurfin-dotai-app/', { waitUntil: 'domcontentloaded' });
+    await page.goto(base + '/a/devopstoolkit-dotai-app/', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(3000);
     const intent = page.locator('textarea').first();
     await intent.waitFor({ state: 'visible', timeout: 60000 });

@@ -2,11 +2,11 @@
 
 **Scope.** Prove that **this K3s cluster** + **this Grafana stack** (Loki / Prometheus / Tempo /
 Alertmanager) + **dot-ai** (query + analysis-only remediate) work *together* through the
-`lesleymurfin-dotai-app` plugin. Proving the plugin merely *hosts* dot-ai is **not** a pass.
+`devopstoolkit-dotai-app` plugin. Proving the plugin merely *hosts* dot-ai is **not** a pass.
 
 **No new UI.** Every check below uses surfaces that already exist: the **Tool** select, the
 question/issue **box**, **Ask** / **Analyze**, **Clear thread**, **Analyze this**, and the
-**Current / Map / History / Response** blocks on `/a/lesleymurfin-dotai-app/`. A check that requires
+**Current / Map / History / Response** blocks on `/a/devopstoolkit-dotai-app/`. A check that requires
 a new screen, tab, panel, datasource picker, or route is out of scope and must be rejected.
 
 **The one rule that overrides everything (owner gate).** A turn passes only when the answer is
@@ -27,10 +27,10 @@ All values below were read from the live cluster and Grafana on 2026-09-01. Use 
 | Grafana namespace / service | `riley-monitoring` / `kube-prometheus-stack-grafana` (port 80) |
 | Grafana pod selector | `-n riley-monitoring -l app.kubernetes.io/name=grafana` |
 | Admin secret | `riley-monitoring/grafana-admin-credentials` keys `username`, `password` |
-| Plugin id | `lesleymurfin-dotai-app` |
-| App page path | `/a/lesleymurfin-dotai-app/` |
-| Config page path | `/plugins/lesleymurfin-dotai-app` |
-| Plugin dist inside the pod | `/var/lib/grafana/plugins/lesleymurfin-dotai-app/` |
+| Plugin id | `devopstoolkit-dotai-app` |
+| App page path | `/a/devopstoolkit-dotai-app/` |
+| Config page path | `/plugins/devopstoolkit-dotai-app` |
+| Plugin dist inside the pod | `/var/lib/grafana/plugins/devopstoolkit-dotai-app/` |
 | Loki datasource uid | `P8E80F9AEF21F6940` (name `Loki`) |
 | Prometheus datasource uid | `prometheus` (name `Prometheus`) |
 | Tempo datasource uid | `tempo` (name `Tempo`) |
@@ -217,10 +217,10 @@ combination.
 |---|---|---|---|
 | **B1** | `npm run build` then list `dist` `.js` files | Exactly `module.js` (+ `module.js.map`). `webpack.config.ts` forces `splitChunks:false`, `runtimeChunk:false`, `LimitChunkCountPlugin({maxChunks:1})` | Any extra numbered chunk (`260.js`, `NNN.js`) appears — Grafana 11.4 404s those and the page dies with `ChunkLoadError` |
 | **B2** | `grep -cE '__webpack_require__[.](e[|]u)[|]ChunkLoadError' dist/module.js` | `0` | Non-zero: the bundle still carries async-chunk loading machinery |
-| **B3** | `curl -sSk -o /tmp/m.js "$GRAFANA_URL/public/plugins/lesleymurfin-dotai-app/module.js"`, then `grep -c -F` for each marker | HTTP 200; `Loki last 15m`, `Prometheus last 15m`, `Tempo last 15m`, `Alertmanager`, `getDataSourceSrv`, `dotai-analyze-this` each `1`; and `P8E80F9AEF21F6940` exactly `0` | A marker is `0` -> a stale build is deployed; rebuild and redeploy per README before running L3/L4. The uid marker being non-zero -> a hardcoded uid regressed back in, defeating type discovery |
-| **B4** | `curl -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" "$GRAFANA_URL/api/plugins/lesleymurfin-dotai-app/settings"` | `enabled: true`, `jsonData.apiUrl` set to the dot-ai tools REST base, `secureJsonFields.apiKey: true` | `enabled:false`, empty `apiUrl`, or `apiKey:false` — the app cannot answer anything |
-| **B5** | `kubectl -n riley-monitoring exec deploy/kube-prometheus-stack-grafana -c grafana -- ls /var/lib/grafana/plugins/lesleymurfin-dotai-app/` | Contains `module.js`, `plugin.json`, `gpx_dot_ai_linux_amd64` | The backend binary is missing -> every `/resources/` call 404s |
-| **B6** | Load `/a/lesleymurfin-dotai-app/` with devtools open | Zero console errors, no `ChunkLoadError`, no 404 under `/public/plugins/lesleymurfin-dotai-app/` | Any of those -> stop, fix the build, do not continue |
+| **B3** | `curl -sSk -o /tmp/m.js "$GRAFANA_URL/public/plugins/devopstoolkit-dotai-app/module.js"`, then `grep -c -F` for each marker | HTTP 200; `Loki last 15m`, `Prometheus last 15m`, `Tempo last 15m`, `Alertmanager`, `getDataSourceSrv`, `dotai-analyze-this` each `1`; and `P8E80F9AEF21F6940` exactly `0` | A marker is `0` -> a stale build is deployed; rebuild and redeploy per README before running L3/L4. The uid marker being non-zero -> a hardcoded uid regressed back in, defeating type discovery |
+| **B4** | `curl -sS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" "$GRAFANA_URL/api/plugins/devopstoolkit-dotai-app/settings"` | `enabled: true`, `jsonData.apiUrl` set to the dot-ai tools REST base, `secureJsonFields.apiKey: true` | `enabled:false`, empty `apiUrl`, or `apiKey:false` — the app cannot answer anything |
+| **B5** | `kubectl -n riley-monitoring exec deploy/kube-prometheus-stack-grafana -c grafana -- ls /var/lib/grafana/plugins/devopstoolkit-dotai-app/` | Contains `module.js`, `plugin.json`, `gpx_dot_ai_linux_amd64` | The backend binary is missing -> every `/resources/` call 404s |
+| **B6** | Load `/a/devopstoolkit-dotai-app/` with devtools open | Zero console errors, no `ChunkLoadError`, no 404 under `/public/plugins/devopstoolkit-dotai-app/` | Any of those -> stop, fix the build, do not continue |
 | **B7** | `curl -sS -u ... "$GRAFANA_URL/api/datasources"` and check types | One datasource each of type `loki`, `prometheus`, `tempo`, `alertmanager` | A type is missing or duplicated -> `getList({type})` picks the first match, so Current will silently read from the wrong instance |
 
 ## L1 Unit tests
@@ -269,7 +269,7 @@ Two routes matter, and only two:
 | What | Pattern |
 |---|---|
 | Grafana datasource query (Loki, Prometheus, Tempo, Alertmanager — all four) | `**/api/ds/query*` |
-| dot-ai through the plugin backend | `**/api/plugins/lesleymurfin-dotai-app/resources/query` (and `/remediate`) |
+| dot-ai through the plugin backend | `**/api/plugins/devopstoolkit-dotai-app/resources/query` (and `/remediate`) |
 
 > **Never let e2e mutate live config.** `tests/appConfig.spec.ts` already refuses to overwrite an
 > `apiUrl` that looks live (`dot-ai`, `10.43.`, `.svc`, `cluster.local`). Any new spec that touches
@@ -288,7 +288,7 @@ backend failure. The checks below extend it. Test ids come from `src/components/
 | **E3** | Fill the box, press `Enter` | Exactly one POST to `.../resources/query`; `dotai-loading` then `dotai-response` | No request fired, or two requests fired |
 | **E4** | Type `line one`, press `Shift+Enter`, type `line two` | The textarea value contains a newline; **no** request fires; submit stays enabled | A request fires on Shift+Enter |
 | **E5** | Switch to Remediate | Field label becomes `Issue description`, the description says analysis-only, submit reads `Analyze`, and the POST goes to `.../resources/remediate` with `{issue,intent}` | Label, route, or body unchanged, or an execute affordance appears |
-| **E6** | Assert the route after every interaction | URL stays `/a/lesleymurfin-dotai-app/`; no new tab, panel, or modal | Navigation to a new screen — violates "no new UI" |
+| **E6** | Assert the route after every interaction | URL stays `/a/devopstoolkit-dotai-app/`; no new tab, panel, or modal | Navigation to a new screen — violates "no new UI" |
 | **E7** | Query turn, switch to Remediate, switch back | Query `dotai-history` still shows the earlier You/Answer pair (max 5 turns); the Remediate thread is independent | Either thread is wiped by switching |
 | **E8** | After a successful query, click `dotai-analyze-this` | Tool switches to Remediate, the box is pre-filled with Query Current, Query History is intact, still analysis-only | The button is absent while Current is non-empty, or Query history is cleared |
 | **E9** | Click `dotai-clear-thread` on Remediate | Only Remediate Current/Map/History/Response reset; the Query thread is intact | Both threads reset |
@@ -329,7 +329,7 @@ not already exist.**
 
 | ID | Click path | Expected on screen | Fail if |
 |---|---|---|---|
-| **C1** | Sidebar -> **dot-ai** (or go to `/a/lesleymurfin-dotai-app/`) | The page renders: Tool select, question box, **Ask**, **Clear thread**. Console clean | Blank page, `ChunkLoadError`, or a 404 for `module.js` |
+| **C1** | Sidebar -> **dot-ai** (or go to `/a/devopstoolkit-dotai-app/`) | The page renders: Tool select, question box, **Ask**, **Clear thread**. Console clean | Blank page, `ChunkLoadError`, or a 404 for `module.js` |
 | **C2** | Network tab, filter `module.js` | A single `module.js`, HTTP 200, and **no** numbered chunk request | A `NNN.js` request appears (404 -> white screen) |
 | **C3** | Type Fixture A's question, press **Shift+Enter** mid-sentence | The caret moves to a new line; nothing submits | The request fires |
 | **C4** | Press **Enter**, and watch the page **while the spinner is up** | `Waiting for dot-ai...` spinner; **Current** shows `Loki last 15m (pod/argocd-application-controller ns/riley-gitops):` followed by real argocd log lines, then `Prometheus last 15m ...` with a restart fact, then `Tempo last 15m ...`, then `Alertmanager ...`; **Map** names the discovered Loki/Prometheus/Tempo/Alertmanager datasources plus `ns/riley-gitops`; then **Response** from dot-ai and a new **History** pair | Current is empty during the turn, or shows generic prose instead of the four blocks. In the Network tab, `POST /api/ds/query` must fire **before** `.../resources/query` |
@@ -378,7 +378,7 @@ npm run test:ci
 go test ./...        # or: docker run --rm -v "$PWD":/src -w /src golang:1.26 go test ./...
 
 # 2. deploy gate — B3: markers present, hardcoded uid absent
-curl -sSk -o /tmp/m.js "$GRAFANA_URL/public/plugins/lesleymurfin-dotai-app/module.js"
+curl -sSk -o /tmp/m.js "$GRAFANA_URL/public/plugins/devopstoolkit-dotai-app/module.js"
 for s in "Loki last 15m" "Prometheus last 15m" "Tempo last 15m" "Alertmanager" "getDataSourceSrv"; do
   printf '%-22s %s\n' "$s" "$(grep -c -F "$s" /tmp/m.js)"
 done

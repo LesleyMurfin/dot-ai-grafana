@@ -180,7 +180,7 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 2. **Timeout & long-call strategy.** Query is short (seconds) → a blocking POST is fine. Remediate is a multi-iteration loop up to ~30 min (`dot-ai-headlamp` `AI_TOOL_TIMEOUT`); Grafana's own guidance treats minutes-long blocking resource calls as unstable. **Leaning: async `202 + jobId` + `/status/{jobId}` poll as the *default* for remediate** — minimal, in-memory, single-instance jobs with a TTL; the UI Cancel abandons the poll; poll on a fixed interval with terminal-state handling. Blocking-with-a-tuned-[Timeout chain](#expansion-timeout--long-call-strategy) is the fallback only where the operator fully controls every hop. **M0 measures the real Grafana resource-call deadline and picks**; this is [Open Question 5](#open-questions). SSE (`/api/v1/events/remediations`, PRD [vfarcic/dot-ai#425](https://github.com/vfarcic/dot-ai/issues/425)) is the post-v1 streaming upgrade.
 3. **Read-only enforcement (two layers).** **(a)** client never sends `executeChoice`/`sessionId`; the backend **fails closed** with a request-field allowlist so a crafted request can't reach an execution path; **(b)** the dot-ai token's RBAC lacks the `apply` verb (PRD [vfarcic/dot-ai#392](https://github.com/vfarcic/dot-ai/issues/392)), so remediate returns analysis + `fallbackReason` and offers no `executionChoices` **server-side** (`remediate.ts` L1606/L1625). **Both.** (b) is authoritative and requires dot-ai RBAC enabled — verified in M0.
 4. **Identity model.** **Leaning:** single shared service token for v1 (dot-ai RBAC applies at token level; audit logs cannot attribute to individual Grafana users — accepted v1 risk). Per-user OAuth/Dex forwarding is a future enhancement (out of scope).
-5. **Plugin identity & home.** Grafana id form `org-name-type`; proposed `devopstoolkit-dotai-app` — **needs maintainer input** on org slug and repo location.
+5. **Plugin identity & home — RESOLVED (2026-09-03).** Canonical Grafana plugin id is `devopstoolkit-dotai-app`; author **DevOps Toolkit**; Go module `github.com/vfarcic/dot-ai-grafana`. Evidence: upstream PR [#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) body, reviewed head `feat/upstream-plugin` @ `0d33a35` `src/plugin.json:5`, `upstream/main` `src/plugin.json`, and `pkg/main.go:19` `app.Manage("devopstoolkit-dotai-app", …)`. Fork development may live under `LesleyMurfin/dot-ai-grafana`, but the **id does not change** for the contribution — a divergent `lesleymurfin-dotai-app` slug broke unsigned allow-lists and deep links and is retired.
 6. **Grafana version floor & reference deployment (11.4).** The reference deployment is **Grafana 11.4 self-managed** (the adopter's production; current Grafana is 13.1). The real compatibility lever is the **`@grafana/{data,ui,runtime}` library versions**, not just `grafanaDependency`: `@grafana/create-plugin` now scaffolds against ~13.x libs, which can break at runtime on 11.4. **Leaning:** pin `@grafana/*` to the latest line whose minimum supported Grafana ≤ 11.4, set `grafanaDependency: >=11.0`, and make CI **build+smoke on 11.4 (must-pass) and a current release (13.x)**. Supporting 10.x/9.x is untested burden for versions neither the adopter nor "current" runs — offer only if the maintainer wants a broad range. (Deviation from PRD #1's `9.x+`; see Scope.)
 7. **Distribution.** **Leaning:** unsigned/private first — which **requires** operator allow-listing (`allow_loading_unsigned_plugins` in `grafana.ini` / `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=<id>`); document it in the install guide. Grafana catalog (signing + review) later.
 8. **Auth header.** Send `Authorization: Bearer`; `X-Dot-AI-Authorization` only for proxy-consuming deployments (see [Auth header](#expansion-auth-header)).
@@ -211,7 +211,7 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 
 ### Architecture
 
-- **Grafana App Plugin** with a custom page (React + TypeScript) — plugin id `lesleymurfin-dotai-app`
+- **Grafana App Plugin** with a custom page (React + TypeScript) — plugin id `devopstoolkit-dotai-app`
 - **This cluster + this stack + dot-ai:** one Ask fuses K3s intelligence (via dot-ai) with live reads from Grafana’s already-wired Loki, Prometheus, Tempo, and Alertmanager datasources
 - **Grafana stack → Current → dot-ai:** plugin gathers stack signals through `getDataSourceSrv` / `ds.query` / `getBackendSrv`, packs them into the client-side **Current** block, then POSTs query/remediate to dot-ai with that block in plain `intent` / `issue`
 - **Backend plugin component** (Go) proxies those POSTs to the dot-ai MCP server with authentication
@@ -558,7 +558,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ## Open Questions
 
 1. **Recommended token scope** — a documented dot-ai RBAC role for "read + analyze, no `apply`" to cite in setup?
-2. **Plugin identity & home** (Design Decision 5) — org slug / id; this repo or a sibling.
+2. **Plugin identity & home** (Design Decision 5) — **RESOLVED 2026-09-03:** id `devopstoolkit-dotai-app`, author DevOps Toolkit, module `github.com/vfarcic/dot-ai-grafana`. Matches maintainer PR #3 / reviewed branch; fork home stays `LesleyMurfin/dot-ai-grafana` for development only.
 3. **Grafana floor** (Design Decision 6) — confirm `>=11.0` with **11.4 as the must-pass reference deployment** + the `@grafana/*` pins; accept dropping 10.x/9.x?
 4. **Distribution** (Design Decision 7) — private/unsigned first vs. catalog.
 5. **Timeout strategy** (Design Decision 2 / M0) — confirm async `202`+poll as the remediate default, or is blocking-with-tuned-chain acceptable on the target Grafana?
@@ -591,7 +591,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | date | decision | rationale |
 |------|----------|-----------|
 | 2026-09-01 | Analysis-only remediate; no execute UI | Product scope is read-only analysis; DotAIPage banner and tests assert no execute/apply payload fields |
-| 2026-09-01 | Plugin id `lesleymurfin-dotai-app`; code home LesleyMurfin/dot-ai-grafana fork | `src/plugin.json` id; README/CLAUDE.md; unsigned allow-list uses this id |
+| 2026-09-03 | Plugin id **`devopstoolkit-dotai-app`**; author DevOps Toolkit; module `github.com/vfarcic/dot-ai-grafana`; fork home `LesleyMurfin/dot-ai-grafana` for development | Contribution identity must match upstream PR #3 body + `feat/upstream-plugin` @ `0d33a35` / `upstream/main` `src/plugin.json` + `pkg/main.go`. Retired fork-only `lesleymurfin-dotai-app` drift on `ai/quality-review`. **Open Question 2 / DD5 closed.** Grafana restart required after id change. |
 | 2026-09-01 | `grafanaDependency: ">=11.0.0"`; `@grafana/*` 11.4.0 pins; unsigned/private dist first | plugin.json + README pins; marketplace publish deferred (risks table) |
 | 2026-09-01 | Test connection = `POST /api/v1/tools/version` with Bearer | README + backend `/test-connection` proxy contract |
 | 2026-09-01 | Grafana plugin HTTP client 120s ceiling; no async 202 this pass | `docs/quality-review.md` known host limits / non-goals |
@@ -676,5 +676,12 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Action**: Appended five Decisions rows (hop cap 3; stack Current packing; public-surface strip; SDK httpclient; live Ask 22:46Z proof / execute still blocked). Did not duplicate progressive-context or stack-intelligence product rows. Status **In Progress**. Ledger absent — WARN. No commit (`scripts/git.py` missing).
 - **Prompt**: `/prd update-decisions` on PRD-1 (missing rows only).
 
+
+
+### 2026-09-03 — plugin identity alignment (Open Question 2)
+
+- **Issue**: Working tree mixed `lesleymurfin-dotai-app` (plugin.json, README, docs, e2e) with `devopstoolkit-dotai-app` (pkg/main.go, some tests, upstream PR #3). Open Question 2 / DD5 still asked for maintainer input.
+- **Action**: Single id repo-wide: `devopstoolkit-dotai-app`. `src/plugin.json` id + author/links aligned to reviewed upstream head; docs/provisioning/tests/specs/CI/.config updated. DD5 and Open Question 2 marked **RESOLVED**. `prds/5-*` left untouched (other owner).
+- **Prompt**: IdentityFix on `ai/quality-review` (AGENTS.md default "do not change plugin ID" overridden on evidence that the reviewed branch already carries `devopstoolkit-dotai-app`).
 
 
