@@ -41,6 +41,18 @@ ci/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+# Agent / session scratch (do not commit)
+.ai/
+.nlm-upload/
+.serena/
+scripts/*.jsonl
+scripts/window*.jsonl
+scripts/measures*.json*
+scripts/t0*.txt
+scripts/t1*.txt
+scripts/golden-ask-results.json
+specs/.tmp*
+
 
 # Editor
 .idea
