@@ -6,6 +6,9 @@ apps:
     org_name: 'devopstoolkit'
     disabled: false
     jsonData:
-      apiUrl: http://127.0.0.1:3456
+      # .svc suffix satisfies allowPlainHTTPHost (in-cluster DNS shape).
+      # Compose alias maps this name to the stub service.
+      apiUrl: http://dot-ai-stub.svc:8080
     secureJsonData:
-      apiKey: 'dev-token'
+      # Unique value used by privacy specs: must never appear in settings/resources/bundle.
+      apiKey: 'bydesign-e2e-bearer-token-do-not-leak'
