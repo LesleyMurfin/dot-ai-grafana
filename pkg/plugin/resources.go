@@ -550,8 +550,14 @@ func boolAt(m map[string]any, key string) (bool, bool) {
 }
 
 // handleQuery proxies POST /query → dot-ai /api/v1/tools/query with Bearer auth.
-// Requires Grafana org Editor or Admin (ADR-0001 disposition 2). Viewer and
-// nil/unrecognised users are refused before any upstream dial.
+// Requires Grafana org Editor or Admin. App resource routes are reachable by any
+// signed-in user with app access because Grafana gates them on ActionAppAccess,
+// not org role (grafana/pkg/api/api.go:401-402). plugin.json includes[].role is
+// navigation visibility only, evaluated only for i.Type == "page"
+// (grafana/pkg/middleware/auth.go:114-130). routes[].reqRole applies only to the
+// datasource proxy (grafana/pkg/api/pluginproxy/ds_proxy.go:307-310). The handler
+// check is therefore the only available control; Viewer, empty, unknown, and nil
+// users are refused before any upstream dial.
 func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
