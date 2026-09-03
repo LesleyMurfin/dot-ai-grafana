@@ -251,7 +251,7 @@ Same minimal surface (no new screens or pickers):
 
 - Rich visualizations (Mermaid diagrams, cards, code blocks with syntax highlighting)
 - Action execution (remediation execution, operate, recommend)
-- GitOps-PR remediate execute (post-v1) — see `prds/2-gitops-pr-remediate.md` (PRD #2); not scoped here
+- GitOps-PR remediate execute (post-v1) — tracked upstream as [issue #5](https://github.com/vfarcic/dot-ai-grafana/issues/5) / [PR #9](https://github.com/vfarcic/dot-ai-grafana/pull/9); not scoped here
 - Multi-stage workflows or wizards
 - **New UI for resource or datasource selection** — no new screens, no custom DS picker, no dashboard-resource browser; use Grafana’s existing Loki / Prometheus / Tempo / Alertmanager wiring only (and any selector Grafana already shows natively)
 - **MCP / server session management** (no `sessionId`, no server conversation store, no multi-turn protocol fields). A **display-only** on-screen History and a client-rewritten **Current** block packed into the next plain-text `intent`/`issue` are in scope for progressive context — they are **not** MCP session management. See Decisions and `docs/progressive-context.md`.
@@ -576,14 +576,14 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-01 | M-scaffold | [x] complete | PR #1 merged; `d46bc5d` feat(m1) scaffold app+backend; `src/plugin.json` type app + backend; e2e `tests/appNavigation.spec.ts` |
 | 2026-09-01 | M-config | [x] complete | `385354b` AppConfig apiUrl+token+Test connection; PR #12 **merged** (`65cd8d5`); Admin draft-`apiUrl` gate (#7) + success-copy (#8); `AppConfig.tsx` + unit tests; working tree |
 | 2026-09-01 | M-proxy | [x] complete | `22dc7a2`/`75295bf` proxy query/remediate/test-connection; envelope normalize via PR #12; `63994e7` SDK `httpclient`; `pkg/plugin/app.go` `newPluginHTTPClient`; `go test ./pkg/...` |
-| 2026-09-01 | M-query | [x] complete | `f4c1d8f` DotAIPage query + `callDotAITool('query')`; stack Current packing (`grafanaStack.ts`/`progressiveContext.ts`/`askOrchestrator.ts`); live Ask **2026-09-01T22:46–22:48Z** PASS 3 golden asks (`scripts/golden-ask-results.json`: hops=3, first_hop=grafana, used_current=true); jest DotAIPage/orchestrator |
+| 2026-09-01 | M-query | [x] complete | `f4c1d8f` DotAIPage query + `callDotAITool('query')`; stack Current packing (`grafanaStack.ts`/`progressiveContext.ts`/`askOrchestrator.ts`); live Ask **2026-09-01T22:46–22:48Z** PASS 3 golden asks (hops=3, first_hop=grafana, used_current=true); jest DotAIPage/orchestrator |
 | 2026-09-01 | M-remediate | [x] complete | `f4c1d8f` remediate mode + analysis-only banner; no execute UI/payload (`dotaiApi.ts` omits execute/apply; tests assert); Execute blocked (PRD #2 owns execute); working tree |
 | 2026-09-01 | M-selector | [x] complete | `f4c1d8f` Query/Remediate dropdown + shared layout; Analyze this / Clear thread; e2e + unit coverage |
 | 2026-09-01 | M-errors | [x] complete | `f4c1d8f` spinner + error alerts; fetch-reject path via PR #12; AppConfig test-connection error path; loading disables controls |
-| 2026-09-01 | M-docs | [~] partial | PR #5 merged (`cfc6bc1`/`11bd7b6`); README install/config; `docs/progressive-context.md` + `docs/grafana-stack-test-plan.md`; hop-cap-3 + §7 Measures; screenshots still open — `src/plugin.json` `screenshots: []` |
+| 2026-09-01 | M-docs | [~] partial | PR #5 merged (`cfc6bc1`/`11bd7b6`); README install/config; `docs/progressive-context.md`; hop-cap-3 + Ask-log measures; screenshots still open — `src/plugin.json` `screenshots: []` |
 | 2026-09-01 | M-compat | [~] partial | `grafanaDependency: ">=11.0.0"`; `@grafana/*` 11.4 pins; 11.x reference host proven (live Ask); **10.x dual-version not proven** |
 | 2026-09-01 | quality | landed | PR #12 **merged** (`65cd8d5`); issues #7–#11 **closed**; public-surface CI (`scripts/public-surface-check.sh`, `6e08d39`); webpack + jest + go tests in tree |
-| 2026-09-01 | live-ask | proof | **2026-09-01T22:46:04Z–22:48:35Z** live UI: 3 golden asks PASS; first ask hops=3 first_hop=grafana used_current=true (`scripts/golden-ask-results.json` / `scripts/golden-ask-log.jsonl`). Lesley AP-003 override: working-tree + this window as `[x]` evidence for M-config–M-errors |
+| 2026-09-01 | live-ask | proof | **2026-09-01T22:46:04Z–22:48:35Z** live UI: 3 golden asks PASS; first ask hops=3 first_hop=grafana used_current=true. Working-tree + this window used as `[x]` evidence for M-config–M-errors |
 
 
 ## Decisions
@@ -597,14 +597,14 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-01 | Grafana plugin HTTP client 120s ceiling; no async 202 this pass | `docs/quality-review.md` known host limits / non-goals |
 | 2026-09-01 | Draft `apiUrl` on `/test-connection` requires Grafana Admin | **On `main`** via PR #12 merge `65cd8d5`; issue #7 **closed** (was quality-review P1) |
 | 2026-09-01 | Quality review 2026-09-01 board | no P0; P1 #7 + P2 #8–#11 all **closed** with PR #12 **merged** to `main` (`65cd8d5`); see `docs/quality-review.md` for original verdict index |
-| 2026-09-01 | **Open Question 6:** v1 stays analysis-only; GitOps-PR remediate-execute is **PRD #2** (`prds/2-gitops-pr-remediate.md`, https://github.com/LesleyMurfin/dot-ai-grafana/issues/13), opened now — not parked as Phase 2 bullets inside this PRD | Viktor on vfarcic/dot-ai-grafana PR #2; RULE-027 — execute/mutation scope gets its own PRD so PRD #1 remains read-only |
+| 2026-09-01 | **Open Question 6:** v1 stays analysis-only; GitOps-PR remediate-execute is a separate roadmap PRD (upstream [issue #5](https://github.com/vfarcic/dot-ai-grafana/issues/5) / [PR #9](https://github.com/vfarcic/dot-ai-grafana/pull/9)), opened now — not parked as Phase 2 bullets inside this PRD | Viktor on vfarcic/dot-ai-grafana PR #2; execute/mutation scope gets its own PRD so PRD #1 remains read-only |
 | 2026-09-01 | Progressive context is client-only: Stable+Current+Map+box in plain `intent`/`issue`; History display-only (last 5); no `sessionId`; Analyze this copies Current → Remediate box | Clarifies upstream “session/history out of scope”: forbids MCP sessions and new REST fields, not UI thread packing. Same POST shapes. `docs/progressive-context.md` |
 | 2026-09-01 | **Stack intelligence in one Ask:** this K3s + this Grafana stack (Loki, Prometheus, Tempo, Alertmanager via existing DS / `getDataSourceSrv`·`ds.query`·`getBackendSrv`) + dot-ai; Grafana is not host-only; no new UI/screens/pickers; stack reads pack into Current then POST query/remediate as plain `intent`/`issue` | Product binding for what we build now — Map = already-configured Grafana datasources; same Tool/box/Ask/Analyze this/thread; analysis-only; no `sessionId`. Replaces “Grafana as shell + resource selection from dashboards” framing |
 | 2026-09-01 | **Hop cap 3** per user Ask (`MAX_ASK_HOPS = 3`); Grafana DS reads do not count as hops; first_hop grafana\|dot-ai by question class; orchestrator may multi-hop on unscoped/conflict/hedge | `src/utils/askOrchestrator.ts`; live Ask 22:46Z scored hops=3 first_hop=grafana used_current=true; RULE-027 loop bound |
 | 2026-09-01 | **Stack Current packing:** client builds Current from Loki/Prometheus/Tempo/Alertmanager via type discovery (no hardcoded uid); packs Stable+Current+Map+box into plain `intent`/`issue`; History never POSTed | `src/utils/grafanaStack.ts` + `progressiveContext.ts`; U1–U6 + DotAIPage tests |
 | 2026-09-01 | **Public-surface strip:** CI forbids internal host/marker/secret leakage on public docs and shipped surfaces | `scripts/public-surface-check.sh` + `.github/workflows/ci.yml` job `public-surface` (`6e08d39`) |
 | 2026-09-01 | **SDK httpclient** for backend outbound HTTP (`grafana-plugin-sdk-go/backend/httpclient`); probe 15s / tools 120s; DefaultMiddlewares + DefaultTimeoutOptions | `pkg/plugin/app.go` `newPluginHTTPClient`; replaces ad-hoc `http.Client` construction |
-| 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | `scripts/golden-ask-results.json`; evidence for v1 Ask path; execute stays PRD #2 |
+| 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | Live Ask window evidence for v1 Ask path; execute stays separate GitOps-PR roadmap item (upstream issue #5) |
 
 
 
@@ -615,8 +615,8 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ### 2026-09-01 — /prd update-progress
 
 - **Issue**: PRD #1 milestone checkboxes were all unchecked despite merged M1/M8–M9 work and in-tree M2–M7 implementation.
-- **Action**: Evidence-only progress refresh from scout map + workspace tree. Set M-scaffold `[x]`; M-config through M-compat `[~]`. Added Progress table with commit/PR evidence. Status left **Draft** (not `/prd start`). Session preflight / quality-circuit-breaker / `.ai/learning/anti_patterns.yaml` absent — skipped. `scripts/git.py` absent — no commit. Ledger scripts absent — WARN.
-- **Prompt**: `/prd update-progress` on PRD-1 (conservative AP-003 checkboxes).
+- **Action**: Evidence-only progress refresh from scout map + workspace tree. Set M-scaffold `[x]`; M-config through M-compat `[~]`. Added Progress table with commit/PR evidence. Status left **Draft** (not `/prd start`). Session preflight / quality-circuit-breaker / anti-pattern ledger absent — skipped. No commit this turn.
+- **Prompt**: `/prd update-progress` on PRD-1 (conservative checkboxes).
 
 ### 2026-09-01 — /prd update-decisions
 
@@ -627,7 +627,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ### 2026-09-01 — Viktor PR #2 comments
 
 - **Issue**: vfarcic/dot-ai-grafana PR #2 — keep v1 analysis-only; open separate PRD for GitOps-PR execute (not Phase 2 parking); scrub public docs of internal infra names; avoid double-tracking milestones (Progress vs Milestones).
-- **Action**: Restated OQ6 in Decisions (analysis-only v1; execute → PRD #2). Pointed out-of-scope execute at `prds/2-gitops-pr-remediate.md`. Labeled Progress as evidence-only (Milestones remain SSOT). Scrubbed README internal GitOps-repo name. Created PRD #2 draft.
+- **Action**: Restated OQ6 in Decisions (analysis-only v1; execute → separate GitOps-PR roadmap PRD, now upstream issue #5 / PR #9). Labeled Progress as evidence-only (Milestones remain SSOT). Scrubbed README internal GitOps-repo name. Created GitOps-PR draft (later rehomed off this public fork).
 - **Prompt**: Finish Viktor PR #2 comments on PRD/docs in workspace (no plugin code; no commit).
 
 ### 2026-09-01 — PRD stack-intelligence rewrite
@@ -640,7 +640,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ### 2026-09-01 — /prd update-progress (evidence refresh)
 
 - **Issue**: Progress table still claimed PR #12 / #7–#8 (and related #9/#11) **open** after merge.
-- **Action**: Verified `gh -R LesleyMurfin/dot-ai-grafana`: PR #12 `MERGED` base `main` mergeCommit `65cd8d5` (2026-09-01T16:03:57Z); issues #7–#11 `CLOSED`. Rewrote Progress evidence rows; left milestone SSOT checkboxes unchanged (AP-003: no new `[x]` without full milestone proof). Status remains **Draft**. Session-preflight / quality-circuit-breaker / anti_patterns absent — WARN skip. Ledger hooks absent — WARN. `scripts/git.py` absent — no commit.
+- **Action**: Verified `gh -R LesleyMurfin/dot-ai-grafana`: PR #12 `MERGED` base `main` mergeCommit `65cd8d5` (2026-09-01T16:03:57Z); issues #7–#11 `CLOSED`. Rewrote Progress evidence rows; left milestone SSOT checkboxes unchanged (no new `[x]` without full milestone proof). Status remains **Draft**. Session tooling absent — skip. No commit this turn.
 - **Prompt**: `/prd update-progress` continuation — align Progress with GH/workspace (issue #7 closed, PR #12 on main).
 
 ### 2026-09-01 — /prd update-decisions (evidence refresh)
@@ -654,7 +654,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ### 2026-09-01 — /prd update-progress (Hop3Build M-docs evidence)
 
 - **Issue**: Peer Hop3Build closed remaining M8 doc gaps in-worktree and reported green typecheck/jest/build/go test; did not edit this PRD.
-- **Action**: Appended/replaced M-docs Progress evidence only; left `[~]` (screenshots still open; AP-003). No Decisions change. Status **Draft**.
+- **Action**: Appended/replaced M-docs Progress evidence only; left `[~]` (screenshots still open). No Decisions change. Status **Draft**.
 - **Prompt**: Peer IRC evidence note into Progress (PRD owner).
 
 
@@ -664,10 +664,10 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Action**: Rewrote M-docs evidence row for exactness; kept `[~]`. Status **Draft**.
 - **Prompt**: Peer correction on Progress evidence only.
 
-### 2026-09-01 — /prd update-progress (v1 built — AP-003 override)
+### 2026-09-01 — /prd update-progress (v1 built)
 
-- **Issue**: Status still Draft and M-config–M-errors still `[~]` despite working-tree v1 + PR #12 + live Ask 22:46Z; Lesley ordered flip off Draft and `[x]` where this tree has implementation + tests.
-- **Action**: Status → **In Progress**. Milestones: M-scaffold already `[x]`; M-config, M-proxy, M-query, M-remediate, M-selector, M-errors → `[x]`; M-docs stays `[~]` (`screenshots: []`); M-compat stays `[~]` (10.x unproven). Progress table rewritten with commits/PR #12/jest/go/webpack + live Ask 22:46–22:48Z (`golden-ask-results.json`: PASS 3 asks, hops=3, first_hop=grafana, used_current=true). AP-003: Lesley override of conservative `[~]` — working-tree + live Ask as evidence. Execute blocked (PRD #2). Session-preflight / QCB / anti_patterns absent — WARN skip. Ledger hooks/db absent — WARN. `scripts/git.py` absent — no commit.
+- **Issue**: Status still Draft and M-config–M-errors still `[~]` despite working-tree v1 + PR #12 + live Ask 22:46Z; owner ordered flip off Draft and `[x]` where this tree has implementation + tests.
+- **Action**: Status → **In Progress**. Milestones: M-scaffold already `[x]`; M-config, M-proxy, M-query, M-remediate, M-selector, M-errors → `[x]`; M-docs stays `[~]` (`screenshots: []`); M-compat stays `[~]` (10.x unproven). Progress table rewritten with commits/PR #12/jest/go/webpack + live Ask 22:46–22:48Z (PASS 3 asks, hops=3, first_hop=grafana, used_current=true). Working-tree + live Ask used as evidence for `[x]`. Execute blocked (separate GitOps-PR roadmap item). Session tooling absent — skip. No commit this turn.
 - **Prompt**: `/prd update-progress` on PRD-1 (v1 built; not Draft; M-docs/M-compat `[~]` only).
 
 ### 2026-09-01 — /prd update-decisions (v1 bounds)
@@ -681,7 +681,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 ### 2026-09-03 — plugin identity alignment (Open Question 2)
 
 - **Issue**: Working tree mixed `lesleymurfin-dotai-app` (plugin.json, README, docs, e2e) with `devopstoolkit-dotai-app` (pkg/main.go, some tests, upstream PR #3). Open Question 2 / DD5 still asked for maintainer input.
-- **Action**: Single id repo-wide: `devopstoolkit-dotai-app`. `src/plugin.json` id + author/links aligned to reviewed upstream head; docs/provisioning/tests/specs/CI/.config updated. DD5 and Open Question 2 marked **RESOLVED**. `prds/5-*` left untouched (other owner).
+- **Action**: Single id repo-wide: `devopstoolkit-dotai-app`. `src/plugin.json` id + author/links aligned to reviewed upstream head; docs/provisioning/tests/CI/.config updated. DD5 and Open Question 2 marked **RESOLVED**. Usability roadmap draft left to its own owner (upstream issue #8).
 - **Prompt**: IdentityFix on `ai/quality-review` (AGENTS.md default "do not change plugin ID" overridden on evidence that the reviewed branch already carries `devopstoolkit-dotai-app`).
 
 

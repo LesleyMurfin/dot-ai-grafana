@@ -7,7 +7,7 @@ This file is a **gap matrix**, not a claim that Group A/B/C from the M0 validati
 | What | Where | State |
 |------|--------|--------|
 | Group A/B/C plan | M0 validation plan (capture `design/`) | **Pre-build.** Still lists OpenAPI client generation, async **202** + job poll, UI **char counter**, and **raw-response toggle** as assumptions/gates. Those items were **not** built in the thin-client pass. |
-| Milestone verify cmds | `specs/grafana-prd1-m*.md` | **Factory-era** verify blocks (`npm run build` / `test:ci` / `go test`, greps for handlers). They track milestone slices, not a thin-client-only inventory and not live Group A curls. |
+| Milestone verify cmds | Internal milestone specs (capture layer; not in this repo) | Pre-ship verify blocks (`npm run build` / `test:ci` / `go test`, greps for handlers). They track milestone slices, not a thin-client-only inventory and not live Group A curls. |
 | What actually runs | CI + Jest / Go / Playwright | **Shipped automation** in this repo. Indexed below (counted from source). |
 
 ## Group A (A1–A8) — planned live REST checks

@@ -543,7 +543,7 @@ func boolAt(m map[string]any, key string) (bool, bool) {
 }
 
 // handleQuery proxies POST /query → dot-ai /api/v1/tools/query with Bearer auth.
-// Requires Grafana org Editor or Admin (ADR-0001 disposition 2). Viewer and
+// Requires Grafana org Editor or Admin (security model: Editor+ gate). Viewer and
 // nil/unrecognised users are refused before any upstream dial.
 func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {

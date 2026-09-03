@@ -55,9 +55,7 @@ kubectl -n "$NS" delete pod -l app.kubernetes.io/name=grafana
 
 ## Test
 
-Unit (Go backend + frontend Jest) and Playwright e2e against **k3s Grafana** (not docker compose):
-
-Full stack proof (plugin load, Enter/Analyze, Loki/Prometheus/Tempo/Alertmanager data in **Current**, live click path, per-check fail criteria): **[docs/grafana-stack-test-plan.md](docs/grafana-stack-test-plan.md)**. Ask quality is scored fail-closed by [§7 Measures](docs/grafana-stack-test-plan.md#measures) (`current_empty`, `first_hop`, `hops`, `latency_ms`, `used_current`) from the backend Ask log at `/var/lib/grafana/dotai-ask.log`.
+Unit (Go backend + frontend Jest) and Playwright e2e against Grafana cover plugin load and Ask/Analyze. Full combination proof against a live Loki/Prometheus/Tempo/Alertmanager stack is an operator checklist outside this repo. Ask quality is scored fail-closed from the backend Ask log at `/var/lib/grafana/dotai-ask.log` with fields `current_empty`, `first_hop`, `hops`, `latency_ms`, `used_current`.
 
 ```bash
 # Go unit tests
@@ -98,7 +96,7 @@ Upstream / fork PRD text lives under `prds/`.
    - On **Query / Ask**, before calling dot-ai the plugin discovers Grafana datasources with `getDataSourceSrv().getList({ type })` + `get(ref)` + `DataSourceApi.query` for **Loki, Prometheus, Tempo, Alertmanager** (no hardcoded uids, no proxy URL client, no picker UI). Capped DataFrame text goes into **Current**; **Map** lists the four sources + pod/ns hints. Missing DS → one-line note.
    - **Stable** + **Current** + **Map** + the input box (question) are packed into the next plain-text `intent`/`issue` for **dot-ai** (K3s + Grafana together).
    - Cluster-wide questions (no pod/namespace named) still read Loki and Prometheus — the stack leg is never skipped just because the question parses no target.
-   - One user click may spend up to **3** dot-ai POSTs (`MAX_ASK_HOPS` in `src/utils/askOrchestrator.ts`): hop 1 answers from the packed Current, and hop 2/3 only fire when the question is unscoped ("all clusters") or the answer contradicts evidence already in Current. Grafana datasource reads are **not** hops. Each hop is one line in the Ask log scored by [test plan §7](docs/grafana-stack-test-plan.md#measures).
+   - One user click may spend up to **3** dot-ai POSTs (`MAX_ASK_HOPS` in `src/utils/askOrchestrator.ts`): hop 1 answers from the packed Current, and hop 2/3 only fire when the question is unscoped ("all clusters") or the answer contradicts evidence already in Current. Grafana datasource reads are **not** hops. Each hop is one line in the Ask log (`current_empty`, `first_hop`, `hops`, `latency_ms`, `used_current`).
    - **History** (You/answer) is on screen only — last 5 turns — and is **not** sent in the POST body.
    - After each successful answer, **Current** is rewritten (size-capped); each tool keeps its own thread (switch does not wipe).
    - **Analyze this** (after a Query success) copies **Current** into the Remediate issue box and switches tools; Query History stays. Still analysis-only.
