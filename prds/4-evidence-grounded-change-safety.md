@@ -6,12 +6,12 @@
 **Status**: Draft
 **Updated**: 2026-09-03
 
-> **Filename:** `prds/4-evidence-grounded-change-safety.md`. Set **Issue** when filed. PRD index is **4** even if the GitHub issue number differs.
+> **Filename:** `prds/4-evidence-grounded-change-safety.md`. Tracking issue [#31](https://github.com/LesleyMurfin/dot-ai-grafana/issues/31). PRD index is **4** even if the GitHub issue number differs.
 
 ## Current State
 
 - **Goal:** Make Grafana the place where a GitOps change is **pre-flighted against live telemetry**, judged for **whether now is a safe time**, **verified after merge**, and optionally **recorded back into operational knowledge** — not a second Kubernetes day-2 manager.
-- **Active milestone:** None started. Draft until issue filed; needs PRD #2 PR path (or a test double) for integration demos that end in a real PR.
+- **Active milestone:** None started. Tracking issue #31 filed; needs PRD #2 PR path (or a test double) for integration demos that end in a real PR.
 - **Next action:** Freeze M1 Outcome/Demo; inventory which `impact_analysis` / remediate fields the engine already returns vs what the plugin must join from Current; clarify `manageKnowledge` write-back capability with upstream ([UNVERIFIED]).
 - **Write rule (estate):** dot-ai may read broadly; cluster writes go through **Git** only. Direct apply into KRO-owned namespaces is manufactured drift (estate GitOps source-of-truth policy: no direct apply into abstraction-owned namespaces). Grafana's blessed execute trigger is **PRD #2 propose → GitOps PR**, not live apply.
 - **Surface demarcation (Viktor):** Grafana = observability-first intelligence + GitOps-PR triggering. Headlamp = day-2 object lifecycle and direct resource actions. Do not turn this plugin into a duplicate cluster manager.
@@ -360,7 +360,7 @@ The full loop — **is it safe now → what will it touch → propose as a PR �
 - Direct `kubectl apply` / live execute from Grafana.
 - Grafana **Build/Update** / `recommend` / `operate` object-lifecycle wizards (Headlamp; see Considered and deferred).
 - Duplicating Headlamp resource-detail injection (I-076).
-- Thread history, async 202 job-poll, ship/identity docs (usability PRD).
+- Thread history, async 202 job-poll, ship/identity docs (**PRD #5**).
 - Engine forks; org signal config via existing patterns where possible.
 - Guaranteeing `manageKnowledge` write-back before upstream capability is verified.
 
@@ -387,7 +387,7 @@ The full loop — **is it safe now → what will it touch → propose as a PR �
 
 ## How slices work
 
-Same contract as the usability PRD: frozen **Outcome / Demo / Budget**; free design; loop log; exits **SHIPPED** or **PARKED** only; milestone fence with one integration demo. PARKED is success if the wedge is weak.
+Same contract as **PRD #5** (plugin usability): frozen **Outcome / Demo / Budget**; free design; loop log; exits **SHIPPED** or **PARKED** only; milestone fence with one integration demo. PARKED is success if the wedge is weak.
 
 ## Milestones
 
@@ -511,7 +511,7 @@ A Grafana **Build** (`recommend`) or **Update** (`operate`) wizard would duplica
 
 Related still-true outs:
 
-- **I-076** resource-detail injection → Headlamp (usability register / out-of-scope).
+- **I-076** resource-detail injection → Headlamp (PRD #5 usability register / out-of-scope).
 - **PRD #2** remains the only propose→PR implementation owner — this PRD consumes it.
 
 If product strategy later reverses Viktor's demarcation, reopen these rows with a **new** PRD number — do not silently expand #4 into a cluster manager.

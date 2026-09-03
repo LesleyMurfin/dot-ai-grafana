@@ -1,6 +1,7 @@
 # PRD: GitOps PR path for remediate execute (post v1)
 
 **Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/13
+**PRD**: **#2** (GitOps-PR remediate execute; after #1 v1; Map is #3, evidence-safety #4, usability #5)
 **Priority**: High (follows PRD #1 ship)  
 **Status**: Draft  
 **Updated**: 2026-09-01
