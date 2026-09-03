@@ -1212,13 +1212,25 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts_http_example_invalid_at_parse_layer", func(t *testing.T) {
-		base, err := validateAPIURL("http://example.invalid")
-		if err != nil {
-			t.Fatal(err)
+	t.Run("rejects_http_example_invalid_at_parse_layer", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.invalid")
+		if err == nil {
+			t.Fatal("expected error for http://example.invalid")
 		}
-		if base != "http://example.invalid" {
-			t.Fatalf("base=%q", base)
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
+		}
+	})
+
+	t.Run("rejects_public_http_example_com", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.com")
+		if err == nil {
+			t.Fatal("expected error for http://example.com")
+		}
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
 		}
 	})
 
@@ -1229,6 +1241,26 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 		if base != "https://dot-ai.example.com/v1" {
 			t.Fatalf("base=%q", base)
+		}
+	})
+
+	t.Run("accepts_http_loopback_rfc1918_incluster", func(t *testing.T) {
+		cases := []string{
+			"http://dot-ai.dot-ai.svc:3456",
+			"http://127.0.0.1:3456",
+			"http://10.43.0.10:3456",
+		}
+		for _, raw := range cases {
+			raw := raw
+			t.Run(raw, func(t *testing.T) {
+				base, err := validateAPIURL(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if base != raw {
+					t.Fatalf("base=%q", base)
+				}
+			})
 		}
 	})
 }
@@ -1384,7 +1416,7 @@ func TestAskLogFile(t *testing.T) {
 	defer upstream.Close()
 
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
@@ -1491,7 +1523,7 @@ func TestAskLogFile(t *testing.T) {
 	}))
 	defer bad.Close()
 	inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
@@ -1540,6 +1572,43 @@ func TestAskLogFile(t *testing.T) {
 		t.Fatalf("error line leaked secret: %s", lines[2])
 	}
 }
+
+func TestAskLogDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+		Path:   "query",
+		Method: http.MethodPost,
+		Body:   []byte(`{"intent":"list pods"}`),
+	}, callResourceResponseSenderFunc(func(*backend.CallResourceResponse) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("ask log should not exist when debugLog is off: %v", err)
+	}
+}
+
 
 func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 	dir := t.TempDir()

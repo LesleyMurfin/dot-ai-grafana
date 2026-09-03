@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 // testConnectionRequest allows the config UI to probe draft (unsaved) settings.
@@ -434,6 +436,7 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 }
 
 // validateAPIURL requires an absolute http(s) URL with a non-empty host.
+// http is allowed only for loopback, RFC1918, or in-cluster DNS (https-except-cluster-local).
 // It returns a trimmed base (no trailing slash) suitable for path join.
 // Call before any outbound dial so file://, javascript:, and host-less values never hit the network.
 func validateAPIURL(apiURL string) (string, error) {
@@ -455,7 +458,26 @@ func validateAPIURL(apiURL string) (string, error) {
 	if u.Host == "" {
 		return "", fmt.Errorf("apiUrl must include a host")
 	}
+	if scheme == "http" && !allowPlainHTTPHost(u.Hostname()) {
+		return "", fmt.Errorf("http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https")
+	}
 	return base, nil
+}
+
+// allowPlainHTTPHost reports whether host may use plaintext http.
+// Loopback, RFC1918/private IPs, and in-cluster DNS are allowed; public hosts require https.
+func allowPlainHTTPHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	if strings.HasSuffix(h, ".svc") || strings.Contains(h, ".svc.") || strings.HasSuffix(h, ".cluster.local") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate()
+	}
+	return false
 }
 
 func versionURL(apiURL string) string {
@@ -621,12 +643,17 @@ func extractErrorMessage(payload any, fallback string) string {
 
 // proxyDotAI forwards the request body to a dot-ai tools REST path and returns a
 // stable {ok,status,summary,error} envelope (never the raw upstream body).
-// Each completed call appends one JSON line to the Ask log file (Grafana PVC).
+// When jsonData.debugLog is true, each completed call appends one JSON line to the ask log.
 func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
 	tool := toolNameFromPath(toolPath)
 	var reqBody []byte
 	finish := func(httpStatus, status int, summary, errMsg string) {
-		appendAskLog(tool, reqBody, status, summary, errMsg)
+		if errMsg != "" {
+			log.DefaultLogger.Error("dot-ai tool call failed", "tool", tool, "status", status, "error", errMsg)
+		}
+		if a.debugLog {
+			appendAskLog(tool, reqBody, status, summary, errMsg)
+		}
 		writeToolProxy(w, httpStatus, status, summary, errMsg)
 	}
 
