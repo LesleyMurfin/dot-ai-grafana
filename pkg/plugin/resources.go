@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 // testConnectionRequest allows the config UI to probe draft (unsaved) settings.
@@ -212,21 +214,27 @@ func intFromAny(v any) int {
 	return 0
 }
 
-// stripAskMetaForUpstream drops hop meta before dot-ai.
-// Remediate stays analysis-only allowlist. Query only removes hop meta keys.
+// stripAskMetaForUpstream allowlists fields before dot-ai (query and remediate).
 func stripAskMetaForUpstream(body []byte, toolPath string) ([]byte, error) {
 	if toolPath == "/api/v1/tools/remediate" {
 		return sanitizeRemediateBody(body)
 	}
+	return sanitizeQueryBody(body)
+}
+
+// sanitizeQueryBody allowlists analysis-only query fields. Hop meta and any
+// extra keys (including execute/apply) are dropped so query matches remediate
+// "allowlisted by construction".
+func sanitizeQueryBody(body []byte) ([]byte, error) {
 	var in map[string]any
 	if err := json.Unmarshal(body, &in); err != nil {
-		// Non-JSON query body: forward as-is (legacy).
-		return body, nil
+		return nil, fmt.Errorf("invalid JSON body")
 	}
-	for _, k := range []string{"hop", "hops", "current_empty", "first_hop", "branch"} {
-		delete(in, k)
+	intent, _ := in["intent"].(string)
+	if strings.TrimSpace(intent) == "" {
+		return nil, fmt.Errorf("intent is required")
 	}
-	return json.Marshal(in)
+	return json.Marshal(map[string]any{"intent": intent})
 }
 
 // appendAskLog writes one JSON line for a completed query/remediate call.
@@ -307,6 +315,16 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Configuration is Admin-only; Test connection must not let a Viewer probe
+	// the saved URL with a token they supply.
+	if !isOrgAdmin(req.Context()) {
+		writeJSON(w, http.StatusForbidden, testConnectionResponse{
+			Status:  "error",
+			Message: "Admin role required to test connection",
+		})
+		return
+	}
+
 	apiURL := a.apiURL
 	apiKey := a.apiKey
 
@@ -324,16 +342,7 @@ func (a *App) handleTestConnection(w http.ResponseWriter, req *http.Request) {
 		bodyURL := strings.TrimRight(strings.TrimSpace(body.APIURL), "/")
 		bodyKey := strings.TrimSpace(body.APIKey)
 
-		// Draft URL different from saved settings can only be probed by org Admin.
-		// Saved-URL tests (empty body URL or same as configured) may proceed without Admin.
 		if bodyURL != "" && bodyURL != a.apiURL {
-			if !isOrgAdmin(req.Context()) {
-				writeJSON(w, http.StatusForbidden, testConnectionResponse{
-					Status:  "error",
-					Message: "Admin role required to test a draft apiUrl",
-				})
-				return
-			}
 			apiURL = bodyURL
 			if bodyKey != "" {
 				apiKey = bodyKey
@@ -434,6 +443,7 @@ func (a *App) probeVersion(ctx context.Context, apiURL, apiKey string) (testConn
 }
 
 // validateAPIURL requires an absolute http(s) URL with a non-empty host.
+// http is allowed only for loopback, RFC1918, or in-cluster DNS (https-except-cluster-local).
 // It returns a trimmed base (no trailing slash) suitable for path join.
 // Call before any outbound dial so file://, javascript:, and host-less values never hit the network.
 func validateAPIURL(apiURL string) (string, error) {
@@ -455,7 +465,26 @@ func validateAPIURL(apiURL string) (string, error) {
 	if u.Host == "" {
 		return "", fmt.Errorf("apiUrl must include a host")
 	}
+	if scheme == "http" && !allowPlainHTTPHost(u.Hostname()) {
+		return "", fmt.Errorf("http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https")
+	}
 	return base, nil
+}
+
+// allowPlainHTTPHost reports whether host may use plaintext http.
+// Loopback, RFC1918/private IPs, and in-cluster DNS are allowed; public hosts require https.
+func allowPlainHTTPHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	if strings.HasSuffix(h, ".svc") || strings.Contains(h, ".svc.") || strings.HasSuffix(h, ".cluster.local") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback() || ip.IsPrivate()
+	}
+	return false
 }
 
 func versionURL(apiURL string) string {
@@ -621,12 +650,17 @@ func extractErrorMessage(payload any, fallback string) string {
 
 // proxyDotAI forwards the request body to a dot-ai tools REST path and returns a
 // stable {ok,status,summary,error} envelope (never the raw upstream body).
-// Each completed call appends one JSON line to the Ask log file (Grafana PVC).
+// When jsonData.debugLog is true, each completed call appends one JSON line to the ask log.
 func (a *App) proxyDotAI(w http.ResponseWriter, req *http.Request, toolPath string) {
 	tool := toolNameFromPath(toolPath)
 	var reqBody []byte
 	finish := func(httpStatus, status int, summary, errMsg string) {
-		appendAskLog(tool, reqBody, status, summary, errMsg)
+		if errMsg != "" {
+			log.DefaultLogger.Error("dot-ai tool call failed", "tool", tool, "status", status, "error", errMsg)
+		}
+		if a.debugLog {
+			appendAskLog(tool, reqBody, status, summary, errMsg)
+		}
 		writeToolProxy(w, httpStatus, status, summary, errMsg)
 	}
 

@@ -138,9 +138,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -294,9 +295,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -349,9 +351,10 @@ func TestTestConnection(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "test-connection",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -581,8 +584,8 @@ func TestTestConnection(t *testing.T) {
 		}
 	})
 
-	t.Run("saved_url_editor_no_admin_gate", func(t *testing.T) {
-		// Acceptance: saved-URL tests without a divergent draft URL must not require Admin.
+	t.Run("saved_url_editor_requires_admin", func(t *testing.T) {
+		// Non-Admin must not probe the saved apiUrl.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if got := r.Header.Get("Authorization"); got != "Bearer from-settings" {
 				t.Errorf("Authorization=%q", got)
@@ -615,13 +618,13 @@ func TestTestConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
 	})
 
-	t.Run("same_url_as_saved_editor_no_admin_gate", func(t *testing.T) {
-		// Same draft apiUrl as saved settings is not a divergent draft URL.
+	t.Run("same_url_as_saved_editor_requires_admin", func(t *testing.T) {
+		// Same draft apiUrl as saved still requires Admin.
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"connected":true}`))
@@ -655,7 +658,7 @@ func TestTestConnection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusForbidden {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
 	})
@@ -915,7 +918,7 @@ func TestProxyBodyLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("empty_body_defaults_to_empty_object", func(t *testing.T) {
+	t.Run("empty_body_requires_intent", func(t *testing.T) {
 		var gotBody []byte
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			gotBody, _ = io.ReadAll(r.Body)
@@ -946,11 +949,14 @@ func TestProxyBodyLimits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.Status != http.StatusOK {
+		if resp.Status != http.StatusBadRequest {
 			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
-		if strings.TrimSpace(string(gotBody)) != "{}" {
-			t.Fatalf("expected upstream to receive {}, got %q", string(gotBody))
+		if !strings.Contains(string(resp.Body), "intent is required") {
+			t.Fatalf("want intent required, got %s", string(resp.Body))
+		}
+		if len(gotBody) != 0 {
+			t.Fatalf("upstream must not be dialed without intent, got %q", string(gotBody))
 		}
 	})
 }
@@ -1083,7 +1089,7 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 	})
 
 
-	t.Run("query_still_forwards_extra_fields", func(t *testing.T) {
+	t.Run("query_allowlists_intent_only", func(t *testing.T) {
 		gotPath, gotBody = "", nil
 		payload := []byte(`{"intent":"list pods","execute":true,"mode":"execute"}`)
 		var resp backend.CallResourceResponse
@@ -1111,9 +1117,14 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		if forwarded["intent"] != "list pods" {
 			t.Fatalf("intent=%v body=%s", forwarded["intent"], string(gotBody))
 		}
-		// Query path is unchanged: extra keys are still forwarded.
-		if _, ok := forwarded["execute"]; !ok {
-			t.Fatalf("query should forward execute unchanged, body=%s", string(gotBody))
+		if _, ok := forwarded["execute"]; ok {
+			t.Fatalf("query must not forward execute, body=%s", string(gotBody))
+		}
+		if _, ok := forwarded["mode"]; ok {
+			t.Fatalf("query must not forward mode, body=%s", string(gotBody))
+		}
+		if len(forwarded) != 1 {
+			t.Fatalf("want only intent, got %v", forwarded)
 		}
 	})
 }
@@ -1212,13 +1223,25 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 	})
 
-	t.Run("accepts_http_example_invalid_at_parse_layer", func(t *testing.T) {
-		base, err := validateAPIURL("http://example.invalid")
-		if err != nil {
-			t.Fatal(err)
+	t.Run("rejects_http_example_invalid_at_parse_layer", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.invalid")
+		if err == nil {
+			t.Fatal("expected error for http://example.invalid")
 		}
-		if base != "http://example.invalid" {
-			t.Fatalf("base=%q", base)
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
+		}
+	})
+
+	t.Run("rejects_public_http_example_com", func(t *testing.T) {
+		_, err := validateAPIURL("http://example.com")
+		if err == nil {
+			t.Fatal("expected error for http://example.com")
+		}
+		want := "http apiUrl is only allowed for loopback, RFC1918, or in-cluster DNS; use https"
+		if err.Error() != want {
+			t.Fatalf("err=%q want=%q", err.Error(), want)
 		}
 	})
 
@@ -1229,6 +1252,26 @@ func TestValidateAPIURL(t *testing.T) {
 		}
 		if base != "https://dot-ai.example.com/v1" {
 			t.Fatalf("base=%q", base)
+		}
+	})
+
+	t.Run("accepts_http_loopback_rfc1918_incluster", func(t *testing.T) {
+		cases := []string{
+			"http://dot-ai.dot-ai.svc:3456",
+			"http://127.0.0.1:3456",
+			"http://10.43.0.10:3456",
+		}
+		for _, raw := range cases {
+			raw := raw
+			t.Run(raw, func(t *testing.T) {
+				base, err := validateAPIURL(raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if base != raw {
+					t.Fatalf("base=%q", base)
+				}
+			})
 		}
 	})
 }
@@ -1384,7 +1427,7 @@ func TestAskLogFile(t *testing.T) {
 	defer upstream.Close()
 
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
@@ -1491,7 +1534,7 @@ func TestAskLogFile(t *testing.T) {
 	}))
 	defer bad.Close()
 	inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
-		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `"}`),
+		JSONData:                []byte(`{"apiUrl":"` + bad.URL + `","debugLog":true}`),
 		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
 	})
 	if err != nil {
@@ -1540,6 +1583,43 @@ func TestAskLogFile(t *testing.T) {
 		t.Fatalf("error line leaked secret: %s", lines[2])
 	}
 }
+
+func TestAskLogDisabledByDefault(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+		Path:   "query",
+		Method: http.MethodPost,
+		Body:   []byte(`{"intent":"list pods"}`),
+	}, callResourceResponseSenderFunc(func(*backend.CallResourceResponse) error { return nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("ask log should not exist when debugLog is off: %v", err)
+	}
+}
+
 
 func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 	dir := t.TempDir()
@@ -1629,7 +1709,7 @@ func mustJSONString(s string) string {
 }
 
 func TestAskMetaFromBodyReadsBranch(t *testing.T) {
-	body := []byte(`{"hop":3,"hops":3,"current_empty":false,"first_hop":"grafana","branch":"hedge"}`)
+	body := []byte(`{"intent":"list pods","hop":3,"hops":3,"current_empty":false,"first_hop":"grafana","branch":"hedge","execute":true}`)
 	hop, hops, currentEmpty, firstHop, branch := askMetaFromBody(body)
 	if hop != 3 || hops != 3 || firstHop != "grafana" || branch != "hedge" {
 		t.Fatalf("hop=%d hops=%d firstHop=%q branch=%q", hop, hops, firstHop, branch)
@@ -1648,8 +1728,11 @@ func TestAskMetaFromBodyReadsBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("strip: %v", err)
 	}
-	if strings.Contains(string(out), "branch") {
-		t.Fatalf("branch forwarded upstream: %s", out)
+	if strings.Contains(string(out), "branch") || strings.Contains(string(out), "execute") {
+		t.Fatalf("extra keys forwarded upstream: %s", out)
+	}
+	if !strings.Contains(string(out), `"intent":"list pods"`) {
+		t.Fatalf("intent dropped: %s", out)
 	}
 	if strings.Contains(askBodyPreview(body), "branch") {
 		t.Fatalf("branch leaked into body preview")

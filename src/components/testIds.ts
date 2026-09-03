@@ -5,6 +5,9 @@ export const testIds = {
     submit: 'data-testid ac-submit-form',
     testConnection: 'data-testid ac-test-connection',
     testStatus: 'data-testid ac-test-status',
+    debugLog: 'data-testid ac-debug-log',
+    showContext: 'data-testid ac-show-context',
+    sendGrafanaEvidence: 'data-testid ac-send-evidence',
   },
   dotai: {
     container: 'data-testid dotai-container',
@@ -19,5 +22,8 @@ export const testIds = {
     map: 'data-testid dotai-map',
     clearThread: 'data-testid dotai-clear-thread',
     analyzeThis: 'data-testid dotai-analyze-this',
+    retry: 'data-testid dotai-retry',
+    cancel: 'data-testid dotai-cancel',
+    consent: 'data-testid dotai-consent',
   },
 };
