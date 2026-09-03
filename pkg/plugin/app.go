@@ -30,12 +30,14 @@ type App struct {
 
 	apiURL         string
 	apiKey         string
+	debugLog       bool // jsonData.debugLog — ask-log JSONL; default off
 	httpClient     *http.Client // short timeout (version/health)
 	toolHTTPClient *http.Client // longer timeout (query/remediate)
 }
 
 type appJSONData struct {
-	APIURL string `json:"apiUrl"`
+	APIURL   string `json:"apiUrl"`
+	DebugLog bool   `json:"debugLog"`
 }
 
 // NewApp creates a new *App instance from Grafana app settings.
@@ -49,6 +51,7 @@ func NewApp(_ context.Context, settings backend.AppInstanceSettings) (instancemg
 		}
 	}
 	app.apiURL = strings.TrimRight(strings.TrimSpace(jd.APIURL), "/")
+	app.debugLog = jd.DebugLog
 	if settings.DecryptedSecureJSONData != nil {
 		app.apiKey = strings.TrimSpace(settings.DecryptedSecureJSONData["apiKey"])
 	}
