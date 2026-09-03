@@ -63,7 +63,7 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 - Changing plugin resource paths (stay `/api/plugins/<id>/resources/*`).
 - Panel data-link intent prefill (original PRD #1 M7 wording) — not this slice.
 - GitOps remediate execute — [prds/5-gitops-pr-remediate.md](5-gitops-pr-remediate.md) / issue #5.
-- Any change to PRD #1 v1 / unsigned **0.1.0** on vfarcic#3.
+- Any change to PRD #1 v1 / unsigned **0.1.0** on vfarcic/dot-ai-grafana#3.
 - Remediate v2 “improve dashboards/alerts so we catch this next time.”
 - Marketplace signing, execute/apply, operate/recommend.
 
@@ -75,7 +75,7 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 - “show me dashboards” skips dot-ai; Map `/d/<uid>` only for firing-alert `dashboardUid`; no UID → no `/d/` link, no search, Ask still succeeds.
 - Answer renders markdown; Current starts collapsed.
 - Plugin resources remain `/api/plugins/devopstoolkit-dotai-app/resources/*`.
-- Ships as **0.2.x** on the fork; 0.1.0 v1 on vfarcic#3 unchanged.
+- Ships as **0.2.x** on the fork; 0.1.0 v1 on vfarcic/dot-ai-grafana#3 unchanged.
 
 ## Milestones
 
@@ -103,7 +103,7 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 
 ### 2026-09-02 — PRD opened from parked M7 extras
 
-- **Issue**: Map `/d/<uid>`, Explore/Drilldown links, show-me skip POST, and markdown Answer landed after Viktor’s vfarcic#3 review at `7af77b3`, then were reverted so v1 stays analysis-only packing.
+- **Issue**: Map `/d/<uid>`, Explore/Drilldown links, show-me skip POST, and markdown Answer landed after Viktor’s vfarcic/dot-ai-grafana#3 review at `7af77b3`, then were reverted so v1 stays analysis-only packing.
 - **Action**: Draft PRD #6 (problem, scope, out, milestones). Does not edit `prds/1`. Does not mix GitOps execute.
 - **Prompt**: Own parked M7 as post-v1 0.2.x on the fork.
 
