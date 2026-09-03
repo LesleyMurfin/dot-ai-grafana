@@ -8,8 +8,6 @@ import {
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
 import { lastValueFrom, Observable } from 'rxjs';
-import { buildDrilldownLinks, DrilldownLink } from './grafanaExplore';
-
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
@@ -37,9 +35,7 @@ export type StackContextResult = {
   alertLines: string[];
   /** True when every stack block is an empty/missing note (no evidence lines). */
   currentEmpty: boolean;
-  drilldowns: DrilldownLink[];
 };
-
 
 /** Cluster-wide LogQL when the question has no pod/ns — recent error-ish lines. */
 export const CLUSTER_LOGQL =
@@ -60,7 +56,22 @@ type PromTarget = { refId: string; expr: string; instant?: boolean; format?: str
 type TempoTarget = { refId: string; queryType?: string; query?: string; limit?: number };
 type AlertTarget = { refId: string; expr?: string; queryType?: string };
 
-/** True when s is RFC-1123 DNS label(s); rejects HINT_STOPWORDS. */
+/** Resource-kind / filler words that must never become a pod or namespace. */
+const NAME_DENY: Record<string, true> = {
+  pods: true,
+  issues: true,
+  logs: true,
+  failing: true,
+  crashlooping: true,
+  cluster: true,
+  which: true,
+  what: true,
+  show: true,
+  why: true,
+  in: true,
+};
+
+/** True when s is RFC-1123 DNS label(s); rejects HINT_STOPWORDS and NAME_DENY. */
 function isRfc1123Name(s: string): boolean {
   if (!s || s.length > 253) {
     return false;
@@ -73,14 +84,19 @@ function isRfc1123Name(s: string): boolean {
     if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(label)) {
       return false;
     }
-    if (HINT_STOPWORDS[label]) {
+    if (HINT_STOPWORDS[label] || NAME_DENY[label]) {
       return false;
     }
   }
   return true;
 }
 
-/** Best-effort pod + namespace from free-text question. */
+/** Workload names in free text almost always contain a hyphen (checkout-api). */
+function looksLikeWorkloadName(s: string): boolean {
+  return s.includes('-') && isRfc1123Name(s);
+}
+
+/** Best-effort pod + namespace from free-text question. Names stored lowercase. */
 export function parsePodNamespace(question: string): PodNamespaceTarget {
   const text = question.trim();
   const out: PodNamespaceTarget = {};
@@ -90,23 +106,36 @@ export function parsePodNamespace(question: string): PodNamespaceTarget {
     /\bpod[/:=\s]+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text) ||
     /\b(?:for|of)\s+pod\s+([a-z0-9][a-z0-9.-]{0,252})\b/i.exec(text);
   if (podLabeled && isRfc1123Name(podLabeled[1])) {
-    out.pod = podLabeled[1];
+    out.pod = podLabeled[1].toLowerCase();
   }
 
   const nsLabeled =
     /\b(?:namespace|ns)[/:=\s]+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text) ||
     /\bin\s+(?:namespace|ns)\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
   if (nsLabeled && isRfc1123Name(nsLabeled[1])) {
-    out.namespace = nsLabeled[1];
+    out.namespace = nsLabeled[1].toLowerCase();
   }
 
+  // "X in Y" only when X looks like a workload (hyphenated). Rejects
+  // "pods in production" and "crashlooping in staging".
   if (!out.namespace) {
     const inNs = /\b([a-z0-9][a-z0-9.-]{1,60})\s+in\s+([a-z0-9][a-z0-9-]{0,62})\b/i.exec(text);
-    if (inNs && isRfc1123Name(inNs[1]) && isRfc1123Name(inNs[2])) {
+    if (inNs && looksLikeWorkloadName(inNs[1]) && isRfc1123Name(inNs[2])) {
       if (!out.pod) {
-        out.pod = inNs[1];
+        out.pod = inNs[1].toLowerCase();
       }
-      out.namespace = inNs[2];
+      out.namespace = inNs[2].toLowerCase();
+    }
+  }
+
+  if (!out.pod) {
+    const hyphenated = /\b([a-z0-9][a-z0-9.-]*-[a-z0-9.-]*[a-z0-9])\b/gi;
+    let m: RegExpExecArray | null;
+    while ((m = hyphenated.exec(text)) !== null) {
+      if (isRfc1123Name(m[1])) {
+        out.pod = m[1].toLowerCase();
+        break;
+      }
     }
   }
 
@@ -281,7 +310,7 @@ function fieldGet(values: unknown, index: number): unknown {
 /** Flatten string-ish DataFrame fields into plain lines (shared for Loki/AM). */
 export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] {
   const lines: string[] = [];
-  const seen: Record<string, true> = {};
+  const seen = new Set<string>();
   for (const frame of frames) {
     const fields = frame.fields ?? [];
     const preferred =
@@ -295,57 +324,15 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
       const line = String(fieldGet(preferred.values, i) ?? '')
         .replace(/\s+/g, ' ')
         .trim();
-      if (!line || seen[line]) {
+      if (!line || seen.has(line)) {
         continue;
       }
-      seen[line] = true;
+      seen.add(line);
       lines.push(line);
     }
   }
   return lines.slice(0, cap);
 }
-
-const DASHBOARD_UID_KEYS = ['dashboardUID', 'dashboardUid', '__dashboardUid__', 'dashboard_uid'];
-
-function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[]) {
-  const s = String(raw ?? '').trim();
-  if (!s || seen[s] || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
-    return;
-  }
-  seen[s] = true;
-  uids.push(s);
-}
-
-/** v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search. */
-export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
-  const uids: string[] = [];
-  const seen: Record<string, true> = {};
-  for (const frame of frames) {
-    for (const field of frame.fields ?? []) {
-      if (DASHBOARD_UID_KEYS.includes(field.name)) {
-        const len = fieldLength(field.values);
-        for (let i = 0; i < len; i++) {
-          addDashboardUid(fieldGet(field.values, i), seen, uids);
-        }
-      }
-      const labels = (field as { labels?: Record<string, string> }).labels ?? {};
-      for (const key of DASHBOARD_UID_KEYS) {
-        if (labels[key]) {
-          addDashboardUid(labels[key], seen, uids);
-        }
-      }
-    }
-  }
-  return uids;
-}
-
-export function dashboardHintFromUids(uids: string[]): string {
-  if (uids.length === 0) {
-    return 'dashboards: none linked on firing alerts';
-  }
-  return `dashboards: ${uids.map((u) => `/d/${u}`).join(' ')}`;
-}
-
 
 export function linesFromLokiFrames(frames: DataFrame[]): string[] {
   return textLinesFromFrames(frames, LOG_LINE_CAP);
@@ -393,7 +380,7 @@ export function factsFromPromFrames(frames: DataFrame[]): string[] {
 
 export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
   const out: string[] = [];
-  const seen: Record<string, true> = {};
+  const seen = new Set<string>();
   for (const frame of frames) {
     const fields = frame.fields ?? [];
     const idField = fields.find((f) => /trace/i.test(f.name || '')) ?? fields.find((f) => f.type === 'string');
@@ -403,10 +390,10 @@ export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
     const len = fieldLength(idField.values);
     for (let i = 0; i < len && out.length < TEMPO_TRACE_CAP; i++) {
       const id = String(fieldGet(idField.values, i) ?? '').trim();
-      if (!id || seen[id]) {
+      if (!id || seen.has(id)) {
         continue;
       }
-      seen[id] = true;
+      seen.add(id);
       out.push(`trace ${id}`);
     }
   }
@@ -437,7 +424,6 @@ function formatCurrent(args: {
   promLines: string[];
   tempoLines: string[];
   alertLines: string[];
-  dashboardUids: string[];
   lokiNote?: string;
   promNote?: string;
   tempoNote?: string;
@@ -457,17 +443,9 @@ function formatCurrent(args: {
   parts.push('');
   parts.push(`Alertmanager${scope}:`);
   parts.push(args.alertLines.length > 0 ? args.alertLines.join('\n') : args.alertNote ?? 'no alerts');
-  parts.push('');
-  parts.push('Dashboards (from firing alerts):');
-  parts.push(
-    args.dashboardUids.length > 0
-      ? args.dashboardUids.map((u) => `/d/${u}`).join('\n')
-      : 'none linked on firing alerts'
-  );
 
   return parts.join('\n');
 }
-
 
 /**
  * Grafana stack → Current/Map for Query (connect-only).
@@ -485,7 +463,6 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   let promLines: string[] = [];
   let tempoLines: string[] = [];
   let alertLines: string[] = [];
-  let dashboardUids: string[] = [];
   let lokiNote: string | undefined;
   let promNote: string | undefined;
   let tempoNote: string | undefined;
@@ -508,8 +485,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   if (target.pod) {
     mapParts.push(`pod/${target.pod}`);
   }
-  let mapHint = mapParts.join(', ');
-
+  const mapHint = mapParts.join(', ');
 
   // --- Loki (always; cluster-wide when no pod/ns) ---
   if (!loki?.ds) {
@@ -596,9 +572,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
         am.ds,
         baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
       );
-      const amFrames = framesOf(resp);
-      alertLines = textLinesFromFrames(amFrames, ALERT_CAP);
-      dashboardUids = dashboardUidsFromAlertFrames(amFrames);
+      alertLines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
       if (alertLines.length === 0) {
         alertNote = 'no alerts';
       }
@@ -606,19 +580,8 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       alertNote = `no alerts (${e instanceof Error ? e.message : 'Alertmanager query failed'})`;
     }
   }
+
   const currentEmpty = isStackCurrentEmpty({ logLines, promLines, tempoLines, alertLines });
-  mapHint = `${mapHint}, ${dashboardHintFromUids(dashboardUids)}`;
-  const tempoSearch = target.pod || target.namespace || question.slice(0, 80);
-  const drilldowns = buildDrilldownLinks({
-    lokiUid: loki?.settings?.uid,
-    promUid: prom?.settings?.uid,
-    tempoUid: tempo?.settings?.uid,
-    logql,
-    promql,
-    tempoSearch,
-    traceIds: tempoLines.map((line) => line.replace(/^trace\s+/i, '').trim()).filter(Boolean),
-    dashboardUids,
-  });
 
   return {
     logLines,
@@ -626,14 +589,12 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     tempoLines,
     alertLines,
     currentEmpty,
-    drilldowns,
     current: formatCurrent({
       target,
       logLines,
       promLines,
       tempoLines,
       alertLines,
-      dashboardUids,
       lokiNote,
       promNote,
       tempoNote,

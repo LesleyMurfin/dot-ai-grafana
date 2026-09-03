@@ -13,8 +13,6 @@ import {
   PodNamespaceTarget,
   StackContextResult,
 } from './grafanaStack';
-import { DrilldownLink, isShowMeOnly } from './grafanaExplore';
-
 
 /** Max dot-ai POSTs per user Ask (ask-log lines). Grafana DS reads do not count. */
 export const MAX_ASK_HOPS = 3;
@@ -329,9 +327,7 @@ export async function runAskOrchestrator(args: {
         current: rewriteCurrent(args.thread.current, question, summaryText),
         map: mergeMap(args.thread.map, question, summaryText),
         history: appendHistory(args.thread.history, question, summaryText),
-        drilldowns: args.thread.drilldowns ?? [],
       },
-
       firstHop: 'dot-ai',
       hops: 1,
       currentEmpty: meta.current_empty,
@@ -349,8 +345,6 @@ export async function runAskOrchestrator(args: {
   let stackSnapshot = '';
   let stackEmpty = true;
   let currentEmpty = !args.thread.current.trim();
-  let drilldowns: DrilldownLink[] = args.thread.drilldowns ?? [];
-
 
   const loadStack = async (q: string) => {
     if (args.skipStack) {
@@ -362,8 +356,6 @@ export async function runAskOrchestrator(args: {
       stackEmpty = stack.currentEmpty;
       currentEmpty = stack.currentEmpty;
       map = mergeMap(stack.mapHint, map, q);
-      drilldowns = stack.drilldowns ?? [];
-
     } catch (e) {
       const why = e instanceof Error ? e.message : 'Grafana stack query failed';
       stackSnapshot = `Grafana stack read failed:\n${why}`;
@@ -427,9 +419,7 @@ export async function runAskOrchestrator(args: {
         current: ok ? rewriteCurrent(displaySeed, question, summary) : displaySeed || args.thread.current,
         map,
         history: ok ? history : args.thread.history,
-        drilldowns,
       },
-
       firstHop,
       hops,
       currentEmpty,
@@ -440,26 +430,7 @@ export async function runAskOrchestrator(args: {
   if (firstHop === 'grafana') {
     // Always Grafana stack for observability Asks (cluster-wide if no pod/ns).
     await loadStack(question);
-    if (isShowMeOnly(question)) {
-      lastSummary = 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
-      history = appendHistory(history, question, lastSummary);
-      return {
-        ok: true,
-        summary: lastSummary,
-        thread: {
-          current: stackSnapshot || args.thread.current,
-          map,
-          history,
-          drilldowns,
-        },
-        firstHop,
-        hops: 0,
-        currentEmpty,
-        lastPacked: '',
-      };
-    }
     const r1 = await callDotAI(question, 'initial');
-
     if (!r1.ok) {
       return finish(false, r1.errorMessage || 'Request failed');
     }

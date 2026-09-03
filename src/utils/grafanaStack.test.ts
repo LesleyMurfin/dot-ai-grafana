@@ -2,7 +2,7 @@ import { of } from 'rxjs';
 import { getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
-  dashboardUidsFromAlertFrames,
+  CLUSTER_LOGQL,
   fetchStackContext,
   getDataSourceByType,
   linesFromLokiFrames,
@@ -10,12 +10,9 @@ import {
   parsePodNamespace,
 } from './grafanaStack';
 
-
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
-  config: { appSubUrl: '', apps: {}, bootData: { user: { orgId: 1 } } },
 }));
-
 
 const mockGet = jest.fn();
 const mockGetList = jest.fn();
@@ -85,6 +82,46 @@ describe('parsePodNamespace / buildLogQL', () => {
     ).toEqual({});
   });
 
+  test("Viktor's table: English stopwords and in-fallback do not become pod names", () => {
+    expect(parsePodNamespace('show failing pods in production')).toEqual({});
+    expect(parsePodNamespace('top issues in the cluster')).toEqual({});
+    expect(parsePodNamespace('which pods are crashlooping in staging')).toEqual({});
+    expect(parsePodNamespace('why is checkout-api CrashLooping in prod?')).toEqual({
+      pod: 'checkout-api',
+    });
+    expect(parsePodNamespace('show logs for pod checkout-api in namespace production')).toEqual({
+      pod: 'checkout-api',
+      namespace: 'production',
+    });
+  });
+
+  test("Viktor's table: generated LogQL never uses invented pod/ns labels", () => {
+    expect(buildLogQL(parsePodNamespace('show failing pods in production'))).toBe(CLUSTER_LOGQL);
+    expect(buildLogQL(parsePodNamespace('top issues in the cluster'))).toBe(CLUSTER_LOGQL);
+    expect(buildLogQL(parsePodNamespace('which pods are crashlooping in staging'))).toBe(CLUSTER_LOGQL);
+
+    const crashLogQL = buildLogQL(parsePodNamespace('why is checkout-api CrashLooping in prod?'));
+    expect(crashLogQL).toBe('{pod=~"checkout-api.*"}');
+    expect(crashLogQL).not.toMatch(/CrashLooping/i);
+    expect(crashLogQL).not.toMatch(/namespace="prod"/);
+
+    expect(buildLogQL(parsePodNamespace('show logs for pod checkout-api in namespace production'))).toBe(
+      '{namespace="production",pod=~"checkout-api.*"}'
+    );
+
+    const invented = /pod=~"(in|issues|are|CrashLooping)\.\*"/;
+    for (const q of [
+      'show failing pods in production',
+      'top issues in the cluster',
+      'which pods are crashlooping in staging',
+      'why is checkout-api CrashLooping in prod?',
+      'show logs for pod checkout-api in namespace production',
+    ]) {
+      expect(buildLogQL(parsePodNamespace(q))).not.toMatch(invented);
+      expect(buildLogQL(parsePodNamespace(q))).not.toMatch(/namespace="the"/);
+    }
+  });
+
 });
 
 describe('linesFromLokiFrames', () => {
@@ -93,34 +130,6 @@ describe('linesFromLokiFrames', () => {
     expect(linesFromLokiFrames([frameWithLineField(many) as never])).toHaveLength(LOG_LINE_CAP);
   });
 });
-
-describe('dashboardUidsFromAlertFrames', () => {
-  test('reads dashboardUid field and labels; ignores junk', () => {
-    const uids = dashboardUidsFromAlertFrames([
-      {
-        fields: [
-          { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
-          { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
-        ],
-      } as never,
-      {
-        fields: [
-          {
-            name: 'alertname',
-            type: 'string',
-            values: ['Other'],
-            labels: { __dashboardUid__: 'panel-uid-1' },
-          },
-        ],
-      } as never,
-      {
-        fields: [{ name: 'dashboardUid', type: 'string', values: ['no'] }],
-      } as never,
-    ]);
-    expect(uids).toEqual(['abc12def', 'panel-uid-1']);
-  });
-});
-
 
 describe('fetchStackContext', () => {
   test('Current includes mocked Loki log lines via ds.query', async () => {
@@ -170,42 +179,13 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('trace abc123');
     expect(result.current).toContain('Alertmanager');
     expect(result.current).toContain('KubePodCrashLooping');
-    expect(result.current).toContain('none linked on firing alerts');
     expect(result.mapHint).toMatch(/Loki/);
     expect(result.mapHint).toMatch(/Prometheus/);
-    expect(result.mapHint).toMatch(/dashboards: none linked on firing alerts/);
-    expect(result.drilldowns.some((l) => l.id === 'explore-logs')).toBe(true);
-    expect(result.drilldowns.some((l) => l.href.startsWith('/explore?'))).toBe(true);
-
+    expect(result.mapHint).toMatch(/Tempo/);
+    expect(result.mapHint).toMatch(/Alertmanager/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/P8E80F9AEF21F6940/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/datasources\/proxy/);
   });
-
-  test('Map and Current include /d/uid when alert has dashboardUid', async () => {
-    mockGet.mockImplementation(async (ref: string) => {
-      if (ref === 'am-1' || ref === 'Alertmanager') {
-        return {
-          query: () =>
-            of({
-              data: [
-                {
-                  fields: [
-                    { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
-                    { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
-                  ],
-                },
-              ],
-            }),
-        };
-      }
-      return { query: () => of({ data: [] }) };
-    });
-
-    const result = await fetchStackContext('show me the alerts for checkout');
-    expect(result.current).toContain('/d/abc12def');
-    expect(result.mapHint).toMatch(/dashboards: \/d\/abc12def/);
-  });
-
 
   test('one-line note when Loki datasource missing', async () => {
     mockGetList.mockImplementation((opts?: { type?: string }) => {
