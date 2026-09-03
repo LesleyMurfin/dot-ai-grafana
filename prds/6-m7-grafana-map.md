@@ -16,7 +16,7 @@ PRD #1 v1 packs Loki / Prometheus / Tempo / Alertmanager into **Current** and PO
 - Ask “show me the logs|alerts|traces|metrics|dashboards” without a wasted dot-ai POST
 - Read GFM answers (v1 dumps the summary in `<pre>`)
 
-These four landed **after** Viktor reviewed [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) at `7af77b3`, then were **parked** off that PR ([prior working branch]((prior working-branch PR; not linked))) so v1 stays thin. PRD #1 **M7 stays Not in v1**. This file owns M7.
+These four landed **after** Viktor reviewed [vfarcic/dot-ai-grafana#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) at `7af77b3`, then were **parked** off that PR (prior working branch) so v1 stays thin. PRD #1 **M7 stays Not in v1**. This file owns M7.
 
 ## Solution
 
@@ -62,7 +62,7 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 - Grafana 12+ Dashboard `/apis` inventory (later). Firing-alert `dashboardUid` is the v0.2 dashboard-to-open path.
 - Changing plugin resource paths (stay `/api/plugins/<id>/resources/*`).
 - Panel data-link intent prefill (original PRD #1 M7 wording) — not this slice.
-- GitOps remediate execute — [prds/5-gitops-pr-remediate.md](5-gitops-pr-remediate.md) / [prior working branch]((prior working-branch PR; not linked)).
+- GitOps remediate execute — [prds/5-gitops-pr-remediate.md](5-gitops-pr-remediate.md) / issue #5.
 - Any change to PRD #1 v1 / unsigned **0.1.0** on vfarcic#3.
 - Remediate v2 “improve dashboards/alerts so we catch this next time.”
 - Marketplace signing, execute/apply, operate/recommend.
@@ -110,4 +110,4 @@ Never `GET /api/search`. Never `/api/datasources`. Plugin calls stay SDK `/api/p
 ### 2026-09-02 — Split documented; show-me contract
 
 - **Issue**: CodeRabbit on #22: show-me matching unspecified; `show me dashboards` had no empty state.
-- **Action**: Issue #6 filed. Matching contract + dashboard empty state written here. PRD #1 (prior working branch) and PRD #5 (fork #18) now point here.
+- **Action**: Issue #6 filed. Matching contract + dashboard empty state written here. Matching contract + dashboard empty state written here.
