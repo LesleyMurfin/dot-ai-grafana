@@ -3,3 +3,25 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
+    environment:
+      # Keep anonymous off so Viewer/Editor org roles are real (matches CI).
+      GF_AUTH_ANONYMOUS_ENABLED: ${ANONYMOUS_AUTH_ENABLED:-false}
+      # Form/API login used by plugin-e2e createUser + login fixtures.
+      GF_AUTH_BASIC_ENABLED: 'true'
+    depends_on:
+      - dot-ai-stub
+
+  # Stub dot-ai tools REST so authorization assertions are not dial failures.
+  dot-ai-stub:
+    image: python:3.12-alpine
+    container_name: dot-ai-stub
+    volumes:
+      - ./tests/harness/dot_ai_stub.py:/app/dot_ai_stub.py:ro
+    command: ['python', '/app/dot_ai_stub.py']
+    expose:
+      - '8080'
+    networks:
+      default:
+        aliases:
+          # Matches provisioning apiUrl host; passes plugin allowPlainHTTPHost.
+          - dot-ai-stub.svc
