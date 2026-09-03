@@ -1,6 +1,6 @@
 import { DotAITool } from './dotaiApi';
 
-/** Display-only turn; never included in POST body text. */
+/** Conversation turn. UI shows full text; packer may send a condensed Prior block. */
 export type HistoryTurn = {
   role: 'you' | 'answer';
   text: string;
@@ -78,24 +78,38 @@ export const HINT_STOPWORDS: Record<string, true> = {
 };
 
 /**
- * Pack Stable + Current + Map + box for the next POST.
- * History is intentionally omitted.
- * Always ≤ MAX_INTENT_CHARS: drop Map, then Tempo, then trim Loki, then hard cap.
+ * Soft cap for condensed Prior (History) content, excluding the "Prior:" label.
+ * Keeps follow-up referents without crowding Current/Question under MAX_INTENT_CHARS.
+ */
+export const MAX_PRIOR_CHARS = 240;
+
+/**
+ * Pack Stable + Current + Prior + Map + box for the next POST.
+ * Prior is a condensed view of recent History turns (referents over prose).
+ * Always ≤ MAX_INTENT_CHARS. Truncation priority (drop first):
+ * Map → shrink Prior to latest turn → Tempo → trim Loki → drop Prior → hard cap.
+ * Map is convenience chips; Prior is what makes follow-ups resolvable, so Map goes first.
  */
 export function buildRequestText(args: {
   tool: DotAITool;
   current: string;
   map: string;
   box: string;
+  /** Full display history; packer condenses recent turn(s) into Prior. */
+  history?: HistoryTurn[];
 }): string {
   const box = args.box.trim();
   let current = args.current.trim();
   let map = args.map.trim();
+  let prior = condensePriorTurns(args.history ?? [], MAX_PRIOR_CHARS);
 
-  const pack = (c: string, m: string): string => {
+  const pack = (c: string, m: string, p: string): string => {
     const parts: string[] = [stablePreamble(args.tool)];
     if (c) {
       parts.push('', 'Current:', c);
+    }
+    if (p) {
+      parts.push('', 'Prior:', p);
     }
     if (m) {
       parts.push('', 'Map:', m);
@@ -104,34 +118,123 @@ export function buildRequestText(args: {
     return parts.join('\n');
   };
 
-  let text = pack(current, map);
+  let text = pack(current, map, prior);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
-  // 1. Drop Map
+  // 1. Drop Map (chips are convenience; Prior keeps follow-up referents)
   map = '';
-  text = pack(current, map);
+  text = pack(current, map, prior);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
-  // 2. Drop Tempo section from Current
+  // 2. Shrink Prior to the single latest turn, tighter budget
+  if (prior) {
+    prior = condensePriorTurns(args.history ?? [], Math.min(160, MAX_PRIOR_CHARS), 1);
+    text = pack(current, map, prior);
+    if (text.length <= MAX_INTENT_CHARS) {
+      return text;
+    }
+  }
+
+  // 3. Drop Tempo section from Current
   current = dropTempoSection(current);
-  text = pack(current, map);
+  text = pack(current, map, prior);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
-  // 3. Trim Loki body lines until under budget
-  current = trimLokiSection(current, (c) => pack(c, map).length, MAX_INTENT_CHARS);
-  text = pack(current, map);
+  // 4. Trim Loki body lines until under budget
+  current = trimLokiSection(current, (c) => pack(c, map, prior).length, MAX_INTENT_CHARS);
+  text = pack(current, map, prior);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
-  // 4. Hard cap full packed string
+  // 5. Drop Prior only after Current evidence has been reduced
+  if (prior) {
+    prior = '';
+    text = pack(current, map, prior);
+    if (text.length <= MAX_INTENT_CHARS) {
+      return text;
+    }
+  }
+
+  // 6. Hard cap full packed string
   return cap(text, MAX_INTENT_CHARS);
+}
+
+/** Pair You+Answer turns chronologically; orphan answers (after display slice) are skipped. */
+function historyPairs(history: HistoryTurn[]): Array<{ you: string; answer: string }> {
+  const pairs: Array<{ you: string; answer: string }> = [];
+  let pendingYou: string | null = null;
+  for (const turn of history) {
+    if (turn.role === 'you') {
+      pendingYou = turn.text;
+      continue;
+    }
+    if (turn.role === 'answer' && pendingYou !== null) {
+      pairs.push({ you: pendingYou, answer: turn.text });
+      pendingYou = null;
+    }
+  }
+  return pairs;
+}
+
+/**
+ * Condense prior turn(s) for the wire: keep the referent (resource chips / short A)
+ * and a short Q so "the first one" can resolve. Most recent first; older only if budget allows.
+ */
+export function condensePriorTurns(
+  history: HistoryTurn[],
+  maxChars: number,
+  maxPairs = 2
+): string {
+  if (!history.length || maxChars <= 0 || maxPairs <= 0) {
+    return '';
+  }
+  const pairs = historyPairs(history);
+  if (!pairs.length) {
+    return '';
+  }
+
+  const lines: string[] = [];
+  // Walk newest → oldest so the latest referent always wins the budget.
+  for (let i = pairs.length - 1; i >= 0 && lines.length < maxPairs; i--) {
+    const pair = pairs[i];
+    const used = lines.reduce((n, line) => n + line.length + (n > 0 ? 1 : 0), 0);
+    const remaining = maxChars - used;
+    if (remaining < 24 && lines.length > 0) {
+      break;
+    }
+    const line = formatPriorPair(pair.you, pair.answer, Math.max(remaining, 24));
+    if (!line) {
+      continue;
+    }
+    // Prepend so final order is chronological.
+    lines.unshift(line);
+  }
+
+  const joined = lines.join('\n');
+  return joined.length <= maxChars ? joined : cap(joined, maxChars);
+}
+
+/** One wire line: short Q + answer biased toward resource referents. */
+function formatPriorPair(you: string, answer: string, budget: number): string {
+  if (budget < 12) {
+    return '';
+  }
+  const qBudget = Math.min(90, Math.max(20, Math.floor(budget * 0.35)));
+  const q = oneLine(you, qBudget);
+  const prefix = `You: ${q} | A: `;
+  const aBudget = Math.max(12, budget - prefix.length);
+  const hints = extractResourceHints(you, answer);
+  // Prefer chips + a short prose tail so "first one" still maps to a name when present.
+  const aSource = hints ? `${hints} — ${answer.replace(/\s+/g, ' ').trim()}` : answer;
+  const a = oneLine(aSource, aBudget);
+  return `${prefix}${a}`;
 }
 
 /** Remove the Tempo last-15m block from a stack Current string. */
@@ -237,7 +340,7 @@ export function rewriteCurrent(previous: string, userText: string, answer: strin
 }
 
 
-/** Append You + Answer; keep only the last MAX_HISTORY_TURNS for display. */
+/** Append You + Answer; keep only the last MAX_HISTORY_TURNS (UI + packer source). */
 export function appendHistory(history: HistoryTurn[], you: string, answer: string): HistoryTurn[] {
   const next = [
     ...history,

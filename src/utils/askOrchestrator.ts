@@ -298,6 +298,7 @@ export async function runAskOrchestrator(args: {
       current: args.thread.current,
       map: args.thread.map,
       box: question,
+      history: args.thread.history,
     });
     const meta: AskMeta = {
       hop: 1,
@@ -390,6 +391,7 @@ export async function runAskOrchestrator(args: {
       current: stackSnapshot || args.thread.current,
       map,
       box,
+      history,
     });
     lastPacked = packed;
     const meta: AskMeta = {
