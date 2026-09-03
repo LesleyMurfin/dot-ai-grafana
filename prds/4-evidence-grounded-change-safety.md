@@ -1,6 +1,6 @@
 # PRD: Evidence-grounded change safety and verification
 
-**Issue**: TBD — file on LesleyMurfin/dot-ai-grafana (number confirmed only on filing)
+**Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/31
 **PRD**: **#4** (free after #1 v1, #2 GitOps-PR execute, #3 M7 Map)
 **Priority**: High (closes the change loop only Grafana can close; depends on PRD #2 for PR trigger)
 **Status**: Draft
@@ -12,7 +12,7 @@
 
 - **Goal:** Make Grafana the place where a GitOps change is **pre-flighted against live telemetry**, judged for **whether now is a safe time**, **verified after merge**, and optionally **recorded back into operational knowledge** — not a second Kubernetes day-2 manager.
 - **Active milestone:** None started. Draft until issue filed; needs PRD #2 PR path (or a test double) for integration demos that end in a real PR.
-- **Next action:** File issue; freeze M1 Outcome/Demo; inventory which `impact_analysis` / remediate fields the engine already returns vs what the plugin must join from Current; clarify `manageKnowledge` write-back capability with upstream ([UNVERIFIED]).
+- **Next action:** Freeze M1 Outcome/Demo; inventory which `impact_analysis` / remediate fields the engine already returns vs what the plugin must join from Current; clarify `manageKnowledge` write-back capability with upstream ([UNVERIFIED]).
 - **Write rule (estate):** dot-ai may read broadly; cluster writes go through **Git** only. Direct apply into KRO-owned namespaces is manufactured drift (estate GitOps source-of-truth policy: no direct apply into abstraction-owned namespaces). Grafana's blessed execute trigger is **PRD #2 propose → GitOps PR**, not live apply.
 - **Surface demarcation (Viktor):** Grafana = observability-first intelligence + GitOps-PR triggering. Headlamp = day-2 object lifecycle and direct resource actions. Do not turn this plugin into a duplicate cluster manager.
 - **Rationale captured (2026-09-03):** Change-safety failure patterns from large-operator field experience, the third capability (**is now a safe time?**), and the bidirectional knowledge loop (`manageKnowledge` read + write-back) are now in this PRD.

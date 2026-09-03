@@ -1,6 +1,6 @@
 # PRD: Plugin usability, shipped in vertical slices
 
-**Issue**: TBD — file on LesleyMurfin/dot-ai-grafana (number confirmed only on filing)
+**Issue**: https://github.com/LesleyMurfin/dot-ai-grafana/issues/32
 **PRD**: **#5** (free after #1 v1, #2 GitOps-PR execute, #3 M7 Map, #4 evidence-grounded change safety)
 **Priority**: High (finishes the plugin after PRD #1 thin-client + PRD #2 / #3 / #4 roadmap split)
 **Status**: Draft — **restructured 2026-09-03** after collision with PRD #3
@@ -17,8 +17,8 @@
   PRD #1  v1 0.1.0        — analysis-only, pack Current       — vfarcic#3 / fork #21
   PRD #2  GitOps execute  — issue #13 / fork PR #18           — propose → GitOps PR only
   PRD #3  M7 Map          — issue #23 / fork PR #22           — 0.2.x
-  PRD #4  Evidence safety — prds/4-evidence-grounded-change-safety.md (issue TBD)
-  PRD #5  Usability rest  — this issue / this file — M-A (done), M-B, M-D, M-F + IaC/topology notes
+  PRD #4  Evidence safety — issue #31 / prds/4-evidence-grounded-change-safety.md
+  PRD #5  Usability rest  — issue #32 / this file — M-A (done), M-B, M-D, M-F + IaC/topology notes
   ```
 - **Viktor demarcation (verbatim intent):** Grafana = observability-first intelligence + **GitOps-PR triggering**. Headlamp = day-2 object lifecycle and direct resource actions. Grafana must **not** become a duplicate cluster manager. Analysis-only v1 was **sequencing** ("ship the smaller thing, then open a separate PRD for the GitOps-PR path"), not a permanent ban on execute-via-PR — and that execute path is **PRD #2**, not a new operate wizard.
 - **Active milestone**: **M-B — The thread actually works** (next). **M-A is DONE.**
