@@ -16,8 +16,125 @@
 - **Write rule (estate):** dot-ai may read broadly; cluster writes go through **Git** only. Direct apply into KRO-owned namespaces is manufactured drift (ADR-0019, `riley_infrastructure`). Grafana's blessed execute trigger is **PRD #2 propose → GitOps PR**, not live apply.
 - **Surface demarcation (Viktor):** Grafana = observability-first intelligence + GitOps-PR triggering. Headlamp = day-2 object lifecycle and direct resource actions. Do not turn this plugin into a duplicate cluster manager.
 - **Rationale captured (2026-09-03):** Change-safety failure patterns from large-operator field experience, the third capability (**is now a safe time?**), and the bidirectional knowledge loop (`manageKnowledge` read + write-back) are now in this PRD.
-- **Attachment (2026-09-03):** This PRD now attaches to `operate`'s existing change-safety envelope (dry-run → approval → execute → validate; Risk Assessment; `opr-` sessions) rather than inventing a parallel one. Whether telemetry-aware risk and metric-recovery validation land in the **engine** (via PRD #1 M13 `mcp-grafana`) or the **plugin** is an open architectural question for Viktor — see §Where this attaches and §Open architectural question.
+- **Attachment (2026-09-03):** This PRD now attaches to `operate`'s existing change-safety envelope (dry-run → approval → execute → validate; Risk Assessment; `opr-` sessions) rather than inventing a parallel one. Whether telemetry-aware risk and metric-recovery validation land in the **engine** (ADR-0020/`operate` consuming already-live **`grafana-mcp`**, topology graph when deployed) or the **plugin** is an open architectural question for Viktor — see §Where this attaches and §Open architectural question. Note: **`grafana-mcp` is already live** per ADR-0020; the open question is wiring into change-safety reasoning, not building the MCP from scratch.
+- **North star + principles (2026-09-03):** This PRD is the **Grafana surface** of **ADR-0020** — *Agentic SRE-ops framework on Temporal (dot-ai knowledge reason, evidence + graph sense, GitOps-PR act)* (`revive_ai-dev/design/adr/ADR-0020-agentic-sre-ops-framework-on-temporal.md`, Proposed 2026-08-07) — not a competing framework. Operator multi-plane overlay framing, four binding design principles, and join-key hard part under §North star / §Design principles. Per ADR-0020 live-state: **`grafana-mcp` is already live**; topology graph and Kubeshark are the genuine missing planes.
 - **Not this PRD:** Map/markdown/show-me (PRD #3); analysis-only v1 packing (PRD #1); PR mechanism internals (PRD #2); thread/wait/ship usability (unnumbered usability PRD); Headlamp Recommend/Operate live wizards.
+
+## North star: an instrument for the operator
+
+**Placement:** immediately after `## Current State` and before `## Problem`, so the framework citation and operator framing precede the failure modes.
+
+### This PRD does not invent the north star
+
+The estate north star already exists: **ADR-0020 — Agentic SRE-ops framework on Temporal (dot-ai knowledge reason, evidence + graph sense, GitOps-PR act)** (*Status: Proposed*, 2026-08-07; path in the design hub: `revive_ai-dev/design/adr/ADR-0020-agentic-sre-ops-framework-on-temporal.md`). **PRD #4 is the Grafana surface of that framework** — diagnose/watch, evidence-grounded change safety, and the human decision point on the observability doorway — **not** a second agentic architecture.
+
+ADR-0020 already composes six capabilities this PRD must not restate as original invention:
+
+1. **Resource-agnostic reasoner** — dot-ai over the live Kubernetes API (consumes evidence; does not replace observability).
+2. **K8s-native evidence stack** — Prometheus, Loki, Hubble, Kubeshark (tier-3), K8s API; largely via **`mcp-grafana` / `grafana-mcp`**.
+3. **Durable orchestration** — Temporal (retries, human gates, long DAGs).
+4. **Single write path** — git + KRO → ArgoCD (GitOps-PR only).
+5. **Ingestable vector Knowledge Base** — semantic sense (*what does this mean*).
+6. **Topology graph** — structural sense (*what depends on this / blast radius / does this causal path exist*).
+
+Load-bearing ADR decisions this PRD inherits:
+
+- **D3 — two complementary knowledge representations.** Vector KB and topology graph answer **different** questions and **must both be present**; GraphRAG fuses them. That is the mature form of "do not collapse disagreeing senses into one story."
+- **D6 — GitOps-PR is the only mutation path**; confidence + blast-radius gate autonomy (HIGH auto / MEDIUM human signal / LOW analysis-only).
+- **D8 — graph and evidence stack are derived read-only projections**, never authoritative; **graph freshness is safety-critical** because blast-radius gates actuation.
+- **Surfaces (D5):** *Grafana (diagnose/watch, read-only) + Headlamp (resource-centric operate) — two doorways to one dot-ai server.* Independently matches Viktor's demarcation already in this PRD.
+
+ADR-0020's seven-step skeleton is a **superset** of this PRD's change loop:
+
+| ADR-0020 step | What PRD #4 serves on the Grafana doorway |
+|---------------|-------------------------------------------|
+| 1 Trigger | Out of scope here (alerts/schedules/drift live elsewhere); plugin may *receive* context |
+| 2 Enrich | **Yes** — pack/join live evidence for the change identity (pre-flight / safe-time) |
+| 3 Reason | Consumes dot-ai reasoner output; does not replace Temporal/dot-ai reasoning |
+| 4 Validate | **Yes** — show deterministic/graph + telemetry ground truth the human can check |
+| 5 Decide | **Yes** — human-facing decision UX (MEDIUM path); show blast-radius + dissenting evidence |
+| 6 Act | **PRD #2 only** — propose GitOps PR; no live apply (aligns D6) |
+| 7 Record | **Yes (intent)** — evidence artifact + knowledge write-back **[UNVERIFIED]** on `manageKnowledge` |
+
+**What belongs to the broader framework (not this plugin alone):** Temporal orchestration, topology-graph deployment/projector, autonomy HIGH/MEDIUM/LOW policy engine, domain validation oracles, Kubeshark tier-3 MOPs, core GraphRAG, and estate-wide KB corpora. **What this plugin owns:** observability-first presentation, multi-plane overlay UX on the change path, join of packed Current/stack evidence to impact/safe-time, PRD #2 arming order, post-merge metric verify bound to change identity, and making dissent visible at the human gate.
+
+### Operator framing (why Grafana)
+
+Twenty-five years of network operations keep returning to the same need: **real-time data the operator can pull, overlay, and slice**, and the ability to **look forward** at what a change will do *before* it is committed. The cinematic shorthand for that forward look is the film *Minority Report* — reach into the data, see what is about to happen, act with eyes open. After that single reference, this document stays in operator language.
+
+Chat transcripts scroll; instruments stay put. The owner’s multi-plane destination — inventory, topology, state, telemetry, logs, alarms, packet captures, netflow composited as one working set — is how an operator experiences ADR-0020’s evidence stack + graph + KB on the Grafana doorway. Build the instrument for Kubernetes first; extending the same shape to the network remains a hypothesis (below).
+
+### Eight planes — honest live state
+
+Statuses below follow **ADR-0020 live-state verification (2026-08-07)** plus what this companion already packs on the Ask/Current path. Correct a prior mis-frame: **`grafana-mcp` (`mcp-grafana`) is already live** in `riley-monitoring`, targeting in-cluster Grafana with a SA token — ADR-0020 calls it *the single cheapest integration already running*. Hubble is **live**. The two **genuinely missing** overlay planes are the **topology graph** (net-new) and **Kubeshark** (not deployed; privileged, MOP-gated tier-3).
+
+| plane | Provider (this estate) | status |
+|-------|------------------------|--------|
+| **Inventory** | dot-ai resource inventory / `ResourceSyncConfig` → vector DB; K8s API listing via `query` | **Live** (engine/API); not yet a first-class Grafana overlay pane |
+| **Topology** | ADR-0020 topology graph (structural sense); today only partial stand-ins (ownerRefs / KRO parentage; `visualizationUrl` when Web UI configured) | **Not deployed** (graph is net-new per ADR-0020); stand-ins only |
+| **State** | Live Kubernetes API via dot-ai `query` | **Live** |
+| **Telemetry** | Prometheus (`mcp-grafana` + Grafana datasource / Current packing) | **Live** |
+| **Logs** | Loki | **Live** |
+| **Alarms** | Alertmanager | **Live** |
+| **Packet captures** | Kubeshark (tier-3 PCAP / L7) | **Not deployed** — privileged, on-demand, MOP-gated (ADR-0020); also named tier-3 in PRD #1 |
+| **Netflow / flows** | Cilium **Hubble** (`hubble-relay` / UI; `mcp-grafana` sensor path in ADR-0020 D5) | **Live** in-cluster; Grafana overlay join on the change path still open work |
+
+**Implication for wiring:** observational planes need **join and UX in this surface**, not greenfield builds. Remaining net-new estate work called by ADR-0020 — topology graph, Kubeshark, Temporal skeleton, validation oracles — is **framework scope**. This companion must consume graph/capture when present and stay honest when absent (empty/inconclusive, never fake green).
+
+### Hypothesis: same instrument, network planes
+
+**[INFERENCE]** The same overlay generalises from Kubernetes to the network because a network operator already lives with the identical eight planes under different names: CMDB (inventory), L2/L3 topology, device configuration/state, SNMP/gNMI telemetry, syslog, fault-management alarms, taps (packet capture), and IPFIX/NetFlow. Kubernetes is the **proving ground**, not the final destination. This is a product hypothesis, not a delivery claim in PRD #4 scope, and not a claim that ADR-0020 already decided network CMDB joins.
+
+### The hard part is the join key
+
+The reason a multi-plane overlay has rarely shipped for networks is not lack of vision. The planes **do not share join keys**. Correlating a packet capture to a flow to an alarm to an inventory record requires common **identity**, **time**, and **topology** keys. Kubernetes gives those nearly free: namespace, pod, labels, owner references, UID, and a single cluster clock. A traditional network does not.
+
+That complements ADR-0020 rather than duplicating it: the **topology graph (D3/D8)** is the structural store those keys must feed; **graph freshness** is safety-critical because blast-radius gates actuation (D8). Without stable join keys, GraphRAG and blast-radius are theatre. So Kubernetes is not merely the easier demo — it is where join keys already exist, which is why it is the right proving ground. **[INFERENCE]** Identifying and enforcing those keys across panes is what must be solved before any extension to the network is credible; the join key (plus a fresh graph) is the product spine, not a pile of panes.
+
+**Implication:** on the Grafana doorway the product is an **instrument the operator works with**, not a chatbot that answers questions. PRD #4’s loop (safe-time → pre-flight → PRD #2 PR → verify → record) is how ADR-0020 steps enrich / validate / decide / record feel to a human on that doorway. A design that collapses into a scrolling answer log, a single green/red verdict the operator cannot interrogate, or disconnected panes without shared keys, has left both the operator need and ADR-0020.
+
+## Design principles
+
+Binding for this Grafana surface. Where they overlap ADR-0020, they are **derived**, not parallel law. Each principle states what it forbids and how a Demo would prove compliance.
+
+### 1. Overlay, not transcript
+
+- **The principle:** Composite multi-plane evidence into one operator-facing working view; do not make a scrolling chat log the primary change-safety surface.
+- **Why:** ADR-0020 composes an evidence stack + graph + KB as senses the operator (and the skeleton) use together; chat-only UX buries concurrent degradation and disagreeing channels (§Why change safety fails in practice). Progressive-context blocks (Stable / Current / Map / History in `src/utils/progressiveContext.ts`) are a text-only seed of overlay, not the destination.
+- **What it rules out:** Change-safety UX whose primary artifact is a linear assistant transcript; packing graph impact and telemetry in separate hops without a shared composite pane; eight unrelated tabs with no shared selection/identity.
+- **How you would know it is being followed:** **Demo** — fixture with graph/impact dependents *and* a firing alert shows both in one pre-flight/safe-time surface without multi-turn scroll archaeology; missing planes render empty/inconclusive in-place; selection keeps panes on the same identity key.
+
+### 2. Manipulate, not just ask
+
+- **The principle:** Let the operator slice and re-cut evidence already gathered; do not require a new LLM round-trip for every re-filter of the same packed data.
+- **Why:** ADR-0020 D5 names Grafana as **diagnose/watch, read-only** — an instrument doorway, not a second reasoner. Night operators must pull *this* dependency, alert, or burn window without another model hop. Seed: `isShowMeOnly()` in `src/utils/grafanaExplore.ts` and 0-hop Explore navigation from Grafana datasources.
+- **What it rules out:** Forcing every “show only blast-set alerts” through a fresh Ask/operate completion; agency that is only “type another question.”
+- **Observability-first demarcation (resolved tension):** “Manipulate” means slicing and overlaying **data** (time-series, alerts, packed Current, Explore links, future flow/capture panes). It does **not** mean mutating **Kubernetes objects** from Grafana. Object lifecycle stays with Headlamp; Grafana’s only write trigger remains **PRD #2 propose → GitOps PR** (ADR-0020 D6 + Viktor demarcation; I-026/I-077 deferred).
+- **How you would know it is being followed:** **Demo** — after one pack of graph + telemetry, operator filters to alerting blast-set members (or opens Explore) with **zero** new dot-ai completion; no object-edit/live-apply control on the path.
+
+### 3. Pre-cognition for changes
+
+- **The principle:** Before the operator commits a change (arms PR create), render predicted impact and whether **now** is a safe time from live evidence and graph/blast context.
+- **Why:** Maps to ADR-0020 steps **Validate** and **Decide** before **Act**, and to this PRD’s co-equal capabilities (safe-time, pre-flight, verify). Graph-only `impact_analysis` and replica-only “healthy” cannot see relative-to-history degradation (§Pre-flight is graph-only today; field concurrent-degradation pattern).
+- **What it rules out:** Arming Propose on graph or ticket text alone; treating dry-run command success as sufficient forward view; skipping safe-time because autonomy policy lives “somewhere in Temporal.”
+- **How you would know it is being followed:** **Demo** — PR control stays disarmed until safe-time + pre-flight have rendered; degraded fixture warns *before* PRD #2; quiet fixture shows honest clear/empty — never silent skip.
+
+### 4. Show the minority report
+
+- **The principle:** When evidence senses disagree, show each verdict side by side with the dissent visible; never collapse conflicting signals into one averaged confidence or a single risk badge the operator cannot unpack.
+- **Why (derived from ADR-0020 D3 + this PRD’s field evidence):** D3 requires **two stores** — vector KB (*what does this mean*) and topology graph (*what depends on this / blast radius / does this causal path exist*) — **both present**, fused by GraphRAG, not averaged away. The same discipline extends to **graph/structural risk vs live telemetry** on the change path. `operate` today emits a single **Risk Assessment** (e.g. paraphrased worked example: *"LOW RISK — Scaling up from 2 to 4 replicas on healthy deployment"*) where “healthy” is **replica/cluster state**, not traffic, alerts, burn, or concurrent reconcile ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate); §The precise gap). Field experience records the failure: a change that looked safe proceeding over a system **already degraded by an unrelated concurrent event** (§Why change safety fails in practice). Suppressing dissent into one green light is exactly that failure mode.
+- **Relation to ADR-0020 D6 confidence tiers:** HIGH/MEDIUM/LOW may still **gate autonomy** (auto PR / human signal / analysis-only). That tier is a **policy outcome**, not a license to hide contributing channels. If graph says low blast and telemetry says page-severity burn, the human MEDIUM surface must show **both**, then the tier — not a fused “0.73 safe” that dropped the dissent.
+- **What it rules out:** Single collapsed `Risk Assessment` / primary averaged confidence / one traffic-light when channels disagree; UI that shows only the winning verdict; shipping I-098 telemetry enrichment as a quieter one-badge string; treating vector *or* graph as optional when the other is present.
+- **How you would know it is being followed:** **Demo** — fixture where structural/graph risk is low **and** telemetry is hot: decision surface shows **graph verdict** and **telemetry verdict** as separate labeled results with dissent explicit; optional autonomy tier is secondary and labeled as policy, not as substitute evidence; inverse fixture keeps both channels. One chip with no breakdown fails the demo.
+
+### Principles → plan map
+
+| principle | ADR-0020 anchor | already serving (milestones / ideas) | gap |
+|-----------|-----------------|--------------------------------------|-----|
+| 1 Overlay, not transcript | Evidence stack + graph + KB as co-present senses; Grafana diagnose/watch doorway | **Partial:** M1.S2 pre-flight panel; I-086, I-089, I-091, I-102. Progressive-context packing is text-only. | **No milestone** yet for durable multi-plane instrument UI or shared join keys. **I-103**, **I-108**, **I-110**. M1.S2 must not pass as transcript-shaped chrome. Topology/Kubeshark panes stay honest empty until estate deploys them (**I-109**). |
+| 2 Manipulate, not just ask | D5 Grafana read-only doorway; D6 no live mutate from this surface | **Partial seed:** `isShowMeOnly` / 0-hop Explore; I-089 chips; I-087 links; I-026/I-077 deferred | **No slice** demos LLM-free re-filter of packed pre-flight evidence (**I-105**). |
+| 3 Pre-cognition for changes | D1 steps Validate → Decide → Act; D6/D8 blast-radius before act | **In plan:** M1, M2, I-086, I-088, I-091, I-092, I-096; **I-106** names forward view | Delivery not started; warn vs hard-gate still open (§Open questions). |
+| 4 Show the minority report | **D3** vector + graph both present; validate against graph; human sees blast-radius | **Partial intent:** success criteria “disagree with graph says safe”; I-086, I-091, I-098 | **I-098** can still be mis-read as one enriched badge. **No Demo** yet requires side-by-side dissent or forbids primary averaged score — **I-104**, **I-107**. D6 confidence tier must not become the only visible signal. |
 
 ## Problem
 
@@ -138,7 +255,7 @@ Read this PRD as **folding evidence into an existing envelope**, not as standing
 
 The same Operate Guide lists: **"MCP server integration — Augment analysis with tools from external MCP servers (e.g., Prometheus metrics)"**, with a pointer to MCP Server Integration in the deployment docs ([Operate Guide — Key Features](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). The engine already anticipates telemetry augmentation of analysis.
 
-That extension point is PRD #1's milestone **M13 (`mcp-grafana`)**. PRD #1 marks M13 as **core `vfarcic/dot-ai` work** and explicitly **"Not this companion repo."** If telemetry-aware risk assessment is delivered by registering `mcp-grafana` with the engine, every surface that already calls `operate` (CLI, Web UI, Headlamp, and any Grafana path that reuses the tool) inherits it — see the open architectural question next.
+That extension point is exactly what **`grafana-mcp` / `mcp-grafana`** is for. **ADR-0020 live-state (2026-08-07) verified it is already deployed** (`grafana-mcp` in `riley-monitoring`, in-cluster Grafana + SA token) — *the single cheapest integration is already running*. PRD #1 may still track deeper engine packaging under historical M13 labels; do **not** read that as "MCP does not exist." The remaining work is **wiring** live MCP evidence (and, when deployed, the topology graph) into `operate`/`remediate` risk and into this plugin's pre-flight/verify UX so every doorway inherits telemetry-aware safety — see the open architectural question next.
 
 ## Open architectural question: engine or plugin?
 
@@ -146,7 +263,7 @@ If telemetry can enter `operate` through engine-side MCP registration, **much of
 
 ### Reading A — this belongs in the engine
 
-Register `mcp-grafana` (PRD #1 M13) with the **engine**. Then `operate` and `remediate` can perform telemetry-aware risk assessment and richer post-execution checks for **every** surface at once — CLI, Headlamp, Web UI, and Grafana — with **no** plugin-specific join code. That is consistent with PRD #1 **DD11**'s thin-client boundary and with dot-ai's orchestrator-neutral design: intelligence and safety reasoning stay in the engine; surfaces present and approve. Under Reading A, a large fraction of "is now safe?" and even "did the metric move?" is engine work; the companion repo should not rebuild it client-side.
+Consume already-live `grafana-mcp` from the **engine** (and register any missing tool surface area). Then `operate` and `remediate` can perform telemetry-aware risk assessment and richer post-execution checks for **every** surface at once — CLI, Headlamp, Web UI, and Grafana — with **no** plugin-specific join code. That is consistent with PRD #1 **DD11**'s thin-client boundary and with dot-ai's orchestrator-neutral design: intelligence and safety reasoning stay in the engine; surfaces present and approve. Under Reading A, a large fraction of "is now safe?" and even "did the metric move?" is engine work; the companion repo should not rebuild it client-side.
 
 ### Reading B — the plugin still owns something
 
@@ -154,7 +271,7 @@ Even a telemetry-aware engine still leaves a **human** deciding in a **surface**
 
 **[INFERENCE] — likely split, not a decision.** Capability-shaped guess for discussion only:
 
-- **Engine (core `vfarcic/dot-ai`, via M13 and `operate`/`remediate` enrichment):** telemetry-augmented **Risk Assessment**; optional post-execution hooks that can assert metric/signal movement when MCP tools are available; shared session fields (`opr-…`, Policies Checked, Patterns Applied) every surface can render.
+- **Engine (core `vfarcic/dot-ai`, via live `grafana-mcp` + `operate`/`remediate` enrichment; topology graph when ADR-0020 deploys it):** telemetry-augmented **Risk Assessment**; optional post-execution hooks that can assert metric/signal movement when MCP tools are available; shared session fields (`opr-…`, Policies Checked, Patterns Applied) every surface can render.
 - **Plugin (this companion):** human decision UX in the observability surface; pre-flight / safe-time **presentation** joined to PRD #2 propose; post-merge **verify view** bound to PR/session identity with Explore deep links; runbook-beside-alert and evidence artifact UX; surfacing `visualizationUrl` / governance fields at the point of approval. Not a second dry-run engine.
 
 **Viktor decides** the core-versus-companion boundary. PRD #1 DD11 already sets a thin-client line; this PRD must not override it by assertion. Until he answers the questions in §Open questions for Viktor, milestones here stay draft and must not silently assume either Reading A or Reading B as settled product law.
@@ -250,8 +367,8 @@ The full loop — **is it safe now → what will it touch → propose as a PR �
 ## Open questions for Viktor
 
 - Does `manageKnowledge` support **incremental write-back** of execution evidence (structured append / update of an existing knowledge URI), or only whole-document ingest by URI? **[UNVERIFIED]** — blocks I-094 delivery shape. (Existing question; **[UNVERIFIED]** flag carried forward — not newly opened here.)
-- Should **telemetry-aware risk assessment** for `operate` and `remediate` be delivered by registering **`mcp-grafana` with the engine** (PRD #1 **M13**) rather than by the Grafana plugin joining telemetry client-side? See §Where this attaches and §Open architectural question.
-- If the engine gains telemetry via M13, what remains **genuinely plugin-side** — is it only presentation, change-identity binding, and the human decision point (Reading B), or does the plugin still own substantive safe-time/verify logic?
+- Should **telemetry-aware risk assessment** for `operate` and `remediate` be delivered primarily by the **engine consuming already-live `grafana-mcp`** (ADR-0020) rather than by the Grafana plugin joining telemetry only client-side? See §Where this attaches and §Open architectural question. (MCP deploy is not the blocker; **wiring** is.)
+- Given live `grafana-mcp`, what remains **genuinely plugin-side** — is it only presentation, change-identity binding, and the human decision point (Reading B), or does the plugin still own substantive safe-time/verify logic?
 - Does `operate`'s **post-execution validation** step (flow step 8) have any hook today for asserting a **metric recovered**, or is it strictly **cluster-state / operation-completed** validation? **[UNVERIFIED]** against engine internals beyond the public [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) wording.
 - Which live signals reliably mean "another change is in flight" in this estate (ArgoCD app conditions, MOP ticket state, annotation conventions)?
 - Product default: **warn** vs **hard-gate** when safe-time checks fail?
@@ -413,22 +530,27 @@ If product strategy later reverses Viktor's demarcation, reopen these rows with 
 | 2026-09-03 | Third co-equal capability: **is now a safe time?** | Field experience at a large telecom operator: concurrent degradation + invisible baseline; only time-series answers; MOP/CRA STOP triggers need live evaluation |
 | 2026-09-03 | Bidirectional knowledge loop in scope (read + write intent) | Runbooks must surface in Grafana; post-change evidence must travel across shifts; `manageKnowledge` write-back **[UNVERIFIED]** |
 | 2026-09-03 | I-091…I-097 opened | Safe-time, concurrent change, evidence capture/write-back, runbook-beside-alert, STOP-vs-telemetry, shift context |
-| 2026-09-03 | Attach PRD #4 to existing `operate` envelope; engine-vs-plugin open | Operate Guide documents dry-run/approval/validate + Risk Assessment; M13 is the named telemetry extension; Viktor owns core-vs-companion (DD11) |
-| 2026-09-03 | I-098…I-102 opened | Telemetry-enriched operate risk; metric-recovery validation; engine mcp-grafana registration note; opr visualizationUrl in Grafana; Policies/Patterns visible at decision point |
+| 2026-09-03 | Attach PRD #4 to existing `operate` envelope; engine-vs-plugin open | Operate Guide documents dry-run/approval/validate + Risk Assessment; `grafana-mcp` already live (ADR-0020); wiring into operate/plugin still open; Viktor owns core-vs-companion (DD11) |
+| 2026-09-03 | I-098…I-102 opened | Telemetry-enriched operate risk; metric-recovery validation; mcp-grafana wiring note; opr visualizationUrl in Grafana; Policies/Patterns visible at decision point |
+| 2026-09-03 | North star = **ADR-0020**; PRD #4 = Grafana surface | Cite ADR-0020 six capabilities + D3/D6/D8/D5; do not author a competing framework; this PRD serves enrich/validate/decide/record on the Grafana doorway |
+| 2026-09-03 | Product is an **operator instrument** (multi-plane overlay), not a chat surface | Operator framing under ADR-0020: pull/overlay/slice live planes and look forward before commit; Kubernetes proving ground; chat transcript is not the primary change-safety UX |
+| 2026-09-03 | Conflicting evidence is **surfaced**, not collapsed | Principle 4 derived from ADR-0020 D3 (vector + graph both present) + field concurrent-degradation failure; forbids single averaged confidence / collapsed Risk Assessment as primary signal; D6 autonomy tier is policy outcome, not hidden dissent |
+| 2026-09-03 | I-103…I-110 opened | Multi-plane overlay; dissent-visible dual verdict; operator slice without LLM hop; forward predicted-impact; reject primary collapsed confidence; Kubeshark missing + Hubble live (ADR-0020); correlation join keys as network-extension prerequisite |
+| 2026-09-03 | Live-state correction: `grafana-mcp` **live**; Hubble **live**; topology graph + Kubeshark **missing** | ADR-0020 live-state table 2026-08-07 supersedes earlier "M13 unbuilt" framing for mcp-grafana |
 
 ## Idea register (append-only)
 
 ### Rules
 
-Append-only; never delete ids; full prose. Moved ids keep original numbers. New work continues **I-086+** (I-091…I-102 active extensions).
+Append-only; never delete ids; full prose. Moved ids keep original numbers. New work continues **I-086+** (I-091…I-110 active extensions).
 
 ### Arithmetic
 
 | item | count |
 |------|-------|
 | Moved full rows (considered-and-deferred) | 2 (I-026, I-077) |
-| New active-scope rows | 17 (I-086…I-102) |
-| **Register rows in this file** | **19** |
+| New active-scope rows | 25 (I-086…I-110) |
+| **Register rows in this file** | **27** |
 | Usability draft stubs for I-026/I-077 | 2 |
 | Original I-001…I-085 traceable | **85** |
 
@@ -448,11 +570,19 @@ Append-only; never delete ids; full prose. Moved ids keep original numbers. New 
 | I-095 | Surface runbook beside firing alert in Grafana | When an alert fires (or pre-flight shows alert risk), surface the **relevant runbook** next to it in the Grafana plugin via `manageKnowledge` semantic search — not only in Headlamp's Knowledge Base UI. Operators at change time should not leave the observability surface to find "where to look." Visible change: Knowledge/runbook panel or chips bound to alert labels / impacted objects with cited sources. | Headlamp Knowledge search present; Grafana plugin has none; manageKnowledge read path | owner-idea | OPEN | — |
 | I-096 | Evaluate MOP/CRA STOP triggers against live telemetry | Estate change governance already defines STOP triggers re-evaluated after each step; today a human reads dashboards to decide stop/go. Bind the same class of questions to **live Prom/Loki/Alertmanager** (and safe-time checks) so STOP is evidence-backed in the change path. Visible change: STOP checklist items show live pass/fail/inconclusive with links; product chooses warn vs hard-gate. `[INFERENCE]` exact MOP field mapping is estate-specific. | estate MOP/CRA model; this PRD Solution §Is now a safe time | owner-idea | OPEN | — |
 | I-097 | Carry change context across shift handover | Package plan intent, pre-flight snapshot, open risks, and (when present) evidence/runbook links so the executor at 03:00 has what the author knew — without relying on individuals still being online. Visible change: handover summary on the change session (export or pinned panel) that survives ticket reassignment; pairs with I-093/I-094 for durability. Systems failure when context dies at shift end; not a people failure. | large-operator field experience (anonymised); Problem §context does not travel | owner-idea | OPEN | — |
-| I-098 | Enrich `operate` Risk Assessment with live telemetry | Today `operate` already emits **Risk Assessment** with a stated level and reasoning, but the public worked example rates a 2→4 replica scale as **LOW RISK** from replica/cluster health ("healthy" ≈ 2/2 running), not from traffic, firing alerts, error-budget burn, or concurrent reconcile ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Enrich that field with live telemetry so "is now a safe time?" is answered inside the existing envelope rather than beside it. Visible change: Risk Assessment cites Prom/Alertmanager (or MCP-derived) factors alongside graph/cluster state; inconclusive when signals absent — never invent green. Delivery may be engine-side (M13) and/or plugin presentation — ownership open for Viktor. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) Risk Assessment example; this PRD §Where this attaches gap; I-091 | owner-idea | OPEN | — |
+| I-098 | Enrich `operate` Risk Assessment with live telemetry | Today `operate` already emits **Risk Assessment** with a stated level and reasoning, but the public worked example rates a 2→4 replica scale as **LOW RISK** from replica/cluster health ("healthy" ≈ 2/2 running), not from traffic, firing alerts, error-budget burn, or concurrent reconcile ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Enrich that field with live telemetry so "is now a safe time?" is answered inside the existing envelope rather than beside it. Visible change: Risk Assessment cites Prom/Alertmanager (or MCP-derived) factors alongside graph/cluster state; inconclusive when signals absent — never invent green. Delivery may be engine-side (wiring already-live grafana-mcp) and/or plugin presentation — ownership open for Viktor. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) Risk Assessment example; this PRD §Where this attaches gap; I-091 | owner-idea | OPEN | — |
 | I-099 | Extend post-execution validation to metric recovered | `operate` step 8 validates that the **operation completed** (iterative AI validation of successful completion per docs), not that the **metric recovered**. Extend validation (engine hook and/or Grafana verify bound to `opr-`/PR identity) so "did it work?" means the intended signal moved. Visible change: recovered / not recovered / inconclusive tied to change session, with Explore links — complements I-087 without inventing a second verifier brand. Hook existence in core today is **[UNVERIFIED]**. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) step 8 / iterative validation; this PRD post-merge capability; I-087 | owner-idea | OPEN | — |
-| I-100 | Register `mcp-grafana` with the engine (core repo) | The Operate Guide already names MCP server integration to augment analysis with external tools, giving Prometheus metrics as the example. PRD #1 **M13 (`mcp-grafana`)** is the natural delivery of that extension point and is marked **core `vfarcic/dot-ai` work, "Not this companion repo."** Registering it with the engine would give `operate`/`remediate` telemetry-aware reasoning on **every** surface (CLI, Headlamp, Web UI, Grafana) without plugin-side reinvention. Visible change: tracked as upstream/core dependency note in this PRD — **no implementation in this companion repo**. | [Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate) MCP feature; PRD #1 M13; Reading A | owner-idea | OPEN | — |
+| I-100 | Wire already-live `grafana-mcp` into engine change-safety | **Correction (ADR-0020 live-state 2026-08-07):** `grafana-mcp` / `mcp-grafana` is **already deployed** in `riley-monitoring` (in-cluster Grafana + SA token) — not a greenfield build. The Operate Guide names MCP integration to augment analysis with external tools (Prometheus example). Work remaining is **wiring** that live MCP (and Hubble sensors ADR-0020 already counts on) into `operate`/`remediate` risk and validation so every surface inherits telemetry-aware safety, plus optional deeper packaging notes historically labeled PRD #1 M13. Visible change: engine/session risk cites MCP-backed factors; companion documents dependency on live MCP rather than "await M13 deploy." **Not** re-implementing grafana-mcp in this repo. | ADR-0020 live-state table; Operate Guide MCP feature; Reading A | owner-idea | OPEN | — |
 | I-101 | Surface `operate` `visualizationUrl` (`opr-` sessions) in Grafana | `operate` already returns Session ID `opr-…` and a `visualizationUrl` when `webUI.baseUrl` is configured ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Surface those in the Grafana plugin so operators can open the existing analysis view from the observability decision point — mirroring the query-session topology idea already captured elsewhere in the programme. Visible change: deep link / chip from pre-flight or change session to `/v/opr-…` (or documented fallback when Web UI base URL unset). | Operate Guide Session ID + Visualization fields; companion topology/session patterns [INFERENCE] | owner-idea | OPEN | — |
 | I-102 | Show Policies Checked and Patterns Applied at Grafana decision point | `operate` output already includes **Policies Checked** (pass/fail) and **Patterns Applied** in the worked example ([Operate Guide](https://devopstoolkit.ai/docs/ai-engine/tools/operate)). Render those fields in the Grafana change/pre-flight surface so estate governance is **visible where the human decides**, not only in CLI/Headlamp/Web UI transcripts. Visible change: governance chips or checklist beside safe-time/pre-flight; pairs with I-096 STOP evaluation without re-implementing policy engines. | Operate Guide example output fields; Reading B human decision surface; I-096 | owner-idea | OPEN | — |
+| I-103 | Multi-plane composite overlay as primary change-safety view | Replace chat-transcript-primary change UX with a **multi-plane composite overlay**: inventory, topology, live state, telemetry, logs, alarms, and (when present) captures/flows in one operator working view — not a scrolling answer log and not eight unrelated tabs. Builds on progressive-context block names (Stable / Current / Map / History) as a packing primitive while committing the visible surface to instrument layout with **shared selection/identity**. Visible change: pre-flight/safe-time entry opens an overlay where each plane has a stable region keyed to the same workload/change identity; transcript if present is secondary. Serves Design principle 1 and §North star eight-plane table. | owner north-star 2026-09-03 (multi-plane ultimate); `src/utils/progressiveContext.ts`; this PRD §Design principles P1 | owner-idea | OPEN | — |
+| I-104 | Side-by-side graph and telemetry verdicts with dissent visible | When `impact_analysis` / graph structural risk and live telemetry (alerts, traffic, burn, concurrent reconcile) disagree, render **two labeled verdicts** side by side and mark which channel dissents. Do **not** fold them into `operate`'s single collapsed **Risk Assessment** badge or any primary averaged confidence number. Connects directly to the documented field failure: change looking safe while the estate is already degraded by an unrelated concurrent event, and to the Operate Guide example where LOW RISK follows from replica health alone. Visible change: decision row shows e.g. graph=low structural risk | telemetry=hot (alert/burn) with dissent callout; both remain readable after the human chooses go/stop. Serves Design principle 4; hardens I-086/I-091/I-098. | owner north-star 2026-09-03; Operate Guide Risk Assessment example; Problem §concurrent degradation; §The precise gap | owner-idea | OPEN | — |
+| I-105 | Operator-driven slice of packed evidence without LLM hop | After graph+telemetry evidence is packed once for a change session, the operator can **filter, focus, and deep-link** that working set (blast-set members, alert chips, burn window, Explore) without a new LLM completion. Extends the `isShowMeOnly()` / 0-hop Explore seed (`src/utils/grafanaExplore.ts`) onto the pre-flight/verify path. **Not** object mutation: slicing **data** only; cluster writes remain PRD #2 GitOps PR. Visible change: UI affordance to restrict the overlay to e.g. alerting dependents with zero dot-ai POST for that gesture (testable). Serves Design principle 2. | owner north-star 2026-09-03; grafanaExplore `isShowMeOnly`; surface demarcation | owner-idea | OPEN | — |
+| I-106 | Forward view: predicted impact before commit | Before PR create is armed, render an explicit **forward view**: what the change is predicted to touch (graph blast + live risk factors) and whether now is a safe time, as a first-class panel the operator must see. This names pre-cognition as UI, not only as backend join. Visible change: predicted-impact summary + safe-time status appear above Propose; M2 disarm rule binds to this view having rendered (or honest inconclusive). Serves Design principle 3; pairs M1/M2, I-086, I-088, I-091. | owner north-star 2026-09-03; this PRD Solution loop; M2.S2 | owner-idea | OPEN | — |
+| I-107 | Reject single collapsed confidence as primary risk signal | Product rule: a single confidence score, fused probability, or one-colour risk chip must **not** be the primary risk signal on the change path when multiple evidence channels exist. Secondary summary is allowed only if every contributing channel remains visible and dissent is not dropped (see I-104). Explicitly argues against shipping telemetry enrichment as a quieter way to keep one `Risk Assessment` string. Visible change: review checklist / Demo failure if primary control is one number or one badge without channel breakdown; docs state the prohibition. Serves Design principle 4; pairs I-098 without weakening it. | owner north-star 2026-09-03; operate single Risk Assessment anti-pattern; field concurrent-degradation pattern | owner-idea | OPEN | — |
+| I-108 | Eight-plane overlay goal (K8s proving ground) | Track the full multi-plane goal named in §North star: inventory, topology, state, telemetry, logs, alarms, packet captures, netflow/flows as one instrument. Kubernetes is the proving ground where join keys exist; network extension is hypothesis only (**[INFERENCE]**). Visible change: north-star table stays authoritative; milestone freezes that claim "overlay" must name which planes are in-demo vs empty/inconclusive, never pretend topology-graph or Kubeshark panes are live before the estate deploys them; Hubble/netflow may be live while still unwired in-plugin. | owner widened vision 2026-09-03; §North star eight-plane table | owner-idea | OPEN | — |
+| I-109 | Missing planes: topology graph (net-new) + Kubeshark (not deployed); Hubble live | Per **ADR-0020 live-state**: **Hubble is live**; **`grafana-mcp` is live**; the two genuinely missing overlay planes are the **topology graph** (net-new structural store, D3/D8) and **Kubeshark** (tier-3 PCAP, privileged, MOP-gated, not deployed). Do not treat Hubble/netflow as unbuilt. Visible change: overlay reserves honest empty states for graph + Kubeshark; flow/netflow pane may bind to live Hubble when join keys exist; no Kubeshark client or graph database built in this companion — estate/framework owns deploy. Historical PRD #1 M14 tier-3 naming for captures remains a pointer, not a claim this repo implements it. | ADR-0020 live-state + D3/D5/D8; §North star eight-plane table | owner-idea | OPEN | — |
+| I-110 | Correlation join keys as prerequisite for network extension | Before any credible extension of the overlay from Kubernetes to the network, define and enforce **correlation keys** (identity, time, topology) that join inventory ↔ topology ↔ state ↔ telemetry ↔ logs ↔ alarms ↔ captures ↔ flows. Kubernetes supplies namespace/pod/labels/ownerRef/UID/cluster clock nearly free; networks do not. Visible change: a written key model for the K8s proving ground (which fields stitch panes today) and an explicit **blocker** note that network CMDB/L2/L3/IPFIX/syslog joins are out of scope until keys are solved — the join key is the product, not the pane count. **[INFERENCE]** on network generalisation. | owner widened vision 2026-09-03; §North star hard part; multi-plane hypothesis | owner-idea | OPEN | — |
 
 
 
@@ -475,3 +605,9 @@ Append-only; never delete ids; full prose. Moved ids keep original numbers. New 
 - **Issue:** PRD #4 risked reading as a parallel change-safety system. Public Operate Guide already documents an eight-step envelope (intent → … → dry-run → approval → execute → validate), structured output (Current State, Risk Assessment, `opr-` Session ID, `visualizationUrl`, Policies/Patterns), and MCP telemetry augmentation — while the worked example's LOW RISK and step-8 validation remain cluster/operation-scoped, not traffic/alert/burn or metric-recovered.
 - **Action:** Add §Where this attaches (tables of stages + output fields; precise gap mapped to three capabilities; M13 extension point); add §Open architectural question (Reading A engine / Reading B plugin, `[INFERENCE]` split, Viktor decides); retitle/extend §Open questions for Viktor; register **I-098…I-102**; Current State attachment one-liner. No edits outside this file. Anonymisation preserved.
 - **Prompt:** Parent assignment OperateFold — fold operate docs behaviour into PRD #4 only; commit, do not push.
+
+### 2026-09-03 — North star + design principles
+
+- **Issue:** PRD #4 had capabilities and `operate` attachment but no binding link to the estate north star; risk of chat-shaped UX, single collapsed risk verdict, and a competing vision doc. Owner multi-plane overlay framing still required under that framework.
+- **Action:** Rewrite §North star as **Grafana surface of ADR-0020** (cite six capabilities, D3/D6/D8/D5, seven-step map for enrich/validate/decide/record); keep operator multi-plane framing, eight-plane table with **ADR-0020 live-state** (`grafana-mcp`+Hubble **live**; topology graph + Kubeshark **missing**), network hypothesis **[INFERENCE]**, join-key hard part; §Design principles derived from ADR where overlapping (esp. D3 → principle 4); register **I-103…I-110**; amend I-100/I-109 for live-state correction. Film metaphor once. Anonymisation verified.
+- **Prompt:** Parent assignment VisionPrinciples + Main steers (multi-plane, then ADR-0020 citation + live-state correction); commit, do not push.
