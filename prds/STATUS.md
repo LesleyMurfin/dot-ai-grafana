@@ -3,16 +3,16 @@
 Live checkboxes: https://github.com/LesleyMurfin/dot-ai-grafana/issues/24
 
 ```
-PRD #1  v1 0.1.0   vfarcic#3   analysis-only pack
+PRD #1  v1 0.1.0   vfarcic#3 @ 179a7df   analysis-only pack
 PRD #2  GitOps     issue #13 / PR #18
 PRD #3  M7 0.2.x   issue #23 / PR #22
+nits    take-or-leave code             PR #26 (open → feat/upstream-plugin)
 ```
 
-Viktor’s review (the only comment on #3):
-https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595  
-Head we addressed: `179a7df`.
+Viktor’s only #3 comment:
+https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 
-## His merge-blockers — done
+## His merge-blockers — done on #3 @ `179a7df`
 
 | # | Ask | Done |
 |---|---|---|
@@ -23,19 +23,24 @@ Head we addressed: `179a7df`.
 | — | CLAUDE.md RBAC honesty | [x] |
 | — | PRD M6: Cancel + Retry shipped | [x] |
 
-## His record item — still open
+## Take-or-leave + checklist — in [PR #26](https://github.com/LesleyMurfin/dot-ai-grafana/pull/26) (not merged yet)
 
-| Ask | Done |
+| Ask | In #26 |
 |---|---|
-| Original Phase-1 checklist still all `[ ]` and still says Grafana 10.x | [ ] |
+| Original Phase-1 checklist ticked; floor `>=11.0` | [x] |
+| Timeout: 120s **per hop** (up to 3) | [x] |
+| `Promise.all` Grafana DS get + query | [x] |
+| `hop` = current, `hops` = planned cap | [x] |
+| Test connection Admin-only (saved URL too) | [x] |
+| Query allowlist = `intent` only | [x] |
+| Dropped `public-surface-check.sh` | [x] |
+| e2e Save path (`127.0.0.1:3456`) | [x] |
+| Skill YAML frontmatter | [x] |
+| App without extra `Routes` | [x] |
+| `go 1.26.5` kept | [x] CI golangci-lint fails on `go 1.26` / `1.26.0` |
+| GitHub Actions on *his* `main` | [ ] **needs Viktor** |
 
-## Take-or-leave — not done (he said optional)
-
-Timeout “per hop” wording · `Promise.all` DS reads · `hop`≡`hops` · non-Admin Test-connection on saved URL · query denylist vs remediate allowlist · drop `public-surface-check.sh` · appConfig e2e Save path in CI · skill frontmatter / `go 1.26.5` / extra `Routes` · Actions on *his* `main` (needs him)
-
-## New work we built after he reviewed — parked, tracked here
-
-Not in vfarcic#3. Not lost.
+## New work after he reviewed — parked, not in vfarcic#3
 
 | Feature | PRD | Issue | PR |
 |---|---|---|---|
