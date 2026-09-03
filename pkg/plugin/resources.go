@@ -543,18 +543,29 @@ func boolAt(m map[string]any, key string) (bool, bool) {
 }
 
 // handleQuery proxies POST /query → dot-ai /api/v1/tools/query with Bearer auth.
+// Requires Grafana org Editor or Admin (ADR-0001 disposition 2). Viewer and
+// nil/unrecognised users are refused before any upstream dial.
 func (a *App) handleQuery(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isEditorOrAbove(req.Context()) {
+		writeToolProxy(w, http.StatusForbidden, http.StatusForbidden, "", "Editor role required")
 		return
 	}
 	a.proxyDotAI(w, req, "/api/v1/tools/query")
 }
 
 // handleRemediate proxies POST /remediate → analysis-only /api/v1/tools/remediate.
+// Requires Grafana org Editor or Admin (same gate as /query).
 func (a *App) handleRemediate(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !isEditorOrAbove(req.Context()) {
+		writeToolProxy(w, http.StatusForbidden, http.StatusForbidden, "", "Editor role required")
 		return
 	}
 	a.proxyDotAI(w, req, "/api/v1/tools/remediate")
@@ -593,6 +604,22 @@ func isOrgAdmin(ctx context.Context) bool {
 		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(u.Role), "Admin")
+}
+
+// isEditorOrAbove reports whether the Grafana request user may invoke engine
+// tool routes (/query, /remediate). Org Editor and Admin qualify; Viewer,
+// empty, unknown, and nil user fail closed.
+func isEditorOrAbove(ctx context.Context) bool {
+	u := backend.UserFromContext(ctx)
+	if u == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(u.Role)) {
+	case "editor", "admin":
+		return true
+	default:
+		return false
+	}
 }
 
 func asMap(v any) map[string]any {
