@@ -92,9 +92,9 @@ Subtests listed for navigation; the contract count is the 13 top-level funcs.
 
 - renders intent field and submit button
 - can switch tool selection to Remediate (analysis only)
-- submit calls query with Stable+stack Current and a condensed Prior block when history exists
+- submit calls query with Stable+stack Current and no Prior on first turn
 - Query Current includes mocked Grafana stack log lines before callDotAITool
-- follow-up packs Current into intent and includes condensed Prior from recent turns
+- follow-up packs Current and condensed Prior into intent
 - success path renders response summary and Current rewrite
 - ok with empty summary shows fallback text
 - error path shows error message without History rewrite; stack Current may remain

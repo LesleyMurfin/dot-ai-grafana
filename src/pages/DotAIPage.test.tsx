@@ -76,7 +76,7 @@ describe('Pages/DotAIPage', () => {
     expect(screen.getByRole('button', { name: /analyze$/i })).toBeInTheDocument();
   });
 
-  test('submit calls query with Stable+stack Current and History is not in POST body', async () => {
+  test('submit calls query with Stable+stack Current and no Prior on first turn', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
@@ -111,6 +111,7 @@ describe('Pages/DotAIPage', () => {
     expect(packed).toContain('show failing pods');
     expect(packed).toContain('Loki last 15m');
     expect(packed).not.toMatch(/\bHistory\b/i);
+    expect(packed).not.toMatch(/^Prior:/m);
     expect(JSON.stringify(mockCallDotAITool.mock.calls[0])).not.toMatch(/\bHistory\b/i);
     const hop2 = mockCallDotAITool.mock.calls[1][1];
     expect(hop2).toContain('Loki last 15m');
@@ -159,7 +160,7 @@ describe('Pages/DotAIPage', () => {
   });
 
 
-  test('follow-up packs Current into intent and still omits History from body', async () => {
+  test('follow-up packs Current and condensed Prior into intent', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
@@ -189,11 +190,13 @@ describe('Pages/DotAIPage', () => {
 
     const secondPacked = mockCallDotAITool.mock.calls[1][1];
     expect(secondPacked).toContain('Current:');
-    // Each Query turn packs fresh Grafana stack Current (not History).
+    // Each Query turn packs fresh Grafana stack Current plus condensed Prior from recent turns.
     expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('why is pod checkout-api restarting in namespace prod?');
+    expect(secondPacked).toMatch(/^Prior:/m);
+    expect(secondPacked).toContain('status of pod checkout-api');
     expect(secondPacked).not.toMatch(/\bHistory\b/i);
-    // On-screen history still present but not in body
+    // Full History remains on screen; only condensed Prior leaves the browser.
     expect(screen.getByTestId(testIds.dotai.history)).toBeInTheDocument();
     expect(currentText.length).toBeGreaterThan(0);
     expect(mockFetchStackContext).toHaveBeenCalledTimes(2);
