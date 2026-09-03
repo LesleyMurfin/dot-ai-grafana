@@ -1,10 +1,11 @@
-import React, { FormEvent, useMemo, useState } from 'react';
+import React, { FormEvent, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { PluginPage } from '@grafana/runtime';
 import {
   Alert,
   Button,
+  Collapse,
   Field,
   Select,
   Spinner,
@@ -12,9 +13,12 @@ import {
   useStyles2,
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
-import { ASK_TIMEOUT_MESSAGE, DotAITool } from '../utils/dotaiApi';
+import { ResponseMarkdown } from '../components/ResponseMarkdown';
+import { DotAITool } from '../utils/dotaiApi';
+import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
+
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -23,13 +27,21 @@ const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
 
 type Threads = Record<DotAITool, ToolThread>;
 
-function DotAIPage() {
+type DotAIPageProps = {
+  showContext?: boolean;
+  sendGrafanaEvidence?: boolean;
+};
+
+function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPageProps) {
   const styles = useStyles2(getStyles);
+  const abortRef = useRef<AbortController | null>(null);
   const [tool, setTool] = useState<DotAITool>('query');
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
   const [responseText, setResponseText] = useState('');
+  const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
+
   const [threads, setThreads] = useState<Threads>({
     query: emptyThread(),
     remediate: emptyThread(),
@@ -44,32 +56,33 @@ function DotAIPage() {
     return 'Ask about cluster resources (e.g. show failing pods in production)';
   }, [tool]);
 
-  const onSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = intent.trim();
-    if (!trimmed || loading) {
+  const runAsk = async (trimmed: string) => {
+    if (!trimmed) {
       return;
     }
-
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     const thread = threads[tool];
     setLoading(true);
     setError(undefined);
     setResponseText('');
-
     try {
-      // M4: first-hop + loop (cap 3) via runAskOrchestrator. History never packed.
-      // Observability → Grafana Current first; inventory → dot-ai first. Answer FROM Current.
       const result = await runAskOrchestrator({
         tool,
         question: trimmed,
         thread,
+        signal: ac.signal,
+        skipStack: !sendGrafanaEvidence,
       });
-
+      if (ac.signal.aborted) {
+        setError(ASK_CANCELLED_MESSAGE);
+        return;
+      }
       setThreads((prev) => ({
         ...prev,
         [tool]: result.thread,
       }));
-
       if (result.ok) {
         setResponseText(result.summary);
         setIntent('');
@@ -79,9 +92,34 @@ function DotAIPage() {
           setResponseText(result.summary);
         }
       }
+    } catch (e) {
+      if (ac.signal.aborted) {
+        setError(ASK_CANCELLED_MESSAGE);
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Request failed');
     } finally {
+      if (abortRef.current === ac) {
+        abortRef.current = null;
+      }
       setLoading(false);
     }
+  };
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (loading) {
+      return;
+    }
+    await runAsk(intent.trim());
+  };
+
+  const onCancel = () => {
+    abortRef.current?.abort();
+  };
+
+  const onRetry = () => {
+    void runAsk(intent.trim());
   };
 
   const onClearThread = () => {
@@ -128,22 +166,38 @@ function DotAIPage() {
   return (
     <PluginPage>
       <div className={styles.wrap} data-testid={testIds.dotai.container}>
+        {sendGrafanaEvidence && (
+          <Alert
+            title="Grafana evidence"
+            severity="info"
+            data-testid={testIds.dotai.consent}
+          >
+            Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.
+          </Alert>
+        )}
+        {tool === 'remediate' && (
+          <Alert title="Analysis only" severity="info">
+            Remediate never executes changes. For operate/execute, use the Headlamp plugin.
+          </Alert>
+        )}
         <form onSubmit={onSubmit} className={styles.form}>
           <Field label="Tool" description="Query cluster resources or request analysis-only remediation guidance.">
-            <Select
-              options={TOOL_OPTIONS}
-              value={TOOL_OPTIONS.find((o) => o.value === tool)}
-              onChange={(v) => {
-                if (loading) {
-                  return;
-                }
-                setTool((v.value as DotAITool) || 'query');
-                setResponseText('');
-                setError(undefined);
-              }}
-              inputId="dotai-tool"
-              disabled={loading}
-            />
+            <div data-testid={testIds.dotai.tool}>
+              <Select
+                options={TOOL_OPTIONS}
+                value={TOOL_OPTIONS.find((o) => o.value === tool)}
+                onChange={(v) => {
+                  if (loading) {
+                    return;
+                  }
+                  setTool((v.value as DotAITool) || 'query');
+                  setResponseText('');
+                  setError(undefined);
+                }}
+                inputId="dotai-tool"
+                disabled={loading}
+              />
+            </div>
           </Field>
 
           <Field
@@ -169,6 +223,11 @@ function DotAIPage() {
             <Button type="submit" data-testid={testIds.dotai.submit} disabled={loading || !intent.trim()}>
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
             </Button>
+            {loading && (
+              <Button type="button" variant="secondary" data-testid={testIds.dotai.cancel} onClick={onCancel}>
+                Cancel
+              </Button>
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -199,31 +258,62 @@ function DotAIPage() {
         </form>
 
         {error && (
-          <Alert
-            title={error === ASK_TIMEOUT_MESSAGE ? 'Ask timed out' : 'Request failed'}
-            severity="error"
-            data-testid={testIds.dotai.error}
-            className={styles.block}
-          >
+          <Alert title={askErrorTitle(error)} severity="error" data-testid={testIds.dotai.error} className={styles.block}>
             {error}
+            {error !== ASK_CANCELLED_MESSAGE && (
+              <div className={styles.actions}>
+                <Button type="button" data-testid={testIds.dotai.retry} onClick={onRetry} disabled={loading || !intent.trim()}>
+                  Retry
+                </Button>
+              </div>
+            )}
           </Alert>
         )}
 
-        {activeThread.current && (
-          <div className={styles.context} data-testid={testIds.dotai.current}>
-            <h3 className={styles.responseTitle}>Current</h3>
-            <pre className={styles.pre}>{activeThread.current}</pre>
+        {responseText && (
+          <div className={styles.response} data-testid={testIds.dotai.response}>
+            <h3 className={styles.responseTitle}>Answer</h3>
+            <ResponseMarkdown text={responseText} />
           </div>
         )}
 
-        {activeThread.map && (
+        {showContext && (activeThread.map || (activeThread.drilldowns && activeThread.drilldowns.length > 0)) && (
           <div className={styles.context} data-testid={testIds.dotai.map}>
             <h3 className={styles.responseTitle}>Map</h3>
-            <pre className={styles.pre}>{activeThread.map}</pre>
+            {activeThread.drilldowns && activeThread.drilldowns.length > 0 && (
+              <div className={styles.drilldowns} data-testid={testIds.dotai.drilldown}>
+                {activeThread.drilldowns.map((link) => (
+                  <a
+                    key={link.id}
+                    className={styles.drilldownLink}
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            )}
+            {activeThread.map && <pre className={styles.pre}>{activeThread.map}</pre>}
           </div>
         )}
 
-        {activeThread.history.length > 0 && (
+        {showContext && activeThread.current && (
+          <div className={styles.context} data-testid={testIds.dotai.current}>
+            <Collapse
+              label="Current (Grafana evidence)"
+              collapsible={true}
+              isOpen={currentOpen}
+              onToggle={() => setCurrentOpen(!currentOpen)}
+            >
+              <pre className={styles.pre}>{activeThread.current}</pre>
+            </Collapse>
+
+          </div>
+        )}
+
+        {showContext && activeThread.history.length > 0 && (
           <div className={styles.history} data-testid={testIds.dotai.history}>
             <h3 className={styles.responseTitle}>History</h3>
             <ul className={styles.historyList}>
@@ -236,12 +326,6 @@ function DotAIPage() {
           </div>
         )}
 
-        {responseText && (
-          <div className={styles.response} data-testid={testIds.dotai.response}>
-            <h3 className={styles.responseTitle}>Response</h3>
-            <pre className={styles.pre}>{responseText}</pre>
-          </div>
-        )}
       </div>
     </PluginPage>
   );
@@ -305,6 +389,15 @@ const getStyles = (theme: GrafanaTheme2) => ({
   responseTitle: css`
     margin: 0 0 ${theme.spacing(1)} 0;
     font-size: ${theme.typography.h5.fontSize};
+  `,
+  drilldowns: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${theme.spacing(1)};
+    margin-bottom: ${theme.spacing(1)};
+  `,
+  drilldownLink: css`
+    color: ${theme.colors.text.link};
   `,
   pre: css`
     margin: 0;

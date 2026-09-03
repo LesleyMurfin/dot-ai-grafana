@@ -31,7 +31,9 @@ const emptyStack = {
   tempoLines: [] as string[],
   alertLines: [] as string[],
   currentEmpty: false,
+  drilldowns: [] as Array<{ id: string; label: string; href: string }>,
 };
+
 
 
 async function selectTool(label: string) {
@@ -103,7 +105,8 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool).toHaveBeenCalledWith(
       'query',
       expectedHop1,
-      expect.objectContaining({ first_hop: 'grafana', hop: 1 })
+      expect.objectContaining({ first_hop: 'grafana', hop: 1 }),
+      expect.any(AbortSignal)
     );
     const packed = mockCallDotAITool.mock.calls[0][1];
     expect(packed).toContain(stablePreamble('query'));
@@ -209,11 +212,12 @@ describe('Pages/DotAIPage', () => {
     render(<DotAIPage />);
     typeIntent('how is the cluster?');
     clickSubmit();
-
     expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/What's true now/i);
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('You');
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('cluster looks healthy');
+
     expect(screen.queryByTestId(testIds.dotai.error)).not.toBeInTheDocument();
   });
 
@@ -249,8 +253,10 @@ describe('Pages/DotAIPage', () => {
     clickSubmit();
 
     expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('llm unavailable');
-    // Grafana stack Current is set before callDotAITool; History only on success.
+    expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
+
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
   });
 
@@ -272,6 +278,52 @@ describe('Pages/DotAIPage', () => {
     expect(alert).toHaveTextContent('Ask timed out');
   });
 
+  test('HTTP 401 copy uses Authentication failed title and Retry', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: false,
+      status: 502,
+      summary: '',
+      raw: {},
+      errorMessage: 'HTTP 401: UNAUTHORIZED',
+    });
+    render(<DotAIPage />);
+    typeIntent('list pods');
+    clickSubmit();
+    const alert = await screen.findByTestId(testIds.dotai.error);
+    expect(alert).toHaveTextContent('Authentication failed');
+    expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
+  });
+
+  test('Cancel aborts an in-flight Ask', async () => {
+    mockCallDotAITool.mockImplementation((_tool, _text, _meta, signal?: AbortSignal) => {
+      let reject!: (reason?: unknown) => void;
+      const promise = new Promise<{
+        ok: boolean;
+        status: number;
+        summary: string;
+        raw: unknown;
+        errorMessage?: string;
+      }>((_resolve, r) => {
+        reject = r;
+      });
+      const fail = () => {
+        const err = new Error('Ask cancelled.');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      if (signal?.aborted) {
+        fail();
+      } else {
+        signal?.addEventListener('abort', fail);
+      }
+      return promise;
+    });
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+    fireEvent.click(await screen.findByTestId(testIds.dotai.cancel));
+    expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('Ask cancelled');
+  });
 
   test('loading state shows spinner and disables double-submit', async () => {
     let resolve!: (value: {
@@ -432,7 +484,12 @@ describe('Pages/DotAIPage', () => {
       map: '',
       box: 'checkout-api CrashLooping',
     });
-    expect(mockCallDotAITool).toHaveBeenCalledWith('remediate', expected, expect.objectContaining({ first_hop: 'dot-ai', hops: 1 }));
+    expect(mockCallDotAITool).toHaveBeenCalledWith(
+      'remediate',
+      expected,
+      expect.objectContaining({ first_hop: 'dot-ai', hops: 1 }),
+      expect.any(AbortSignal)
+    );
     const [toolArg, issueText] = mockCallDotAITool.mock.calls[0];
     expect(toolArg).toBe('remediate');
     expect(issueText).toContain('checkout-api CrashLooping');
@@ -501,5 +558,95 @@ describe('Pages/DotAIPage', () => {
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
     expect(screen.queryByTestId(testIds.dotai.current)).not.toBeInTheDocument();
     expect(screen.queryByTestId(testIds.dotai.response)).not.toBeInTheDocument();
+  });
+
+  test('showContext on (default) displays Current after a packed Ask', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    expect(screen.getByTestId(testIds.dotai.current)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.dotai.history)).toBeInTheDocument();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('Loki last 15m');
+  });
+
+  test('showContext off hides Current/Map/History but still packs intent', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage showContext={false} />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    expect(screen.queryByTestId(testIds.dotai.current)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.map)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
+    expect(mockCallDotAITool).toHaveBeenCalled();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('Loki last 15m');
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
+  });
+
+  test('sendGrafanaEvidence false hides consent and skips stack fetch', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: '3 pods failing',
+      raw: {},
+    });
+
+    render(<DotAIPage sendGrafanaEvidence={false} />);
+    expect(screen.queryByTestId(testIds.dotai.consent)).not.toBeInTheDocument();
+
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalled();
+    });
+    expect(mockFetchStackContext).not.toHaveBeenCalled();
+    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
+  });
+
+  test('sendGrafanaEvidence default shows consent banner', () => {
+    render(<DotAIPage />);
+    expect(screen.getByTestId(testIds.dotai.consent)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(
+      'Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.'
+    );
+  });
+
+  test('show me the logs skips POST and renders Explore link', async () => {
+    mockFetchStackContext.mockResolvedValue({
+      ...emptyStack,
+      current: 'Loki last 15m:\nboom',
+      mapHint: 'Loki Loki',
+      logLines: ['boom'],
+      drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?panes=x' }],
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show me the logs');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.drilldown)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Explore logs' });
+    expect(link).toHaveAttribute('href', '/explore?panes=x');
+    expect(mockCallDotAITool).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
+    expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
+
   });
 });
