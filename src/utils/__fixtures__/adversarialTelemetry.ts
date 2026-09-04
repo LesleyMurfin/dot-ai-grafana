@@ -8,7 +8,7 @@
  * is attacker-writable *and* accident-prone (a stack trace legitimately containing HTML), so
  * model output derived from it must render inert.
  *
- * Background, entry points, impact classes I1-I6 and controls S1-S4/P1-P2/C1-C2/R1-R2/G1-G2:
+ * Background, entry points, impact classes I1-I11 and controls S1-S4/P1-P2/C1-C2/R1-R2/G1-G2:
  * `prds/1-grafana-ai-cluster-intelligence.md` -> "Expansion: Untrusted telemetry trust boundary".
  *
  * Sink host is always the reserved `example.invalid` (RFC 2606) — never a resolvable domain, and
