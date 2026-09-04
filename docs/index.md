@@ -66,10 +66,10 @@ GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app
 
 **From a release**
 
-1. Download the `devopstoolkit-dotai-app-<version>.zip` from the [latest release](https://github.com/vfarcic/dot-ai-grafana/releases).
+1. Take `devopstoolkit-dotai-app-<version>.zip` from the [latest release](https://github.com/vfarcic/dot-ai-grafana/releases).
 2. Verify it against the published `.sha256`.
 3. Unzip it into Grafana's plugin directory.
-4. Set `GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app` and restart Grafana.
+4. Set the env var above and restart Grafana.
 
 **From source**
 
