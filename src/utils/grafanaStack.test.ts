@@ -286,8 +286,10 @@ describe('fetchStackContext', () => {
       box: question,
     });
     expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-    // Loki lines are peeled from the end, so the 8th line is the marginal one: the 65
-    // chars the placeholder used to spend are exactly what it costs.
+    // The contract is how much evidence reaches the model at a full Current, not whether
+    // a particular header is absent: Loki lines are peeled from the end, so line 07 is
+    // the marginal one and the 65 chars the placeholder used to spend are what it cost.
+    expect((packed.match(/k8s error line/g) ?? []).length).toBeGreaterThanOrEqual(8);
     expect(packed).toContain(lokiDump[7]);
     expect(packed).toContain('Question:');
     expect(packed).toContain(question);
