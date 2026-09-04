@@ -1,3 +1,4 @@
+import { config } from '@grafana/runtime';
 import {
   buildDrilldownLinks,
   dashboardUrl,
@@ -71,6 +72,20 @@ describe('isShowMeOnly', () => {
       isShowMeOnly('show me the logs for the top issue we need to address in our environment')
     ).toBe(false);
   });
+
+  test('clause: collapse internal whitespace — "show  me   the  logs"', () => {
+    expect(isShowMeOnly('show  me   the  logs')).toBe(true);
+    expect(isShowMeOnly('  open\tthe   traces  ')).toBe(true);
+    expect(isShowMeOnly('display\nthe\nmetrics')).toBe(true);
+  });
+
+  test('clause: strip surrounding ? and ! — "show me the logs?" / "open alerts!"', () => {
+    expect(isShowMeOnly('show me the logs?')).toBe(true);
+    expect(isShowMeOnly('open alerts!')).toBe(true);
+    expect(isShowMeOnly('Display The Dashboards?!')).toBe(true);
+    // Interior punctuation is not stripped, so this is not the complete phrase.
+    expect(isShowMeOnly('show me the logs? and metrics')).toBe(false);
+  });
 });
 
 describe('exploreUrl / dashboardUrl', () => {
@@ -89,6 +104,44 @@ describe('exploreUrl / dashboardUrl', () => {
 
   test('dashboard is /d/uid', () => {
     expect(dashboardUrl('abc12def')).toBe('/d/abc12def');
+  });
+
+  test('appSubUrl prefix is kept on Explore and dashboard URLs', () => {
+    const original = config.appSubUrl;
+    config.appSubUrl = '/grafana';
+    try {
+      const href = exploreUrl({
+        uid: 'loki-1',
+        type: 'loki',
+        query: { expr: '{namespace="prod"}', queryType: 'range' },
+      });
+      expect(href.startsWith('/grafana/explore?')).toBe(true);
+      expect(dashboardUrl('abc12def')).toBe('/grafana/d/abc12def');
+
+      const links = buildDrilldownLinks({
+        lokiUid: 'loki-1',
+        promUid: 'prom-1',
+        logql: '{namespace="prod"}',
+        promql: 'up',
+        tempoSearch: '',
+        traceIds: [],
+        dashboardUids: ['dashuid1'],
+      });
+      expect(links.find((l) => l.id === 'explore-logs')?.href.startsWith('/grafana/explore?')).toBe(true);
+      expect(links.find((l) => l.id === 'dash-dashuid1')?.href).toBe('/grafana/d/dashuid1');
+    } finally {
+      config.appSubUrl = original;
+    }
+  });
+
+  test('trailing slash on appSubUrl is not doubled', () => {
+    const original = config.appSubUrl;
+    config.appSubUrl = '/grafana/';
+    try {
+      expect(dashboardUrl('abc12def')).toBe('/grafana/d/abc12def');
+    } finally {
+      config.appSubUrl = original;
+    }
   });
 });
 
