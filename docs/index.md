@@ -12,15 +12,21 @@ sidebar_position: 1
 
 The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin brings AI-powered cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of the pair: Grafana owns **query** and **analysis-only remediate**; the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp) owns operate / execute.
 
-The Grafana plugin backend talks to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API over `Authorization: Bearer` (not the Headlamp `X-Dot-AI-Authorization` Kubernetes-proxy header). The Auth Token is one shared engine credential stored in Grafana encrypted settings. **Grafana org Editor or Admin** may invoke Query and Remediate; **Admin** configures the plugin and runs Test connection. Scope the token analysis-only (no apply).
+The plugin follows **Grafana's own user authentication and authorization model**: operators sign in to Grafana as usual, and the plugin authorizes them by their Grafana **org role**. **Editor or above** runs Query and Remediate; **Admin** configures the plugin and runs Test connection. There is no separate plugin login, user directory, or per-user credential. The Auth Token is the plugin backend credential to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API — stored in Grafana encrypted settings and sent as `Authorization: Bearer` (not the Headlamp `X-Dot-AI-Authorization` Kubernetes-proxy header). Use an analysis-only token with no apply rights.
+
+Open the app from Grafana's left navigation as **dot-ai** (`/a/devopstoolkit-dotai-app/`). Admins reach **Configuration** from the same nav entry or **Administration → Plugins → dot-ai**.
 
 ## Features
 
 ### Query
 
-Ask natural language questions about your cluster. Responses are text summaries.
+Ask natural language questions about your cluster. Answers render as Grafana-sanitized GitHub-flavored markdown (headings, lists, code, tables, links) — not plain monospaced text.
 
 On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources via Grafana's datasource service (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. The on-screen **History** panel keeps the last 5 turns in full for display. A condensed **Prior:** block (referents over prose, soft-capped around 240 characters) is packed into that intent when the 1000-character budget still has room after Stable/Current/Map/Question; under pressure the packer sheds Map first, then shrinks Prior, then may drop Prior entirely before the hard cap — so Prior is not guaranteed on a busy cluster. There is no chat `sessionId`. One Ask may issue up to 3 dot-ai POSTs (for example an unscoped question or an answer that conflicts with Current).
+
+**Map** holds UI-only navigation links built from the same stack read: Explore panes for logs, metrics, and traces (pre-filled query + last-15m range); optional Logs / Metrics / Traces Drilldown app links when those apps are installed; and up to five dashboard links taken from firing-alert `dashboardUid` fields (no Grafana `/api/search`). Links open in a new tab. **Current (Grafana evidence)** is a collapsible panel. Dashboard UIDs also appear in the packed Current text when present on alert frames.
+
+**Show-me navigation.** Complete phrases such as `show me the logs`, `open metrics`, or `display the dashboards` load Grafana evidence and Map links only — zero dot-ai hops. Diagnosis tokens (`why`, `error`, `crash`, `failing`, `analyze`, `remediate`, and related) keep the normal engine path.
 
 While an Ask is in flight, **Cancel** aborts it. Failures show an error Alert with distinct titles (timed out, authentication failed, permission denied, not found, unreachable, cancelled); **Retry** re-runs the same intent text. When **Send Grafana evidence** is on, an info Alert notes that datasource facts go to your configured dot-ai server.
 
@@ -28,7 +34,7 @@ While an Ask is in flight, **Cancel** aborts it. Failures show an error Alert wi
 
 ### Remediate (analysis only)
 
-Get AI-powered issue analysis. Remediate is one hop and reuses Query Current. Request bodies are allowlisted to analysis-only fields (`issue` / `intent`). There is no execute, apply, or mutation UI. An **Analysis only** info banner states that Remediate never executes changes (use the Headlamp plugin for operate/execute). Cancel, Retry, and the same error titles apply as on Query.
+Get AI-powered issue analysis. Remediate is one hop and reuses Query Current. Request bodies are allowlisted to analysis-only fields (`issue` / `intent`). There is no execute, apply, or mutation UI. An **Analysis only** info banner states that Remediate never executes changes (use the Headlamp plugin for operate/execute). Cancel, Retry, and the same error titles apply as on Query. Answers use the same markdown rendering as Query.
 
 [Remediate tool documentation](https://devopstoolkit.ai/docs/ai-engine/tools/remediate)
 
@@ -68,18 +74,18 @@ Copy `dist/` into Grafana's plugin directory as `devopstoolkit-dotai-app`, set t
 
 ### Configure
 
-As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
+As Grafana Admin: open **dot-ai → Configuration** in the left nav, or **Administration → Plugins → dot-ai → Configuration**.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | MCP Server URL | _(empty)_ | Absolute `http(s)` base for the dot-ai tools REST API. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. Do not point this at agentgateway or Context Forge — only the dot-ai tools REST base. |
-| Auth Token | _(empty)_ | Shared Bearer credential stored in Grafana encrypted settings (`Authorization: Bearer`). Outbound Query and Remediate use this single engine token; **Editor or Admin** may invoke those routes (403 before any upstream dial for Viewer/empty/unknown). Scope the token to analysis-only (no apply). |
+| Auth Token | _(empty)_ | Plugin backend credential to the dot-ai engine, stored in Grafana encrypted settings and sent as `Authorization: Bearer`. Use an analysis-only token with no apply rights. |
 | Debug Log | Off | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. |
-| Show context | On | Show Current, Map, and History on the page. Display toggle only; independent of Send Grafana evidence. Intent packing (Current/Map/Prior) still runs when this is off. |
+| Show context | On | Show Current, Map (including Explore / Drilldown / dashboard links), and History on the page. Display toggle only; independent of Send Grafana evidence. Intent packing (Current/Map/Prior) still runs when this is off. |
 | Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts and the page shows a consent info Alert. Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Admin-only. Probes `POST /api/v1/tools/version` through the plugin backend |
 
-**Access model.** Grafana **Admin** opens **Administration → Plugins → dot-ai → Configuration** and runs **Test connection**. **Editor or above** may call Query and Remediate; the backend refuses other roles with 403 before dialing the engine. The Auth Token remains one shared credential for the plugin instance — role gates who may use it, not which per-user token is sent.
+**Authentication and authorization.** The plugin uses Grafana's signed-in user and org role. **Editor or Admin** runs Query and Remediate. **Admin** opens Configuration and runs **Test connection**. The Auth Token is the plugin's engine credential only (encrypted settings, `Authorization: Bearer`); scope it analysis-only with no apply rights.
 
 ## How It Works
 
@@ -87,15 +93,17 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
   Ask ── Remediate: pack Query Current + issue ── 1x POST /remediate
     │
     └── Query
-          Read Loki/Prom/Tempo/AM  →  Current + Map + condensed Prior (budget-dependent)
+          Read Loki/Prom/Tempo/AM  →  Current + Map links + condensed Prior (budget-dependent)
           classifyFirstHop:
             alerts/logs/metrics/traces/"top issues"/default → grafana
             list/show namespaces|pods|…                   → dot-ai
+          grafana path + pure show-me phrase → 0 hops (Map links only; no POST)
           hop 1: POST /query  intent=Stable+Current+Prior?+Map+question
           hop 2: unscoped → across   OR   answer denies Current → conflict
           hop 3: still hedges → hedge     (cap 3)
           Go strips hop meta, writes ask log, Bearer to dot-ai
           dot-ai query toolLoop (kubectl/MCP) returns summary
+          Answer renders as sanitized markdown; Map holds Explore/Drilldown/dashboard links
 ```
 
 ```text
@@ -106,7 +114,7 @@ Browser
                     (/api/v1/tools/query, /remediate, /version)
 ```
 
-Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). Auth for this Grafana path is `Authorization: Bearer` (not `X-Dot-AI-Authorization`, which is the Headlamp Kubernetes API proxy header).
+Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). Outbound engine auth on this path is `Authorization: Bearer` (not `X-Dot-AI-Authorization`, which is the Headlamp Kubernetes API proxy header).
 
 Query and remediate calls use a **120s** ceiling; version/health probes use **15s**. That is shorter than Headlamp's long AI tool window because Grafana does not expose an equivalent long-poll proxy. The plugin does **not** implement async `202` + job poll; if a call hits 120s, retry or narrow the question.
 
