@@ -73,11 +73,13 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | MCP Server URL | _(empty)_ | Absolute `http(s)` base for the dot-ai tools REST API. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. Do not point this at agentgateway or Context Forge — only the dot-ai tools REST base. |
-| Auth Token | _(empty)_ | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`). Use a no-apply token — analysis only. |
+| Auth Token | _(empty)_ | Shared Bearer credential stored in Grafana encrypted settings (`Authorization: Bearer`). Every Grafana user who can open the plugin can invoke Query and Remediate with it — scope the token to analysis-only (no apply). |
 | Debug Log | Off | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. |
 | Show context | On | Show Current, Map, and History on the page. Display-only; independent of Send Grafana evidence. Packing still runs when this is off. |
 | Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts and the page shows a consent info Alert. Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Probes `POST /api/v1/tools/version` through the plugin backend |
+
+The Auth Token is one shared credential for the whole plugin: Query and Remediate resource routes do not check Grafana org role beyond app access, so anyone who can open the page uses that token outbound.
 
 ## How It Works
 
