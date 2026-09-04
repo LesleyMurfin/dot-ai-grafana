@@ -194,12 +194,15 @@ the `Current:` block → and only if the preamble plus the question alone overfl
 cap of the question. The question is reserved before evidence is packed and the packed string
 is never blind-capped, so growing datasource output cannot delete what you asked.
 
-**Prior outranks fresh evidence.** Because `Prior:` is dropped only after log, metric and alert
-lines have been peeled, keeping a follow-up resolvable costs live evidence. Measured on a
-stack Current at real caps (30 Loki lines, 8 Prometheus series, no alerts) with a three-turn
-history: the Prior-carrying pack retained **0** Loki lines where the identical no-history pack
-retained 3. On a busy shape (alerts firing at `ALERT_CAP`) Prior still survives and the pack
-keeps 5 of 8 alert lines and no Loki or Prometheus lines.
+**Prior outranks fresh evidence, but never wastes it.** Because `Prior:` is dropped only after
+log, metric and alert lines have been peeled, keeping a follow-up resolvable costs live
+evidence. Measured on a stack Current at real caps (30 Loki lines, 8 Prometheus series, no
+alerts) with a three-turn history: the Prior-carrying pack retained **0** Loki lines where the
+identical no-history pack retained 3. On a busy shape (alerts firing at `ALERT_CAP`) Prior
+still survives and the pack keeps 5 of 8 alert lines and no Loki or Prometheus lines. When
+`Prior:` is dropped, the evidence reduction restarts from the untouched `Current`, so a pack
+that ends up without `Prior:` carries exactly the evidence it would have carried with no
+history at all — evidence is never spent on a block that does not ship.
 
 ## Timeouts
 
@@ -228,7 +231,7 @@ Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). A
 
 The published OpenAPI document for dot-ai includes execute/operate/recommend. This plugin does **not** generate a client from that full schema — that would pull mutation tools into an analysis-only Grafana app. Outbound HTTP uses the Grafana plugin SDK `httpclient` for the three read paths above.
 
-**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into the same `{intent}` / `{issue}` string, plus a condensed **Prior:** block from recent turns (≤ `MAX_PRIOR_CHARS` = 240 chars inside the 1000-char intent budget; shed under pressure before the hard cap). Full History stays on screen. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
+**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into the same `{intent}` / `{issue}` string, plus a condensed **Prior:** block from the 2 most recent turns (≤ `MAX_PRIOR_CHARS` = 240 chars inside the 1000-char intent budget; shed only after Tempo, log, metric and alert lines have been peeled — see [Data egress](#data-egress)). Full History stays on screen. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
 
 ## Ask log (troubleshooting)
 
