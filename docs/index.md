@@ -22,11 +22,13 @@ Ask natural language questions about your cluster. Responses are text summaries.
 
 On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources via Grafana's datasource service (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** is display-only (last 5 turns) and is never POSTed. There is no chat `sessionId`. One Ask may issue up to 3 dot-ai POSTs (for example an unscoped question or an answer that conflicts with Current).
 
+While an Ask is in flight, **Cancel** aborts it. Failures show an error Alert with distinct titles (timed out, authentication failed, permission denied, not found, unreachable, cancelled); **Retry** re-runs the same intent text. When **Send Grafana evidence** is on, an info Alert notes that datasource facts go to your configured dot-ai server.
+
 [Query tool documentation](https://devopstoolkit.ai/docs/ai-engine/tools/query)
 
 ### Remediate (analysis only)
 
-Get AI-powered issue analysis. Remediate is one hop and reuses Query Current. Request bodies are allowlisted to analysis-only fields (`issue` / `intent`). There is no execute, apply, or mutation UI.
+Get AI-powered issue analysis. Remediate is one hop and reuses Query Current. Request bodies are allowlisted to analysis-only fields (`issue` / `intent`). There is no execute, apply, or mutation UI. An **Analysis only** info banner states that Remediate never executes changes (use the Headlamp plugin for operate/execute). Cancel, Retry, and the same error titles apply as on Query.
 
 [Remediate tool documentation](https://devopstoolkit.ai/docs/ai-engine/tools/remediate)
 
@@ -74,7 +76,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | Auth Token | _(empty)_ | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`). Use a no-apply token — analysis only. |
 | Debug Log | Off | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. |
 | Show context | On | Show Current, Map, and History on the page. Display-only; independent of Send Grafana evidence. Packing still runs when this is off. |
-| Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts. Missing/undefined = send. Independent of Show context. |
+| Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts and the page shows a consent info Alert. Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Probes `POST /api/v1/tools/version` through the plugin backend |
 
 ## How It Works
