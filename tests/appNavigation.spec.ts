@@ -160,4 +160,61 @@ test.describe('dot-ai app navigation', () => {
     await expect(loading.or(error).or(response).first()).toBeVisible({ timeout: 10_000 });
     await expect(error).toBeVisible({ timeout: 10_000 });
   });
+
+  // B2a end-to-end: with "Send Grafana evidence" off the plugin never reads a datasource, so a
+  // show-me navigation Ask has nothing to point at. It must say so — not report success with an
+  // empty Current and Map links that were never built.
+  test('Send Grafana evidence off: a show-me Ask reports failure, not an empty success', async ({ gotoPage, page }) => {
+    const settingsUrl = `/api/plugins/${pluginId}/settings`;
+    const before = await page.request.get(settingsUrl);
+    if (before.status() === 403) {
+      test.skip(true, 'settings API forbidden — not admin in this fixture');
+      return;
+    }
+    expect(before.ok()).toBeTruthy();
+    const meta = await before.json();
+    const jsonData = (meta.jsonData ?? {}) as Record<string, unknown>;
+    const envelope = { enabled: meta.enabled !== false, pinned: Boolean(meta.pinned) };
+
+    // Any dot-ai POST here would mean the engine was consulted for a navigation-only Ask.
+    let toolCalls = 0;
+    await page.route(toolResourceUrl('query'), async (route) => {
+      toolCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, status: 200, summary: 'e2e-mock: must not be reached', error: '' }),
+      });
+    });
+
+    await page.request.post(settingsUrl, {
+      data: { ...envelope, jsonData: { ...jsonData, sendGrafanaEvidence: false } },
+    });
+
+    try {
+      await gotoPage('/');
+      // Toggle took effect: the evidence-consent banner is gone.
+      await expect(page.getByTestId(testIds.dotai.container)).toBeVisible();
+      await expect(page.getByTestId(testIds.dotai.consent)).toHaveCount(0);
+
+      const intent = page.getByTestId(testIds.dotai.intent);
+      const submit = page.getByTestId(testIds.dotai.submit);
+      await intent.fill('show me the logs');
+      await expect(submit).toBeEnabled();
+      await submit.click();
+
+      const error = page.getByTestId(testIds.dotai.error);
+      await expect(error).toBeVisible({ timeout: 10_000 });
+      await expect(error).toContainText(/Send Grafana evidence/i);
+
+      // No success surface: no answer, no Map links, no Current.
+      await expect(page.getByTestId(testIds.dotai.response)).toHaveCount(0);
+      await expect(page.getByTestId(testIds.dotai.drilldown)).toHaveCount(0);
+      await expect(page.getByTestId(testIds.dotai.current)).toHaveCount(0);
+      expect(toolCalls).toBe(0);
+    } finally {
+      // Restore the operator's setting for every other spec in the run.
+      await page.request.post(settingsUrl, { data: { ...envelope, jsonData } });
+    }
+  });
 });

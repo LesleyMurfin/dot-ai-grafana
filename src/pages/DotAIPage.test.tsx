@@ -118,7 +118,7 @@ describe('Pages/DotAIPage', () => {
     expect(hop2).toContain('Loki last 15m');
     expect(hop2).toMatch(/across ALL clusters/i);
     expect(mockCallDotAITool.mock.calls[1][2]).toEqual(
-      expect.objectContaining({ hop: 2, hops: 2, first_hop: 'grafana' })
+      expect.objectContaining({ hop: 2, hops: 3, first_hop: 'grafana' })
     );
   });
 

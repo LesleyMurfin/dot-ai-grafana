@@ -304,7 +304,7 @@ export async function runAskOrchestrator(args: {
     });
     const meta: AskMeta = {
       hop: 1,
-      hops: 1,
+      hops: 1, // remediate is one planned hop
       current_empty: !args.thread.current.trim(),
       first_hop: 'dot-ai',
       branch: 'initial',
@@ -410,8 +410,8 @@ export async function runAskOrchestrator(args: {
     });
     lastPacked = packed;
     const meta: AskMeta = {
-      hop: hops,
-      hops,
+      hop: hops, // current hop (1-based)
+      hops: MAX_ASK_HOPS, // planned cap — not the same field as hop
       current_empty: currentEmpty,
       first_hop: firstHop,
       branch,
@@ -453,9 +453,26 @@ export async function runAskOrchestrator(args: {
     // Always Grafana stack for observability Asks (cluster-wide if no pod/ns).
     await loadStack(question);
     if (isShowMeOnly(question)) {
-      // 0-hop navigation carries no evidence when the stack read failed: fail loudly.
+      // The 0-hop navigation answer only points at evidence — it fetches nothing itself and
+      // calls no engine — so it may only be given when there is something to point AT.
+      // Gate on having evidence, not on the absence of an exception.
+      //
+      // Evidence disabled in plugin config: the engine cannot substitute here (Map/Explore
+      // links come from the Grafana datasource reads we were told not to make), so burning a
+      // hop would still return no links and would override the operator's explicit choice.
+      if (args.skipStack) {
+        return finish(
+          false,
+          'Grafana evidence is disabled in plugin configuration: turn on "Send Grafana evidence" to use show-me navigation.'
+        );
+      }
       if (stackLoadError) {
         return finish(false, `Grafana stack read failed: ${stackLoadError}`);
+      }
+      // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and no
+      // drilldown link was rebuilt: there is no Current to read and no Map link to open.
+      if (stackEmpty && drilldowns.length === 0) {
+        return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
       }
       lastSummary = 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
       history = appendHistory(history, question, lastSummary);
