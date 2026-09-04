@@ -60,6 +60,11 @@ const OPERATOR_QUESTION =
   'why is checkout-api CrashLooping in production, and which pods are restarting the most?';
 
 describe('progressiveContext', () => {
+  test('packed intent contract is 1000 chars', () => {
+    expect(MAX_INTENT_CHARS).toBe(1000);
+    expect(MAX_CURRENT_CHARS).toBe(700);
+  });
+
   test('stable preamble distinguishes query vs remediate analysis-only', () => {
     expect(stablePreamble('query')).toMatch(/Query/i);
     expect(stablePreamble('query')).toMatch(/no mutations/i);
@@ -175,6 +180,37 @@ describe('progressiveContext', () => {
     expect(text).not.toMatch(/Tempo last 15m/i);
     expect(text).toContain('Loki last 15m');
     expect(text).toContain('Prometheus last 15m');
+  });
+
+  test('buildRequestText trims Loki lines after Map and Tempo are dropped', () => {
+    const lokiBody = Array.from({ length: 40 }, (_, i) => `error-line-${i} ${'w'.repeat(80)}`).join('\n');
+    const current = [
+      'Loki last 15m:',
+      lokiBody,
+      '',
+      'Prometheus last 15m:',
+      'restarts=3',
+      '',
+      'Tempo last 15m:',
+      Array.from({ length: 10 }, (_, i) => `trace-${i}-${'z'.repeat(40)}`).join('\n'),
+      '',
+      'Alertmanager:',
+      'firing',
+    ].join('\n');
+
+    const text = buildRequestText({
+      tool: 'query',
+      current,
+      map: 'm'.repeat(400),
+      box: 'why are pods crashing?',
+    });
+
+    expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(text).not.toContain('\nMap:\n');
+    expect(text).not.toMatch(/Tempo last 15m/i);
+    expect(text).toContain('Loki last 15m');
+    expect(text).toContain('Question:');
+    expect(text).toContain('why are pods crashing?');
   });
 
   test('MAX_CURRENT_CHARS cannot overflow packed intent alone', () => {

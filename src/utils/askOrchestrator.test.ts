@@ -7,8 +7,15 @@ import {
   MAX_ASK_HOPS,
   runAskOrchestrator,
 } from './askOrchestrator';
-import { emptyThread, MAX_INTENT_CHARS } from './progressiveContext';
-import { ALERT_CAP, LOG_LINE_CAP, PROM_SERIES_CAP, StackContextResult, TEMPO_TRACE_CAP } from './grafanaStack';
+import { emptyThread, MAX_INTENT_CHARS, MAX_MAP_CHARS, mergeMap } from './progressiveContext';
+import {
+  ALERT_CAP,
+  dashboardHintFromUids,
+  LOG_LINE_CAP,
+  PROM_SERIES_CAP,
+  StackContextResult,
+  TEMPO_TRACE_CAP,
+} from './grafanaStack';
 import { ToolCallResult } from './dotaiApi';
 
 function stackResult(overrides: Partial<StackContextResult> = {}): StackContextResult {
@@ -51,6 +58,15 @@ describe('isUnscopedQuestion / answerConflictsWithCurrent', () => {
     expect(isUnscopedQuestion('how healthy is the cluster')).toBe(true);
     expect(isUnscopedQuestion('logs for pod api in namespace prod')).toBe(false);
     expect(isUnscopedQuestion('app=argocd status')).toBe(false);
+  });
+
+  test('bogus English pods do not block hop-2 across', () => {
+    expect(isUnscopedQuestion('show failing pods in production')).toBe(true);
+    expect(isUnscopedQuestion('top issues in the cluster')).toBe(true);
+    expect(isUnscopedQuestion('which pods are crashlooping in staging')).toBe(true);
+    // Real hyphenated workload — scoped, hop-2 across must not fire for this reason.
+    expect(isUnscopedQuestion('why is checkout-api CrashLooping in prod?')).toBe(false);
+    expect(isUnscopedQuestion('show logs for pod checkout-api in namespace production')).toBe(false);
   });
 
   test('denial vs Loki evidence is a conflict', () => {
@@ -195,6 +211,8 @@ describe('runAskOrchestrator', () => {
     expect(calls[0].text).not.toMatch(/\bHistory\b/i);
     expect(calls[1].text).toContain('Loki last 15m');
     expect(calls[1].text).toMatch(/across ALL clusters/i);
+    expect(calls[0].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(calls[1].text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
     expect(calls[0].meta).toEqual(
       expect.objectContaining({
         hop: 1,
@@ -211,6 +229,151 @@ describe('runAskOrchestrator', () => {
       })
     );
     expect(result.summary).toContain('error boom');
+  });
+
+  test('30×145-char Loki dump still packs every hop ≤ 1000', async () => {
+    const lokiLines = Array.from({ length: 30 }, (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`);
+    const current = [
+      'Loki last 15m (pod/checkout-api ns/prod):',
+      ...lokiLines,
+      '',
+      'Prometheus last 15m:',
+      'pod/checkout-api ns/prod restarts=12',
+      '',
+      'Tempo last 15m:',
+      'trace abc123',
+      '',
+      'Alertmanager:',
+      'KubePodCrashLooping firing',
+    ].join('\n');
+    expect(current.length).toBeGreaterThan(MAX_INTENT_CHARS);
+
+    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
+      expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      return { ok: true, status: 200, summary: 'error boom across clusters', raw: {} };
+    });
+
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues in the cluster',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () =>
+        stackResult({
+          current,
+          logLines: lokiLines,
+          currentEmpty: false,
+        })
+      ),
+      callTool,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(callTool.mock.calls.length).toBeGreaterThanOrEqual(1);
+    for (const [, text] of callTool.mock.calls) {
+      expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      expect(text as string).toContain('Loki last 15m');
+      expect(text as string).toContain('Question:');
+    }
+  });
+
+  // Payload-growth guard for the navigation fold in this PR. formatCurrent() now ALWAYS appends a
+  // "Dashboards (from firing alerts):" block to Current, and fetchStackContext() always appends
+  // dashboardHintFromUids(...) to mapHint (src/utils/grafanaStack.ts). Both are charged against
+  // fixed budgets — Current 700 (MAX_CURRENT_CHARS), Map 400 (MAX_MAP_CHARS) — so the worst
+  // realistic case is measured here: a 30x145-char Loki dump, 8 firing alerts and 8 alert-linked
+  // dashboards give Current 5102 chars and put the merged Map exactly on its 400-char cap.
+  //
+  // Measured on this tree (rebased onto main efd80a4, post-#49): hop 1 = 982, hop 2 = 967 chars,
+  // both carrying the question. Measured on the pre-rebase branch (41996ab, pre-#49) the same
+  // inputs packed to exactly 1000/1000 and the tail — Question: — was shed, so the cap is the
+  // difference between an ask and 1000 chars of evidence with nothing asked.
+  //
+  // The block is charged on EVERY ask, not just this worst case. Same 30-line dump, question
+  // reserved, packed at MAX_INTENT_CHARS: without the block 971 chars keep 1 Loki line; with the
+  // unconditional "(none linked on firing alerts)" placeholder that Loki line is gone (899); with
+  // 8 links the Prometheus sample goes too (982, header only). Section headers and the alert lines
+  // are what must survive, so that is what this test asserts alongside the cap.
+  test('firing-alert dashboards + Loki dump + Map at cap still pack every hop ≤ 1000', async () => {
+    const dashboardUids = [
+      'k8s-workloads-overview-prod',
+      'loki-error-triage-2026q3',
+      'prom-restarts-by-namespace',
+      'crashloop-forensics-board',
+      'alertmanager-firing-heatmap',
+      'checkout-api-golden-signals',
+      'node-pressure-and-evictions',
+      'ingress-5xx-by-route-prod',
+    ];
+    const lokiLines = Array.from(
+      { length: 30 },
+      (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`
+    );
+    const alertLines = Array.from(
+      { length: 8 },
+      (_, i) => `KubePodCrashLooping firing pod/checkout-api-${i} ns/prod`
+    );
+    // Section order and literals mirror formatCurrent() including the dashboards block.
+    const current = [
+      'Loki last 15m (pod/checkout-api ns/prod):',
+      ...lokiLines,
+      '',
+      'Prometheus last 15m (pod/checkout-api ns/prod):',
+      'pod/checkout-api ns/prod restarts=12',
+      '',
+      'Tempo last 15m (pod/checkout-api ns/prod):',
+      'trace abc123',
+      '',
+      'Alertmanager (pod/checkout-api ns/prod):',
+      ...alertLines,
+      '',
+      'Dashboards (from firing alerts):',
+      ...dashboardUids.map((u) => '/d/' + u),
+    ].join('\n');
+    // mapHint exactly as fetchStackContext builds it: datasource tokens, scope, then the
+    // production dashboards hint — long enough that the merged Map lands on its 400-char cap.
+    const mapHint = [
+      'Loki loki-production-us-east',
+      'Prometheus prometheus-production-us-east',
+      'Tempo tempo-production-us-east',
+      'Alertmanager alertmanager-production-us-east',
+      'ns/prod',
+      'pod/checkout-api',
+      dashboardHintFromUids(dashboardUids),
+    ].join(', ');
+    expect(current).toContain('Dashboards (from firing alerts):');
+    expect(mapHint).toContain('dashboards: /d/k8s-workloads-overview-prod');
+    // The dashboards hint alone pushes the merged Map onto its 400-char cap.
+    expect(mergeMap(mapHint, 'top issues in the cluster').length).toBe(MAX_MAP_CHARS);
+
+    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
+      expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      return { ok: true, status: 200, summary: 'checkout-api is crashlooping across clusters', raw: {} };
+    });
+
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues in the cluster',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () =>
+        stackResult({ current, mapHint, logLines: lokiLines, alertLines, currentEmpty: false })
+      ),
+      callTool,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(callTool.mock.calls.length).toBeGreaterThanOrEqual(1);
+    for (const [, text] of callTool.mock.calls) {
+      const packed = text as string;
+      expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      // The dashboards block must not have squeezed the live evidence out of the payload, and
+      // #49's reservation must still put the operator's own question on the wire (pre-#49 this
+      // exact payload shed both markers).
+      expect(packed).toContain('Current:');
+      expect(packed).toContain('Loki last 15m');
+      expect(packed).toContain('KubePodCrashLooping firing');
+      expect(packed).toContain('Question:');
+      expect(packed).toContain('top issues in the cluster');
+    }
   });
 
   test.each([
@@ -333,10 +496,12 @@ describe('runAskOrchestrator', () => {
     expect(result.hops).toBe(2);
     const secondPacked = (callTool.mock.calls[1][1] as string) || '';
 
-    // The Grafana evidence itself is still packed for hop 2.
+    // The Grafana evidence itself is still packed for hop 2 (Current may be
+    // trimmed to the 1000-char intent cap, so assert headers not full Loki lines).
     expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('KubePodCrashLooping firing');
-
+    expect(secondPacked.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    expect(((callTool.mock.calls[0][1] as string) || '').length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
 
     // The follow-up names only the sources that actually carry data, plus the target.
     expect(secondPacked).toMatch(/live evidence from Loki, Alertmanager for pod\/argocd-application-controller ns\/demo-gitops/i);
