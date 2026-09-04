@@ -10,11 +10,11 @@ sidebar_position: 1
 
 ## What is the Grafana Plugin?
 
-The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin brings AI-powered cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of the pair: Grafana owns **query** and **analysis-only remediate**; the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp) owns operate / execute.
+The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin brings AI-powered Kubernetes cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of a pair: this plugin owns **query** and **analysis-only remediate**.
 
-Grafana's own AI surfaces reason about **Grafana**: [Grafana Assistant](https://grafana.com/docs/grafana-cloud/machine-learning/assistant/) holds guided conversations for dashboard creation, analytics, and troubleshooting; the [LLM app](https://grafana.com/docs/grafana-cloud/machine-learning/llm/) is a proxy that centralizes authenticated LLM requests for other Grafana components; the [Grafana MCP server](https://grafana.com/docs/grafana/latest/developer-resources/mcp/) gives an external AI client tools over your Grafana instance. This plugin reasons about the **Kubernetes cluster those dashboards describe**: it takes the alert or log line you are already looking at, packs it as evidence, and asks a Kubernetes-aware engine — running its own kubectl/MCP tool loop against live cluster state — what is actually wrong, without leaving Grafana or re-pasting context into a separate tool. It also runs in whatever Grafana you already operate: it needs Grafana >= 11.0 and a reachable engine, while Assistant runs in Grafana Cloud or in a self-managed Grafana 13.0.0+ connected to a Grafana Cloud Assistant backend.
+Grafana's own AI surfaces reason about **Grafana**: [Grafana Assistant](https://grafana.com/docs/grafana-cloud/machine-learning/assistant/) holds guided conversations for dashboard creation, analytics, and troubleshooting; the [LLM app](https://grafana.com/docs/grafana-cloud/machine-learning/llm/) is a proxy that centralizes authenticated LLM requests for other Grafana components; the [Grafana MCP server](https://grafana.com/docs/grafana/latest/developer-resources/mcp/) gives an external AI client tools over your Grafana instance. This plugin reasons about the **Kubernetes cluster those dashboards describe**: it takes the alert or log line you are already looking at, packs it as evidence, and asks a Kubernetes-aware engine — one that runs its own kubectl/MCP tool loop against live cluster state — what is actually wrong, without leaving Grafana or re-pasting context into a separate tool. It also installs into a Grafana you run yourself, while Assistant runs in Grafana Cloud or in a self-managed Grafana connected to a Grafana Cloud Assistant backend.
 
-Operators sign in to Grafana as usual and are authorized by their Grafana org role — there is no separate plugin login (see [Configure](#configure)).
+It is built for the operator on call. Reach for it the moment an alert fires or a panel goes red and the next question is *what is actually wrong in the cluster*; when the answer becomes a change to apply — scale, update, rollback, delete — switch to the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp), which owns operate / execute. Operators sign in to Grafana as usual and are authorized by their Grafana **org role**, so there is no separate plugin login (see [Configure](#configure)).
 
 Open the app from Grafana's left navigation as **dot-ai** (`/a/devopstoolkit-dotai-app/`). Admins reach **Configuration** from the same nav entry or **Administration → Plugins → dot-ai**.
 
@@ -91,6 +91,8 @@ As Grafana Admin: open **dot-ai → Configuration** in the left nav, or **Admini
 
 ## How It Works
 
+An Ask resolves in at most three engine hops. The browser never talks to the engine directly: the plugin's Go backend is the only component that does.
+
 ```text
   Ask ── Remediate: pack Query Current + issue ── 1x POST /remediate
     │
@@ -107,6 +109,8 @@ As Grafana Admin: open **dot-ai → Configuration** in the left nav, or **Admini
           dot-ai query toolLoop (kubectl/MCP) returns summary
           Answer renders as sanitized markdown; Map holds Explore/Drilldown/dashboard links
 ```
+
+Each POST above travels that same path:
 
 ```text
 Browser
