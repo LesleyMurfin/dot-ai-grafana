@@ -1063,11 +1063,6 @@ func TestToolRoleGate(t *testing.T) {
 
 // TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
 // gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
-
-
-
-// TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
-// gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
 func TestTestConnectionAdminGatePinned(t *testing.T) {
 	t.Run("draft_editor_denied_no_dial", func(t *testing.T) {
 		var hits int32
@@ -2258,4 +2253,3 @@ func TestAskLogUserAttribution(t *testing.T) {
 		}
 	})
 }
-
