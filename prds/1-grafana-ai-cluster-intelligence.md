@@ -305,11 +305,90 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
   - Token only in `secureJsonData`; backend-only read; never logged; `Authorization` redacted and **upstream dot-ai error bodies sanitized** before surfacing to the browser. Custom auth header sent only when configured — never both unconditionally.
   - **Egress/SSRF**: `apiUrl` **must** be `https://` (reject `http://`) and the backend **must** block link-local/metadata (`169.254.169.254`), loopback, and RFC1918 targets unless an operator explicitly allowlists them (fail-closed). Admin-only config lowers but doesn't remove the risk in multi-tenant Grafana.
   - **Read-only**: enforced server-side via a no-`apply` RBAC token *and* a backend fail-closed request-field allowlist (Design Decision 3).
-  - **Prompt/command injection**: free-text `intent`/`issue` reaches an LLM with read-only cluster tools; the token's read scope bounds the blast radius, and remediate's suggested `command`s are advisory/untrusted (a human runs them). Least-privilege token; rotation; per-Grafana-org isolation.
-  - **Identity**: single shared token → no per-user attribution in dot-ai audit logs (accepted v1 risk).
+  - **Indirect prompt injection — telemetry is the vector, the operator is the victim** (OWASP LLM01): the evidence pack packs *attacker-writable* signal into the prompt — Loki log bodies (including externally supplied strings reflected into a log line, e.g. a `User-Agent` on a 404), Alertmanager annotations templated from workload-exposed metric labels, trace attributes, and live K8s object metadata — and the answer renders in the operator's authenticated browser. A least-privilege read-only token does **not** bound this: the blast radius is what the operator's *browser* fetches and what the operator is *persuaded to run*. Least-privilege token, rotation, and per-Grafana-org isolation stay, but they are not the control for this class.
+    Full trust boundary, impact classes **I1–I6** and controls **S1–S4 / P1–P2 / C1–C2 / R1–R2 / G1–G2**: [Expansion: Untrusted telemetry trust boundary](#untrusted-telemetry-trust-boundary).
+  - **Identity**: single shared token → no per-user attribution in dot-ai audit logs (accepted v1 risk) — and, per control **P1**, attribution is not the only consequence: the model answers from a *superset* of what the asking operator is authorized to see, so the I1 exfiltration primitive crosses an **authorization boundary** (a tenant that can write to namespace B can have namespace A's telemetry echoed out of an operator's browser). Accepted for v1 **only** with S1+S2 in place; per-operator credential propagation is the actual fix.
 - **Observability**: backend logs request id, tool, status, duration (no secrets).
 - **Compatibility**: pin `@grafana/*` libs (to support 11.4) + `grafanaDependency: >=11.0`; CI build+smoke on **11.4 (reference deployment, must-pass) and a current release (13.x)**.
 - **Accessibility**: labelled controls; announced response; keyboard submit.
+
+<a id="untrusted-telemetry-trust-boundary"></a>
+
+### Expansion: Untrusted telemetry trust boundary
+
+**Start with the accident, not the attacker (I6).** A stack trace that contains HTML, a log line that quotes a previous model answer, an exception dumping a payload with an `<img>` tag, a CI job legitimately named something imperative — all reach the prompt and then the rendered answer through exactly the same path an attacker would use. Accident is *guaranteed*; the attacker is optional. That is why this is a design driver and not an incident class.
+
+This is [OWASP LLM01 — indirect prompt injection](https://owasp.org/www-project-top-10-for-large-language-model-applications/), applied to an observability surface: nothing here is novel research, and the defence is a documented trust boundary rather than a filter list.
+
+**Trust chain**
+
+```
+  attacker-writable signal        Grafana datasources / live K8s state
+  (log line · alert label   ──►   Loki · Prometheus · Tempo · Alertmanager · dot-ai cluster reads
+   trace attr · object meta)                          │
+                                                      ▼
+                                            plugin evidence pack (Current)
+                                                      │
+                                                      ▼
+                                              dot-ai LLM prompt ──► answer
+                                                      │
+                                                      ▼
+                              operator's authenticated browser        [Phase 1 — today]
+                                                      │
+                                                      ▼
+           Headlamp operate / remediate execute / GitOps PR           [Phase 2 — North Star]
+```
+
+**Entry points** — 1–4 are writable with **no Grafana and no dot-ai credential** at all; 5 needs only ordinary Grafana edit rights:
+
+1. **Log lines (Loki).** Any pod in any monitored namespace writes them. Worse: any *externally supplied* string reflected into a log — a `User-Agent`, a 404 request path, a username in an auth-failure line, a JSON field — means an **unauthenticated internet user** can write into the prompt.
+2. **Alert annotations / labels (Alertmanager).** `summary`/`description` are templated from metric labels; labels come from workload-exposed `/metrics` and from `kube_pod_labels` — attacker-chosen at deploy time.
+3. **Trace attributes / span names (OTel).** Request-derived strings, so again caller-controlled.
+4. **Live Kubernetes object metadata.** dot-ai `query`/`remediate` read cluster state: annotations, labels, container names, image tags, ConfigMap contents, Event messages. A namespace-scoped tenant with `create pod` chooses a container name.
+5. **Dashboard titles / panel descriptions**, plus the plugin's own drilldown text and the evidence pack it assembles.
+
+#### Invariant — telemetry is data, never instruction
+
+> **Telemetry is data, never instruction.** Anything that entered the system from a monitored workload is **untrusted content**. Every downstream component — renderer, prompt packer, output contract, and any future execution surface — **MUST NOT** treat that content as an instruction, as a URL to fetch, or as a command to run.
+
+Normatively: model output derived from telemetry MUST render as inert text; the plugin MUST NOT automatically fetch any model-authored URL; and no answer content may reach an execution affordance without an explicit, provenance-bearing human gate.
+
+**Impact classes**
+
+| ID | What happens | Why existing controls miss it |
+|----|--------------|-------------------------------|
+| I1 | **Exfiltration without script execution.** Rendered markdown/HTML causes the operator's browser to fetch an attacker-controlled URL. Leaks the fact and time of render, which Grafana rendered it, and arbitrary text encoded into the request — including telemetry the operator was authorized to see and the attacker was not. | Read-only tokens, RBAC, and CSP-less deployments are all silent here: no script runs. Sanitizers that allowlist embed tags (`img`/`iframe`/`video`/`audio`) permit it by construction — PR [#13](https://github.com/vfarcic/dot-ai-grafana/pull/13) review finding **B5**. |
+| I2 | **Operator-actioned harm.** Injected content steers the *recommendation*: a plausible root cause plus a destructive command, delivered dressed in real cluster evidence by a trusted assistant. The human is the execution engine. | Least-privilege tokens and read-only enforcement do **nothing** — the operator's own credentials run the command. This is the class the prior "commands are advisory, a human runs them" framing mistook for a mitigation. |
+| I3 | **Agent actuation (North Star).** Once diagnosis output feeds an execution surface (Headlamp `executeRemediation`/`operate`, remediate → GitOps PR), injection becomes remote code execution with a human rubber-stamp. | No control exists yet because the wiring does not exist yet. A control retro-fitted after Phase 2 ships is a control that ships late — see **Phase 2 gate** below. |
+| I4 | **Persistence via knowledge poisoning.** If injected content is ever ingested through dot-ai `manageKnowledge` (auto-ingested runbook, incident summary written back), the injection outlives the session and steers unrelated future questions for other operators. | Session-scoped reasoning about a single Ask does not cover a store that is read by later, unrelated Asks. |
+| I5 | **Context denial / evidence displacement.** A flood of adversarial tokens burns model context and forces truncation that drops the real evidence; the model then answers confidently from attacker-chosen material. | Cheap, deniable, indistinguishable from noisy logging. No per-source cap means one source can dominate the pack. |
+| I6 | **Accident, no attacker.** HTML or markdown in a stack trace, a log line quoting a prior model answer, an imperative-sounding job name — same mechanism, no malice. | Guaranteed to occur in normal operation; the only defence is that the rendering and prompt contracts are safe by construction. |
+
+**Controls** — statuses are honest about this repo today, not aspirational. `Horizon` is the
+sequencing call (`now` = lands with/next to the S1 fix; `next` = Phase 1 hardening before any
+execute wiring; `future` = needs a design change beyond this PRD) and is subject to adjudication
+by the per-pillar now/future plan; the IDs are the stable key.
+
+| ID | Pillar | Control | What it enforces | Status | Horizon |
+|----|--------|---------|------------------|--------|---------|
+| S1 | Security | No raw HTML from model output: disable HTML passthrough in the markdown renderer, or post-process with a restrictive allowlist — no `iframe`/`img`/`video`/`audio`/`object`/`embed`, no remote `src`. Link-scheme allowlist; `rel="noopener noreferrer"` on every model-authored link; **no automatic network fetch of any model-authored URL**. | I1, I6 | **open** — this is PR #13 finding B5. Grafana's own shared sanitizer is not this control: `packages/grafana-data/src/text/sanitize.ts` (v11.4.0) runs js-xss with `img`/`iframe`/`video`/`audio` retained in the allowlist, so the plugin must narrow it locally. | now |
+| S2 | Security | Install docs state the plugin's threat model assumes a **tightened** `img-src`/`frame-src`/`media-src`/`connect-src` CSP in `grafana.ini` — and say plainly that merely *enabling* CSP is not sufficient. | I1 defence-in-depth | **open** — `conf/defaults.ini` ships `content_security_policy = false`, and Grafana's default policy template allows `img-src * data:`, so an image beacon is permitted even with CSP switched on; `media-src 'none'` and a narrow `connect-src` do constrain the media and fetch variants. | now |
+| S3 | Security | Prompt-side: structural delimiting and provenance tagging of every evidence block (source, stream, tenant), an explicit system instruction that tagged blocks are data, and per-source length caps so no single source can dominate the context window. | I2, I5, I6 | **open** — `Current` packing exists (`src/utils/grafanaStack.ts`, `docs/progressive-context.md`) without delimiting, tagging, or caps. | next |
+| S4 | Security | Output contract: commands are inert and copy-only, never one-click; destructive verbs (`delete`, `drain`, `cordon`, `scale --replicas=0`, `patch`) are visually quarantined with a banner naming that the suggestion derives from untrusted telemetry. | I2 | **open** — copy-only/no-execute half is shipped (analysis-only v1, Decisions 2026-09-01); the quarantine + untrusted-origin banner are not built. | next |
+| P1 | Privacy | Multi-tenant containment: the asking operator's authorization should bound what the model sees. A single shared service token means it does not, so I1 exfiltrates across an authorization boundary. | I1 blast radius | **open** — accepted v1 risk, now recorded with its exfiltration consequence (NFR → Identity). | future — per-operator credential propagation is an auth-model change |
+| P2 | Privacy | Redaction pass over the evidence pack before it enters the prompt: secrets, tokens, PII in log bodies. | I1, I4 | **open** | next |
+| C1 | Consent | No autonomous actuation — and confirmation is meaningful only with provenance: every claim in an answer must be attributable to a named evidence source, visible in the UI. Consent without provenance is rubber-stamping. | I2, I3 | **open** — no-actuation half shipped (no execute path presented); per-claim provenance is not built. | next — prerequisite for Phase 2 |
+| C2 | Consent | Explicit opt-in gate on any Grafana → Headlamp / execute handoff. | I3 | **planned** — Phase 2 / PRD #2 (`prds/2-gitops-pr-remediate.md`). | future — gated with the execute surface, must precede its wiring |
+| R1 | Reliability | Fail closed on sanitizer error or unparseable model output — never render the fallback raw. | I1, I6 | **open** | now — same code path as S1 |
+| R2 | Reliability | Truncation is visible in the UI and never silently drops the highest-priority evidence. | I5 | **open** | next |
+| G1 | Governance | The trust boundary is documented **and testable**: an adversarial-telemetry corpus runs in CI against the rendering path. | I1, I6 regression | **planned** — fixtures landed (`src/utils/__fixtures__/adversarialTelemetry.ts`); the consuming test lands with the S1 fix. See Milestones. | now |
+| G2 | Governance | Every new evidence source (Kubeshark, traces, knowledge-base ingest) passes a "does this add attacker-writable input?" gate before it is wired. | I4, and new I1/I2 surface | **planned** | next |
+
+#### Phase 2 gate
+
+The North Star is explicit: **Grafana diagnoses; Headlamp operates** — and Headlamp is *not* read-only (`executeRemediation`, `operate`, `recommend`). The moment diagnosis output becomes an input to that execution surface, I2 (operator-actioned) becomes I3 (agent actuation with a human rubber-stamp). **C1 (per-claim provenance) and C2 (explicit opt-in handoff gate) are therefore prerequisites for wiring Grafana output into any execution surface, together with S1 and S4** — the controls must land *before* the wiring, not after it, because a control designed after the integration ships is a control that never gets to say no.
+
+Reporting channel for content-derived findings: [`SECURITY.md`](../SECURITY.md).
 
 ## Success Criteria
 
@@ -376,6 +455,7 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 - [x] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests
 - [~] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
 - [~] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
+- [ ] **Adversarial-telemetry test programme (G1)** — regression corpus (`src/utils/__fixtures__/adversarialTelemetry.ts`) runs in CI against the answer-rendering path: no remote embed (`img`/`iframe`/`video`/`audio`/`object`/`embed`), no remote `src`, no `target="_blank"` without `rel="noopener noreferrer"`, instruction-override text rendered inert, oversized stuffing truncated visibly (see [Expansion: Untrusted telemetry trust boundary](#untrusted-telemetry-trust-boundary))
 
 ### Expansion: Phase 1 detail (M0–M9 mapping to the checklist above)
 
@@ -601,6 +681,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-01 | **Public-surface strip:** CI forbids internal host/marker/secret leakage on public docs and shipped surfaces | `scripts/public-surface-check.sh` + `.github/workflows/ci.yml` job `public-surface` (`6e08d39`) |
 | 2026-09-01 | **SDK httpclient** for backend outbound HTTP (`grafana-plugin-sdk-go/backend/httpclient`); probe 15s / tools 120s; DefaultMiddlewares + DefaultTimeoutOptions | `pkg/plugin/app.go` `newPluginHTTPClient`; replaces ad-hoc `http.Client` construction |
 | 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | `scripts/golden-ask-results.json`; evidence for v1 Ask path; execute stays PRD #2 |
+| 2026-09-04 | **Untrusted-telemetry trust boundary adopted.** Telemetry is data, never instruction — binding on every surface (render, prompt packing, output contract, and any future execute handoff); markdown rendering of model output must not permit remote embeds | OWASP LLM01: log bodies, alert labels, trace attributes, and live K8s object metadata are attacker-writable with **no** Grafana or dot-ai credential, and reflected strings (`User-Agent`, request path) let an unauthenticated user write into the prompt; PR #13 review finding **B5** showed a remote embed rendering in an operator's authenticated browser with no script execution. Replaces the prior "operator-typed intent, bounded by token read scope" framing. See [Expansion: Untrusted telemetry trust boundary](#untrusted-telemetry-trust-boundary) — I1–I6, S1–S4/P1–P2/C1–C2/R1–R2/G1–G2; disclosure channel `SECURITY.md` |
 
 
 
