@@ -1,0 +1,134 @@
+{
+  "$comment": [
+    "Gate C - constants parity. Every expected value is EXTRACTED FROM SOURCE in this",
+    "checkout; nothing here hardcodes a number. A row is skipped (and said so with -v)",
+    "when its source value cannot be extracted unambiguously - a skipped row is better",
+    "than a fragile regex that fires on clean code.",
+    "",
+    "kinds:",
+    "  numeric_member - every number the doc states in an anchored context must be one",
+    "                   of the values source defines.",
+    "  equals         - the single value source defines must equal what the doc states.",
+    "  conditional_forbid - the doc pattern is only wrong while the source condition holds.",
+    "  ladder         - shedding order, derived from buildRequestText + TRIM_ORDER."
+  ],
+  "doc_globs": ["docs/**/*.md", "README.md"],
+  "rows": [
+    {
+      "id": "http-timeouts",
+      "kind": "numeric_member",
+      "source": {
+        "file": "pkg/plugin/app.go",
+        "regex": "newPluginHTTPClient\\((\\d+)\\s*\\*\\s*time\\.Second\\)",
+        "mode": "set"
+      },
+      "doc": { "anchor": "ceiling|version/health|timeout", "extract": "\\b(\\d+)s\\b" },
+      "reason": "documented HTTP timeout does not match any timeout the plugin actually builds"
+    },
+    {
+      "id": "char-caps",
+      "kind": "numeric_member",
+      "source": {
+        "file": "src/utils/progressiveContext.ts",
+        "regex": "export const (?:MAX_INTENT_CHARS|MAX_CURRENT_CHARS|MAX_MAP_CHARS|MIN_CURRENT_CHARS) = (\\d+);",
+        "mode": "set"
+      },
+      "doc": { "anchor": "character|chars\\b", "extract": "\\b(\\d{2,4})[-\\s](?:character|chars)" },
+      "reason": "documented character budget matches no cap constant in progressiveContext.ts"
+    },
+    {
+      "id": "map-token-cap",
+      "kind": "equals",
+      "numeric": true,
+      "source": {
+        "file": "src/utils/progressiveContext.ts",
+        "regex": "\\.slice\\(0, (\\d+)\\)\\.join\\(', '\\)",
+        "mode": "one"
+      },
+      "doc": {
+        "anchor": "\\btokens?\\b",
+        "extract": "\\b(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\\s+tokens?\\b"
+      },
+      "reason": "documented Map token cap does not match the slice the Map builders apply"
+    },
+    {
+      "id": "grafana-floor",
+      "kind": "equals",
+      "source": {
+        "file": "src/plugin.json",
+        "regex": "\"grafanaDependency\":\\s*\">=\\s*(\\d+\\.\\d+)",
+        "mode": "one"
+      },
+      "doc": { "anchor": ">=\\s*\\d+\\.\\d+", "extract": ">=\\s*(\\d+\\.\\d+)" },
+      "reason": "documented Grafana floor does not match plugin.json grafanaDependency"
+    },
+    {
+      "id": "grafana-lib-pins",
+      "kind": "equals",
+      "prefix_of_source": true,
+      "source": {
+        "file": "package.json",
+        "regex": "\"@grafana/(?:data|runtime|ui|schema)\":\\s*\"(\\d+\\.\\d+\\.\\d+)\"",
+        "mode": "one"
+      },
+      "doc": {
+        "anchor": "@grafana/",
+        "scope_after": "@grafana/",
+        "extract": "\\b(\\d+\\.\\d+(?:\\.\\d+)?)\\b"
+      },
+      "reason": "documented @grafana/* pin does not match package.json"
+    },
+    {
+      "id": "plugin-id",
+      "kind": "equals",
+      "source": { "file": "src/plugin.json", "regex": "\"id\":\\s*\"([a-z0-9-]+)\"", "mode": "one" },
+      "doc": { "anchor": "devopstoolkit-", "extract": "\\b(devopstoolkit-[a-z0-9-]+)\\b" },
+      "reason": "documented plugin id does not match src/plugin.json"
+    },
+    {
+      "id": "nav-path",
+      "kind": "equals",
+      "source": { "file": "src/plugin.json", "regex": "\"id\":\\s*\"([a-z0-9-]+)\"", "mode": "one" },
+      "doc": { "anchor": "/a/", "extract": "/a/([a-z0-9-]+)/" },
+      "reason": "documented app nav path does not match the plugin id it is built from"
+    },
+    {
+      "id": "configuration-role",
+      "kind": "equals",
+      "source": {
+        "file": "src/plugin.json",
+        "regex": "\"name\":\\s*\"Configuration\"[\\s\\S]{0,240}?\"role\":\\s*\"(\\w+)\"",
+        "mode": "one"
+      },
+      "doc": {
+        "anchor": "Configuration",
+        "extract": "\\b(Admin|Editor|Viewer)\\*{0,2}-only\\b"
+      },
+      "reason": "documented role for the Configuration page does not match its plugin.json include"
+    },
+    {
+      "id": "e2e-matrix-static",
+      "kind": "conditional_forbid",
+      "when": {
+        "file": ".github/workflows/ci.yml",
+        "present": "plugin-actions/e2e-version",
+        "absent": "GRAFANA_IMAGE:\\s*\\["
+      },
+      "doc": {
+        "anchor": "CI e2e|e2e (?:exercises|runs|covers)",
+        "forbid": "\\b\\d+\\.\\d+",
+        "min_hits": 3,
+        "distinct": true,
+        "exempt": "matrix|resolved|e2e-version"
+      },
+      "reason": "docs enumerate a fixed list of e2e Grafana versions, but ci.yml resolves the matrix dynamically via grafana/plugin-actions/e2e-version - the list goes stale silently"
+    },
+    {
+      "id": "shedding-ladder",
+      "kind": "ladder",
+      "source": { "file": "src/utils/progressiveContext.ts" },
+      "doc": { "anchor": "shed|sheds|peel|peels|drops" },
+      "reason": "documented shedding order does not match the order buildRequestText applies"
+    }
+  ]
+}

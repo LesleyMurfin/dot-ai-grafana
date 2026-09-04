@@ -11,6 +11,7 @@
     "lint:fix": "npm run lint -- --fix && prettier --write --list-different .",
     "e2e": "playwright test",
     "server": "docker compose up --build",
+    "doc-gates": "python3 scripts/doc-gates/run.py",
     "sign": "sign-plugin"
   },
   "author": "DevOps Toolkit",

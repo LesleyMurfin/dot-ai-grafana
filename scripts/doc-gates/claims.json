@@ -1,0 +1,53 @@
+{
+  "$comment": [
+    "Gate B - claim/symbol parity.",
+    "Semantics: a doc phrase may appear ONLY IF the required symbol exists in the tree.",
+    "Every row is a fact, never an opinion: a hit means the doc describes behaviour whose",
+    "implementing symbol is not in this checkout (typically it lives in a still-open PR).",
+    "Adding a row: copy one, change 'phrases', 'requires' and 'reason'. Nothing else."
+  ],
+  "doc_globs": ["docs/**/*.md", "README.md"],
+  "symbol_roots": ["src"],
+  "symbol_exclude": [
+    "*.test.ts",
+    "*.test.tsx",
+    "*.spec.ts",
+    "*.spec.tsx",
+    "**/__mocks__/**",
+    "**/testdata/**"
+  ],
+  "claims": [
+    {
+      "id": "sanitized-markdown-renderer",
+      "phrases": ["sanitiz", "GitHub-flavored markdown", "GitHub flavored markdown"],
+      "ignore_case": true,
+      "requires": { "symbol": "ResponseMarkdown" },
+      "reason": "Docs promise rendered/sanitized markdown answers, which needs the ResponseMarkdown renderer. Without it the plugin renders plain text.",
+      "introduced_by": "PR #13"
+    },
+    {
+      "id": "explore-drilldown-links",
+      "phrases": ["Explore pane", "Explore link", "Drilldown"],
+      "ignore_case": true,
+      "requires": { "symbol": "grafanaExplore" },
+      "reason": "Docs promise Map links into Explore / the Drilldown apps, which are built by src/utils/grafanaExplore.ts.",
+      "introduced_by": "PR #13"
+    },
+    {
+      "id": "show-me-navigation",
+      "phrases": ["show-me navigation", "show-me phrase", "show me the logs", "zero dot-ai hops", "0 hops"],
+      "ignore_case": true,
+      "requires": { "regex": "show\\s?-?me" },
+      "reason": "Docs promise a show-me phrase path that skips the engine. No non-test source handles it; the only match in the tree is a test fixture.",
+      "introduced_by": "PR #43"
+    },
+    {
+      "id": "prior-block",
+      "phrases": ["Prior:", "condensed \\*\\*Prior\\*\\*", "condensed Prior"],
+      "ignore_case": false,
+      "requires": { "symbol": "Prior", "paths": ["src/utils/progressiveContext.ts"] },
+      "reason": "Docs describe a condensed Prior block packed into the intent. progressiveContext.ts has no Prior packing.",
+      "introduced_by": "PR #43"
+    }
+  ]
+}
