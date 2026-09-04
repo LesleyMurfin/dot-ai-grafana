@@ -5,6 +5,7 @@ import { AppPluginMeta, GrafanaTheme2, PluginConfigPageProps, PluginMeta } from 
 import { getBackendSrv } from '@grafana/runtime';
 import { Alert, Button, Field, FieldSet, Input, SecretInput, Switch, useStyles2 } from '@grafana/ui';
 import { testIds } from '../testIds';
+import { reloadPage } from '../../utils/reload';
 
 export type AppPluginSettings = {
   apiUrl?: string;
@@ -314,7 +315,7 @@ const updatePluginAndReload = async (pluginId: string, data: Partial<PluginMeta<
 
     // Reloading the page as the changes made here wouldn't be propagated to the actual plugin otherwise.
     // This is not ideal, however unfortunately currently there is no supported way for updating the plugin state.
-    window.location.reload();
+    reloadPage();
   } catch (e) {
     console.error('Error while updating the plugin', e);
   }

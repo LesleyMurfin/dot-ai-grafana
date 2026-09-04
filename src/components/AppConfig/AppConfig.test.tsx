@@ -5,12 +5,20 @@ import { getBackendSrv } from '@grafana/runtime';
 import { of } from 'rxjs';
 import AppConfig, { AppConfigProps } from './AppConfig';
 import { testIds } from 'components/testIds';
+import { reloadPage } from '../../utils/reload';
 
 jest.mock('@grafana/runtime', () => ({
   getBackendSrv: jest.fn(),
 }));
 
+// jsdom exposes `window.location` as an unforgeable property, so the reload
+// cannot be redefined or spied on; stub the seam the component calls instead.
+jest.mock('../../utils/reload', () => ({
+  reloadPage: jest.fn(),
+}));
+
 const mockGetBackendSrv = getBackendSrv as jest.MockedFunction<typeof getBackendSrv>;
+const mockReloadPage = reloadPage as jest.MockedFunction<typeof reloadPage>;
 
 describe('Components/AppConfig', () => {
   let props: AppConfigProps;
@@ -130,11 +138,6 @@ describe('Components/AppConfig', () => {
 
   test('submit saves apiUrl and omits secureJsonData when key is already stored', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
 
     const plugin = {
       meta: {
@@ -169,17 +172,12 @@ describe('Components/AppConfig', () => {
     expect(call![0].data.secureJsonData).toBeUndefined();
 
     await waitFor(() => {
-      expect(reloadMock).toHaveBeenCalled();
+      expect(mockReloadPage).toHaveBeenCalled();
     });
   });
 
   test('submit sends a newly typed auth token as secureJsonData', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
 
     const plugin = {
       meta: {
@@ -210,17 +208,12 @@ describe('Components/AppConfig', () => {
     expect(call![0].data.secureJsonData).toEqual({ apiKey: 'new-secret-token' });
 
     await waitFor(() => {
-      expect(reloadMock).toHaveBeenCalled();
+      expect(mockReloadPage).toHaveBeenCalled();
     });
   });
 
   test('submit persists Debug Log on and Show context off', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
 
     const plugin = {
       meta: {
@@ -256,11 +249,6 @@ describe('Components/AppConfig', () => {
 
   test('submit persists Send Grafana evidence off', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
 
     const plugin = {
       meta: {
