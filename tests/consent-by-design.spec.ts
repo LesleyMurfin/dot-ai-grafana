@@ -93,6 +93,9 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
   // Both cases mutate the app's own jsonData, so they must not interleave.
   test.describe.configure({ mode: 'serial' });
 
+  /** Only the field these cases flip; the rest of jsonData is preserved verbatim. */
+  type PluginMeta = { jsonData?: { sendGrafanaEvidence?: boolean } & Record<string, unknown> };
+
   const token = (label: string) => `consentprobe-${label}-${Math.random().toString(36).slice(2, 8)}`;
 
   async function setEvidence(request: APIRequestContext, sendGrafanaEvidence: boolean): Promise<void> {
@@ -100,7 +103,7 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
     const current = await request.get(settingsUrl);
     const currentText = await current.text();
     expect(current.ok(), currentText).toBeTruthy();
-    const meta = JSON.parse(currentText) as { jsonData?: Record<string, unknown> };
+    const meta: PluginMeta = JSON.parse(currentText);
     const resp = await request.post(settingsUrl, {
       data: {
         enabled: true,
@@ -112,13 +115,17 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
     expect(resp.ok(), respText).toBeTruthy();
   }
 
-  /** Ask twice so the second POST is the one that can carry Prior. */
+  /**
+   * Ask twice so the second POST is the one that can carry Prior. Completion is read
+   * from the intent box emptying — the page clears it on success, which also re-disables
+   * the submit button, so `toBeEnabled` never resolves after a successful Ask.
+   */
   async function askTwice(page: Page, first: string, second: string): Promise<void> {
     for (const text of [first, second]) {
       await page.getByTestId(testIds.dotai.intent).fill(text);
       await page.getByTestId(testIds.dotai.submit).click();
-      await expect(page.getByTestId(testIds.dotai.response)).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByTestId(testIds.dotai.submit)).toBeEnabled({ timeout: 30_000 });
+      await expect(page.getByTestId(testIds.dotai.response)).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId(testIds.dotai.intent)).toHaveValue('', { timeout: 20_000 });
     }
   }
 
@@ -165,28 +172,35 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
     page,
   }) => {
     await setEvidence(request, false);
-    try {
-      await gotoPage('/');
+    await gotoPage('/');
 
-      // The operator who opted out is the one most likely to be surprised, so the
-      // notice must still be present and must say the toggle does not cover Prior.
-      const notice = page.getByTestId(testIds.dotai.consent);
-      await expect(notice).toBeVisible();
-      await expect(notice).toContainText('Send Grafana evidence is off, so Asks read no datasource');
-      await expect(notice).toContainText('condensed Prior block of up to 240 characters');
-      await expect(notice).toContainText('The toggle does not cover Prior, Current or Map');
+    // The operator who opted out is the one most likely to be surprised, so the
+    // notice must still be present and must say the toggle does not cover Prior.
+    const notice = page.getByTestId(testIds.dotai.consent);
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('Send Grafana evidence is off, so Asks read no datasource');
+    await expect(notice).toContainText('condensed Prior block of up to 240 characters');
+    await expect(notice).toContainText('The toggle does not cover Prior, Current or Map');
 
-      const first = token('off-first');
-      await askTwice(page, `status of pod ${first} in namespace prod`, 'why is it restarting in namespace prod?');
+    const first = token('off-first');
+    await askTwice(page, `status of pod ${first} in namespace prod`, 'why is it restarting in namespace prod?');
 
-      const packed = followUp(await stubIntents(), first);
-      // Disclosure and egress agree: no fresh datasource block …
-      expect(packed.text, packed.text).not.toContain('Loki last 15m');
-      // … but prior-turn question text is on the wire regardless of the toggle.
-      expect(packed.text, packed.text).toContain('Prior:');
-      expect(packed.len).toBeLessThanOrEqual(1000);
-    } finally {
-      await setEvidence(request, true);
-    }
+    const packed = followUp(await stubIntents(), first);
+    // Disclosure and egress agree: no fresh datasource block …
+    expect(packed.text, packed.text).not.toContain('Loki last 15m');
+    // … but prior-turn question text is on the wire regardless of the toggle.
+    expect(packed.text, packed.text).toContain('Prior:');
+    expect(packed.len).toBeLessThanOrEqual(1000);
+  });
+
+  // Its own step, not a `finally`: a timed-out test has already disposed its request
+  // context, and a restore that cannot run leaves the app off for every later spec.
+  test('the evidence toggle is left back at its default', async ({ request }) => {
+    await setEvidence(request, true);
+    const resp = await request.get(`/api/plugins/${PLUGIN_ID}/settings`);
+    const text = await resp.text();
+    expect(resp.ok(), text).toBeTruthy();
+    const meta: PluginMeta = JSON.parse(text);
+    expect(meta.jsonData?.sendGrafanaEvidence).toBe(true);
   });
 });
