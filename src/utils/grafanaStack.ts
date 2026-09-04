@@ -372,11 +372,22 @@ export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
   return uids;
 }
 
-export function dashboardHintFromUids(uids: string[]): string {
-  if (uids.length === 0) {
-    return 'dashboards: none linked on firing alerts';
+/**
+ * Map hint for the dashboards Grafana attached to firing alerts. Three cases, because
+ * both the Current (700) and Map (400) budgets are fixed and every char spent here is
+ * a char of real evidence the packer sheds:
+ *
+ * - links exist                 → name them; the model can cite them.
+ * - alerts firing, no links     → say so; the explicit negative is the cheap defence
+ *                                 against inventing a dashboard link for an alert.
+ * - no alerts at all            → '' — there is nothing a dashboard could be linked to,
+ *                                 so the sentence would cost budget to say nothing.
+ */
+export function dashboardHintFromUids(uids: string[], alertsFiring = false): string {
+  if (uids.length > 0) {
+    return 'dashboards: ' + uids.map((u) => '/d/' + u).join(' ');
   }
-  return 'dashboards: ' + uids.map((u) => '/d/' + u).join(' ');
+  return alertsFiring ? 'dashboards: none linked on firing alerts' : '';
 }
 
 export function linesFromLokiFrames(frames: DataFrame[]): string[] {
@@ -489,13 +500,26 @@ function formatCurrent(args: {
   parts.push('');
   parts.push(`Alertmanager${scope}:`);
   parts.push(args.alertLines.length > 0 ? args.alertLines.join('\n') : args.alertNote ?? 'no alerts');
-  parts.push('');
-  parts.push('Dashboards (from firing alerts):');
-  parts.push(
+
+  // Dashboards are alert-derived, not a queried datasource, so unlike the four blocks
+  // above they have no "checked, found nothing" state of their own. Emitted in two of
+  // three cases: the links when Grafana attached any, and an explicit negative when
+  // alerts are firing but carry none — that negative is the cheap defence against the
+  // model inventing a link for an alert it can see. On a cluster with no firing alerts
+  // the block is omitted: there it cost 65 chars of the fixed 700-char MAX_CURRENT_CHARS
+  // budget to announce nothing, and the packer paid for it by shedding the last Loki
+  // line that still fitted.
+  const dashboardHint =
     args.dashboardUids.length > 0
       ? args.dashboardUids.map((u) => '/d/' + u).join('\n')
-      : '(none linked on firing alerts)'
-  );
+      : args.alertLines.length > 0
+        ? '(none linked on firing alerts)'
+        : '';
+  if (dashboardHint) {
+    parts.push('');
+    parts.push('Dashboards (from firing alerts):');
+    parts.push(dashboardHint);
+  }
 
   return parts.join('\n');
 }
@@ -645,7 +669,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   alertNote = amRes.note;
   dashboardUids = dashboardUidsFromAlertFrames(amRes.frames);
 
-  const mapHint = mapParts.join(', ') + ', ' + dashboardHintFromUids(dashboardUids);
+  const mapHint = [...mapParts, dashboardHintFromUids(dashboardUids, alertLines.length > 0)]
+    .filter(Boolean)
+    .join(', ');
   const tempoSearch = target.pod || target.namespace || question.slice(0, 80);
   const drilldowns = buildDrilldownLinks({
     lokiUid: loki?.settings?.uid,

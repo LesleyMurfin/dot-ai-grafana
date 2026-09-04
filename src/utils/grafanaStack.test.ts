@@ -11,6 +11,7 @@ import {
   LOG_LINE_CAP,
   parsePodNamespace,
 } from './grafanaStack';
+import { buildRequestText, MAX_INTENT_CHARS, mergeMap } from './progressiveContext';
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
@@ -238,6 +239,90 @@ describe('fetchStackContext', () => {
     const lokiReq = lokiQuery.mock.calls[0][0];
     expect(lokiReq.targets[0].expr).toMatch(/namespace=~/);
   });
+
+  // Dashboards are alert-derived, so the block has three cases and only two are worth
+  // budget. Current (700) and Map (400) are fixed, so every char spent here is a char of
+  // real evidence the packer sheds. Measured with the 30x77-char dump below and no firing
+  // alerts: Current 2523 chars packing to 957 and keeping 8 Loki lines, against 2588
+  // chars packing to 943 and keeping 7 when the "(none linked on firing alerts)"
+  // placeholder is emitted anyway. The placeholder cost the operator log line 07.
+  const lokiDump = Array.from(
+    { length: 30 },
+    (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(60)}`
+  );
+
+  function mockStack(alertFields: Array<Record<string, unknown>>) {
+    mockGet.mockImplementation(async (ref: string) => {
+      if (ref === 'loki-1' || ref === 'Loki') {
+        return { query: () => of({ data: [frameWithLineField(lokiDump)] }) };
+      }
+      if (ref === 'prom-1' || ref === 'Prometheus') {
+        return {
+          query: () => of({ data: [frameWithValue({ pod: 'checkout-api', namespace: 'prod' }, 12)] }),
+        };
+      }
+      if (ref === 'am-1' || ref === 'Alertmanager') {
+        return { query: () => of({ data: alertFields.length > 0 ? [{ fields: alertFields }] : [] }) };
+      }
+      return { query: () => of({ data: [] }) };
+    });
+  }
+
+  test('no firing alerts: no Dashboards block, and one more Loki line survives packing', async () => {
+    mockStack([]);
+
+    const question = 'top issues in the cluster';
+    const result = await fetchStackContext(question);
+
+    expect(result.alertLines).toEqual([]);
+    expect(result.current).not.toContain('Dashboards');
+    expect(result.mapHint).not.toContain('dashboards');
+    expect(result.mapHint).not.toMatch(/,\s*$/);
+
+    const packed = buildRequestText({
+      tool: 'query',
+      current: result.current,
+      map: mergeMap(result.mapHint, question),
+      box: question,
+    });
+    expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+    // Loki lines are peeled from the end, so the 8th line is the marginal one: the 65
+    // chars the placeholder used to spend are exactly what it costs.
+    expect(packed).toContain(lokiDump[7]);
+    expect(packed).toContain('Question:');
+    expect(packed).toContain(question);
+  });
+
+  test('alerts firing with no dashboard link: the explicit negative is still emitted', async () => {
+    mockStack([{ name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] }]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.current).toContain('KubePodCrashLooping');
+    // The model can see the alert, so it must be told there is no dashboard to cite
+    // rather than left to infer one.
+    expect(result.current).toContain('Dashboards (from firing alerts):');
+    expect(result.current).toContain('(none linked on firing alerts)');
+    expect(result.mapHint).toContain('dashboards: none linked on firing alerts');
+  });
+
+  test('alerts firing with dashboard links: the links are named in Current and Map', async () => {
+    mockStack([
+      {
+        name: 'alertname',
+        type: 'string',
+        values: ['KubePodCrashLooping'],
+        labels: { __dashboardUid__: 'abc12def' },
+      },
+    ]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.current).toContain('Dashboards (from firing alerts):');
+    expect(result.current).toContain('/d/abc12def');
+    expect(result.current).not.toContain('none linked');
+    expect(result.mapHint).toContain('dashboards: /d/abc12def');
+  });
 });
 
 describe('getDataSourceByType selection', () => {
@@ -311,7 +396,7 @@ describe('dashboardUidsFromAlertFrames', () => {
       } as never,
     ]);
     expect(uids).toEqual(['abc12def', 'panel-uid-1']);
-    expect(dashboardHintFromUids([])).toContain('none');
+    expect(dashboardHintFromUids([])).toBe('');
     expect(dashboardHintFromUids(uids)).toContain('/d/abc12def');
   });
 });
