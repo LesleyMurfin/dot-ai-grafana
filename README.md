@@ -57,6 +57,49 @@ Local Grafana (create-plugin docker):
 npm run server
 ```
 
+#### What `npm run server` starts (and overrides)
+
+The e2e harness changed this environment in three ways. All three apply to plain
+local development too, not just CI:
+
+1. **A second container.** `docker-compose.yaml` adds `dot-ai-stub`
+   (`python:3.12-alpine`, pinned by digest) running
+   `tests/harness/dot_ai_stub.py`. Grafana `depends_on` it, so it starts on every
+   `npm run server`. It publishes container port `8080` on host port **18080**
+   (`http://localhost:18080/healthz` returns per-tool upstream hit counters, which
+   the deny-path e2e specs read to prove a 403 happened with no upstream dial).
+2. **`apiUrl` points at that stub.** `provisioning/plugins/apps.yaml` provisions
+   `apiUrl: http://dot-ai-stub.svc:8080`. Grafana re-applies app provisioning on
+   **every start**, so it overwrites whatever you set in the plugin config UI. Local
+   dev therefore talks to a fake that answers `stub-query-ok: …`, which looks
+   enough like a working connection to be mistaken for one. (The previous value,
+   `127.0.0.1:3456`, resolved to the Grafana container's own loopback and could
+   never reach a host-side dot-ai either.)
+3. **Anonymous auth is off by default.** `docker-compose.yaml` sets
+   `GF_AUTH_ANONYMOUS_ENABLED: ${ANONYMOUS_AUTH_ENABLED:-false}` as a runtime env
+   var, overriding the image default baked from the create-plugin base build arg
+   (`true`). You now get a **login page** instead of an automatic Admin session;
+   log in with `admin` / `admin` (`GF_AUTH_BASIC_ENABLED: 'true'` is set alongside).
+   Set `ANONYMOUS_AUTH_ENABLED=true` to get the old auto-Admin behaviour back.
+
+To point local dev at a **real** dot-ai instead of the stub, override the
+provisioned value at runtime rather than editing the tracked file — the app
+provisioning file is committed, so an edit there is easy to `git commit` by
+accident (and it carries the e2e bearer placeholder):
+
+```bash
+# One-off: run Grafana without the provisioning mount, then configure the plugin in the UI.
+GF_PATHS_PROVISIONING=/etc/grafana/provisioning-empty npm run server
+
+# Or keep a local, untracked copy of the provisioning file and point Compose at it:
+cp provisioning/plugins/apps.yaml /tmp/apps.local.yaml   # edit apiUrl/apiKey there
+# then mount /tmp/apps.local.yaml over provisioning/plugins/apps.yaml in a
+# docker-compose.override.yaml (untracked) for your machine only.
+```
+
+Note that `provisioning/plugins/apps.yaml`'s hostname is load-bearing for the
+test suite — see the comment in that file before changing it.
+
 ## Releasing
 
 Tag the version and the [release workflow](.github/workflows/release.yml) does
