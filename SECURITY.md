@@ -53,7 +53,7 @@ attacker-chosen URL, or present a misleading or destructive recommendation.
 
 The governing invariant is **telemetry is data, never instruction**. Any concrete way to break it
 is a valid report, including the no-attacker case (HTML or markdown that legitimately appears in a
-stack trace). Background, impact classes `I1`–`I6`, and the control set live in
+stack trace). Background, impact classes `I1`–`I11`, and the control set live in
 [`prds/1-grafana-ai-cluster-intelligence.md` → *Expansion: Untrusted telemetry trust boundary*](prds/1-grafana-ai-cluster-intelligence.md#untrusted-telemetry-trust-boundary).
 
 ## Out of scope for this repository
