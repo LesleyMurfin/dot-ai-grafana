@@ -222,8 +222,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           description="Write one JSON line per query/remediate hop to /var/lib/grafana/dotai-ask.log (no tokens). Off by default."
           className={s.marginTop}
         >
-          <span data-testid={testIds.appConfig.debugLog}>
+          <span>
             <Switch
+              data-testid={testIds.appConfig.debugLog}
               value={state.debugLog}
               onChange={(event) => {
                 setState({ ...state, debugLog: event.currentTarget.checked });
@@ -237,8 +238,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           description="Show Current, Map, and History on the page. Packing still runs when this is off. On by default."
           className={s.marginTop}
         >
-          <span data-testid={testIds.appConfig.showContext}>
+          <span>
             <Switch
+              data-testid={testIds.appConfig.showContext}
               value={state.showContext}
               onChange={(event) => {
                 setState({ ...state, showContext: event.currentTarget.checked });
@@ -252,8 +254,9 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
           description="When on, Query packs Loki/Prometheus/Tempo/Alertmanager into the Ask. Off = question text only. On by default."
           className={s.marginTop}
         >
-          <span data-testid={testIds.appConfig.sendGrafanaEvidence}>
+          <span>
             <Switch
+              data-testid={testIds.appConfig.sendGrafanaEvidence}
               value={state.sendGrafanaEvidence}
               onChange={(event) => {
                 setState({ ...state, sendGrafanaEvidence: event.currentTarget.checked });

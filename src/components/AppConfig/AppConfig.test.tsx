@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { of } from 'rxjs';
@@ -11,6 +11,61 @@ jest.mock('@grafana/runtime', () => ({
 }));
 
 const mockGetBackendSrv = getBackendSrv as jest.MockedFunction<typeof getBackendSrv>;
+
+type LocationImpl = { reload: () => void };
+
+let restoreLocationStub: (() => void) | null = null;
+
+/**
+ * `AppConfig` reloads the page after a successful save, so these tests need `window.location.reload`
+ * to be observable. How that is possible depends on the jsdom version:
+ *
+ * - jsdom <= 21 (jest-environment-jsdom 29): `window.location` is a configurable accessor, so the
+ *   whole object can be replaced. It must be replaced with `configurable: true`, otherwise the next
+ *   test to stub it fails with `TypeError: Cannot redefine property: location`.
+ * - jsdom >= 22 (jest-environment-jsdom 30): `Location` is implemented with WebIDL
+ *   [LegacyUnforgeable] members. `window.location` is a non-configurable accessor and
+ *   `location.reload` is a non-writable own property, so `Object.defineProperty(window, 'location')`
+ *   throws `Cannot redefine property: location` and `jest.spyOn(window.location, 'reload')` throws
+ *   `Cannot assign to read only property 'reload'`. The wrapper delegates to a jsdom implementation
+ *   object, which is writable, so the stub goes there instead.
+ *
+ * Either way the stub is undone after every test so it cannot leak into another suite.
+ */
+function stubLocationReload(): jest.Mock {
+  const reloadMock = jest.fn();
+  const descriptor = Object.getOwnPropertyDescriptor(window, 'location');
+
+  if (descriptor?.configurable) {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { reload: reloadMock },
+    });
+    restoreLocationStub = () => {
+      Object.defineProperty(window, 'location', descriptor);
+    };
+    return reloadMock;
+  }
+
+  const implSymbol = Object.getOwnPropertySymbols(window.location).find((symbol) => String(symbol) === 'Symbol(impl)');
+  if (!implSymbol) {
+    throw new Error('Cannot stub window.location.reload: window.location is unforgeable and exposes no jsdom impl');
+  }
+
+  const impl = (window.location as unknown as Record<symbol, LocationImpl>)[implSymbol];
+  // Own property shadowing `LocationImpl.prototype.reload`; deleting it restores the real one.
+  impl.reload = reloadMock;
+  restoreLocationStub = () => {
+    delete (impl as Partial<LocationImpl>).reload;
+  };
+  return reloadMock;
+}
+
+function restoreLocation(): void {
+  restoreLocationStub?.();
+  restoreLocationStub = null;
+}
 
 describe('Components/AppConfig', () => {
   let props: AppConfigProps;
@@ -34,6 +89,10 @@ describe('Components/AppConfig', () => {
       },
       query: {},
     } as unknown as AppConfigProps;
+  });
+
+  afterEach(() => {
+    restoreLocation();
   });
 
   test('renders API settings with auth token, URL, save and test connection', () => {
@@ -130,11 +189,7 @@ describe('Components/AppConfig', () => {
 
   test('submit saves apiUrl and omits secureJsonData when key is already stored', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
+    const reloadMock = stubLocationReload();
 
     const plugin = {
       meta: {
@@ -175,11 +230,7 @@ describe('Components/AppConfig', () => {
 
   test('submit sends a newly typed auth token as secureJsonData', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
+    const reloadMock = stubLocationReload();
 
     const plugin = {
       meta: {
@@ -216,11 +267,7 @@ describe('Components/AppConfig', () => {
 
   test('submit persists Debug Log on and Show context off', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
+    stubLocationReload();
 
     const plugin = {
       meta: {
@@ -236,8 +283,8 @@ describe('Components/AppConfig', () => {
     // @ts-ignore
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.debugLog)).getByRole('checkbox'));
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.showContext)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId(testIds.appConfig.debugLog));
+    fireEvent.click(screen.getByTestId(testIds.appConfig.showContext));
     fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
 
     await waitFor(() => {
@@ -256,11 +303,7 @@ describe('Components/AppConfig', () => {
 
   test('submit persists Send Grafana evidence off', async () => {
     mockFetch.mockReturnValue(of({ data: {} }));
-    const reloadMock = jest.fn();
-    Object.defineProperty(window, 'location', {
-      writable: true,
-      value: { reload: reloadMock },
-    });
+    stubLocationReload();
 
     const plugin = {
       meta: {
@@ -276,7 +319,7 @@ describe('Components/AppConfig', () => {
     // @ts-ignore
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.sendGrafanaEvidence)).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId(testIds.appConfig.sendGrafanaEvidence));
     fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
 
     await waitFor(() => {
@@ -292,5 +335,4 @@ describe('Components/AppConfig', () => {
       sendGrafanaEvidence: false,
     });
   });
-
 });
