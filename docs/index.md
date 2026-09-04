@@ -10,9 +10,9 @@ sidebar_position: 1
 
 ## What is the Grafana Plugin?
 
-The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin is a page you open in [Grafana](https://grafana.com) when something is red. You ask *why is checkout failing?* in the tab you are already in; the plugin gathers the Loki, Prometheus, and Tempo evidence around that question, sends it with your question to the [dot-ai engine](https://devopstoolkit.ai/docs/ai-engine), which inspects live cluster state, and hands back an answer plus links into Explore and the Drilldown apps for the datasources involved. It is a human surface: the operator on call types into it and reads the answer. The engine does the reasoning; the plugin exposes no MCP server and no tool API for an AI client to drive.
+The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin is a page you open in [Grafana](https://grafana.com) when something is red. You ask *why is checkout failing?* in the tab you are already in; the plugin gathers the Loki, Prometheus, and Tempo evidence around that question, sends it with your question to the [dot-ai engine](https://devopstoolkit.ai/docs/ai-engine), which inspects live cluster state, and hands back an answer. It is a human surface: the operator on call types into it and reads the answer. The engine does the reasoning; the plugin exposes no MCP server and no tool API for an AI client to drive.
 
-So you stop context-switching between Grafana, a terminal, and a chat window, and stop hand-copying log lines and pod names into a prompt. Ask short questions — the packed evidence competes with your wording inside one 1000-character intent. The questions worth asking here are the ones a Grafana-only assistant cannot answer, because it cannot see the cluster, and a cluster-only agent cannot answer, because it cannot see your dashboards:
+So you stop context-switching between Grafana, a terminal, and a chat window, and stop hand-copying log lines and pod names into a prompt. Ask short questions — your wording and the packed evidence share one 1000-character intent, so a long question leaves less room for the evidence traveling with it. The questions worth asking here are the ones a Grafana-only assistant cannot answer, because it cannot see the cluster, and a cluster-only agent cannot answer, because it cannot see your dashboards:
 
 - **Restarts with no obvious cause** — *"why is checkout restarting?"* → the top pods by restart count in the last 15m travel with the question while the engine inspects the workload behind them.
 - **The logs point at one node** — *"why these errors on node-3?"* → the Loki error lines on screen go with the question; the engine looks at the node and pods behind them.
@@ -29,13 +29,13 @@ Whoever is signed in to Grafana uses it under their existing **org role**; there
 
 ### Query
 
-Ask natural language questions about your cluster. Answers render as Grafana-sanitized GitHub-flavored markdown: headings, lists, code, tables, links.
+Ask natural language questions about your cluster. The engine's answer renders as plain text.
 
-On Query, the page reads configured Loki, Prometheus, and Tempo datasources via Grafana's datasource service (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** keeps the last 5 turns in full on screen. A condensed **Prior:** block (referents over prose, soft-capped near 240 characters) joins that intent when the 1000-character budget has room after Stable/Current/Map/Question. Under pressure the packer sheds Map, shrinks Prior, then drops it, drops the Tempo block, and finally peels Loki lines — on a busy cluster the Loki block can shrink to `…`, so neither Prior nor a full log excerpt is guaranteed, and a long question is the last thing the hard cap cuts. One Ask may issue up to 3 dot-ai POSTs.
+On Query, the page reads configured Loki, Prometheus, and Tempo datasources via Grafana's datasource service (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** stays on screen only — the last 5 turns in full — and is never sent to the engine. The packed intent is capped at 1000 characters, and your question is reserved *before* the evidence is packed: under pressure the packer drops plugin-written follow-up lines, drops Map, drops the Tempo block, peels Loki, then Prometheus, then Alertmanager lines, and finally caps the Current block itself — never the packed tail that carries the question. On a busy cluster the Loki block can shrink to `…`, so a full log excerpt is not guaranteed. Keep questions short anyway: a long question crowds out evidence, and if the preamble plus the question alone overflow the budget the question is capped as the last resort. One Ask may issue up to 3 dot-ai POSTs.
 
-**Map** holds UI-only navigation links built from the same stack read: Explore panes for logs, metrics, and traces (pre-filled query + last-15m range), up to five per-trace Explore links, and optional Logs / Metrics / Traces Drilldown app links when those apps are installed. No Grafana `/api/search`.
+**Map** is a short list of the namespaces and pods that came up in the evidence and the conversation — tokens like `ns/payments, pod/checkout-7d9f` (and `checkout@payments` for a bare "name in namespace" mention), up to twelve and at most 400 characters. It is shown on the page as plain text and travels inside the intent as follow-up referents, so "why is *that* one restarting?" resolves. It is not built from a Grafana search API.
 
-**Show-me navigation.** Complete phrases such as `show me the logs`, `open metrics`, or `display the traces` load Grafana evidence and Map links only — zero dot-ai hops. Diagnosis wording (`why`, `error`, `crash`, `failing`, `analyze`, `remediate`) keeps the normal engine path.
+**Question routing.** Observability wording (`logs`, `metrics`, `traces`, `alerts`, `top issues`, `crash`, `failing`, `restarts`) — and anything the plugin does not recognise as inventory wording, which is the default — reads the Grafana stack first, then asks the engine with that evidence attached. Inventory wording (`list namespaces`, `show pods`) goes straight to the engine. Either way, every Ask makes at least one engine call.
 
 While an Ask is in flight, **Cancel** aborts it. Failures show an error Alert with distinct titles (timed out, authentication failed, permission denied, not found, unreachable, cancelled); **Retry** re-runs the same intent text.
 
@@ -64,7 +64,7 @@ Allow the unsigned plugin:
 GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app
 ```
 
-**From a release**
+**From a release** (once the first release is cut — no tags exist yet, so build from source until then)
 
 1. Take `devopstoolkit-dotai-app-<version>.zip` from the [latest release](https://github.com/vfarcic/dot-ai-grafana/releases).
 2. Verify it against the published `.sha256`.
@@ -89,10 +89,12 @@ As Grafana **Admin**: open **Configuration** under **dot-ai** in the left nav, o
 |---------|---------|-------------|
 | MCP Server URL | _(empty)_ | Absolute `http(s)` base for the dot-ai tools REST API, and nothing else. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. |
 | Auth Token | _(empty)_ | Plugin backend credential to the dot-ai engine, stored in Grafana encrypted settings and sent as `Authorization: Bearer`. Use an analysis-only token with no apply rights. |
-| Debug Log | Off | JSONL ask log at `/var/lib/grafana/dotai-ask.log`. May include packed Current (Loki/Prom lines). No Grafana tokens. |
-| Show context | On | Show Current, Map (Explore / Drilldown links), and History on the page. Display only; intent packing still runs when this is off. |
-| Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo facts and the page shows a consent info Alert. Missing/undefined = send. Independent of Show context. |
+| Debug Log | Off | JSONL ask log at `/var/lib/grafana/dotai-ask.log`. May include packed Current (Loki/Prom lines). Each line records the Grafana user `login` and org `role`; never their email or display name. No Grafana tokens. |
+| Show context | On | Show Current, Map, and History on the page. Display only; intent packing still runs when this is off. |
+| Send Grafana evidence | On | When on, Asks pack Grafana datasource facts and the page shows a consent info Alert naming them (Loki, Prometheus, Tempo, Alertmanager). Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Admin-only. Probes `POST /api/v1/tools/version` through the plugin backend |
+
+Alertmanager is named in that consent Alert because an Ask also queries a configured Alertmanager datasource cluster-wide. It is resolved like the others, through Grafana's datasource service rather than a hardcoded UID, which does not surface Grafana's own built-in Alertmanager — so in practice Current reports it as missing unless a standalone Alertmanager datasource is configured ([issue #47](https://github.com/vfarcic/dot-ai-grafana/issues/47)). That is why the evidence described above is Loki, Prometheus, and Tempo.
 
 **Authentication and authorization.** The plugin uses the signed-in Grafana user and their **org role**, with no separate plugin login, user directory, or per-user credential. **Editor or above** runs Query and Remediate; **Admin** opens Configuration and runs **Test connection**. The **Auth Token** row above is the plugin backend's own credential to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API — not a user identity.
 
@@ -104,17 +106,17 @@ An Ask resolves in at most three engine hops. The browser never talks to the eng
   Ask ── Remediate: pack Query Current + issue ── 1x POST /remediate
     │
     └── Query
-          Read Loki/Prom/Tempo  →  Current + Map links + condensed Prior (budget-dependent)
+          Read Loki/Prom/Tempo  →  Current + Map hints
           classifyFirstHop:
-            logs/metrics/traces/"top issues"/default → grafana
-            list/show namespaces|pods|…                   → dot-ai
-          grafana path + pure show-me phrase → 0 hops (Map links only; no POST)
-          hop 1: POST /query  intent=Stable+Current+Prior?+Map+question
+            alerts/logs/metrics/traces/"top issues"/default → grafana
+            list/show namespaces|pods|…                     → dot-ai
+          hop 1: POST /query  intent=Stable+Current+Map+question  (≤1000 chars,
+                 question reserved first; evidence sheds, never the question)
           hop 2: unscoped → across   OR   answer denies Current → conflict
           hop 3: still hedges → hedge     (cap 3)
           Go strips hop meta, writes ask log, Bearer to dot-ai
           dot-ai query toolLoop (kubectl/MCP) returns summary
-          Answer renders as sanitized markdown; Map holds Explore/Drilldown links
+          Answer renders as plain text
 ```
 
 Each POST above travels that same path:
@@ -135,7 +137,7 @@ Outbound engine auth on this path is `Authorization: Bearer` (not `X-Dot-AI-Auth
 |---------|---------|
 | >= 11.0 | Minimum supported |
 | 11.4 | Reference host (`@grafana/*` libraries pinned here) |
-| Later majors | CI e2e exercises **11.0.x**, **11.3.x**, **12.0.x**, **12.4.x**, **13.2.x**, and **nightly** |
+| Later majors | CI e2e exercises the current and recent Grafana majors on every PR, resolved by `grafana/plugin-actions/e2e-version` |
 
 ## Releasing
 
