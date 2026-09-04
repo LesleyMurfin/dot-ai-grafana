@@ -1,36 +1,52 @@
 import { test, expect } from './fixtures';
 import {
-  PLUGIN_ID,
   PROVISIONED_API_KEY,
   UPSTREAM_INTERNAL_FIELD,
   UPSTREAM_SECRET_MARKER,
   asEnvelope,
   bodyContainsForbidden,
+  dialProbe,
   isStableEnvelope,
   resourcePath,
+  stubHealth,
 } from './byDesignHelpers';
 
 /**
  * Security by design — real HTTP path /api/plugins/<id>/resources/*.
  *
- * On main (no isEditorOrAbove gate) Viewer is EXPECTED to receive 200 from
- * /query and /remediate when the stub upstream is up. That red is the proof
- * the control is absent. With PR #25 applied, the same unedited specs expect 403.
+ * Every deny case plants a unique DIALPROBE token in the request body and
+ * snapshots the stub's GET /healthz counters before and after, then asserts a
+ * zero delta for that probe: the denial happened with **no upstream dial**
+ * (#44 S1/S2/S5/S7), measured rather than inferred from response body markers.
+ * The body-marker assertions are kept alongside.
  */
 
 const viewerState = 'playwright/.auth/viewer.json';
 const editorState = 'playwright/.auth/editor.json';
 const adminState = 'playwright/.auth/admin.json';
 
+/** Probe delta for one token, plus the per-tool totals for failure context. */
+async function probeDelta(token: string): Promise<{ delta: number; detail: string }> {
+  const after = await stubHealth();
+  return {
+    delta: after.probes[token] ?? 0,
+    detail: `stub hits=${JSON.stringify(after.hits)} probes[${token}]=${after.probes[token] ?? 0}`,
+  };
+}
+
 test.describe('Security by design — Viewer denied on tool routes', () => {
   test.use({ storageState: viewerState });
 
   for (const tool of ['query', 'remediate'] as const) {
-    test(`Viewer POST /${tool} is refused with HTTP 403 and no upstream body`, async ({ request }) => {
+    test(`Viewer POST /${tool} is refused with HTTP 403 and no upstream dial`, async ({ request }) => {
+      const probe = dialProbe(`viewer-${tool}`);
+      const before = await stubHealth();
+      expect(before.probes[probe], 'probe token must be unused before the request').toBeUndefined();
+
       const body =
         tool === 'query'
-          ? { intent: 'list pods in default' }
-          : { issue: 'crashloop on checkout', intent: 'crashloop on checkout' };
+          ? { intent: `list pods in default ${probe}` }
+          : { issue: `crashloop on checkout ${probe}`, intent: `crashloop on checkout ${probe}` };
 
       const resp = await request.post(resourcePath(tool), { data: body });
       const text = await resp.text();
@@ -41,11 +57,15 @@ test.describe('Security by design — Viewer denied on tool routes', () => {
         json = text;
       }
 
-      // THE GATE ASSERTION — red on main without PR #25, green with it.
+      // THE GATE ASSERTION — red without the role gate (PR #25), green with it.
       expect(
         resp.status(),
         `Viewer /${tool} must be HTTP 403 (role gate). body=${text}`
       ).toBe(403);
+
+      // THE NO-DIAL ASSERTION — fails if the gate dialled upstream and discarded it.
+      const { delta, detail } = await probeDelta(probe);
+      expect(delta, `Viewer /${tool} denial must not dial upstream. ${detail}`).toBe(0);
 
       const forbidden = bodyContainsForbidden(
         json,
@@ -72,7 +92,11 @@ test.describe('Security by design — unauthenticated caller', () => {
 
   for (const tool of ['query', 'remediate'] as const) {
     test(`unauthenticated POST /${tool} is not treated as an authorized tool call`, async ({ request }) => {
-      const body = tool === 'query' ? { intent: 'whoami' } : { issue: 'whoami' };
+      const probe = dialProbe(`anon-${tool}`);
+      const before = await stubHealth();
+      expect(before.probes[probe], 'probe token must be unused before the request').toBeUndefined();
+
+      const body = tool === 'query' ? { intent: `whoami ${probe}` } : { issue: `whoami ${probe}` };
       const resp = await request.post(resourcePath(tool), { data: body });
       const text = await resp.text();
       let json: unknown;
@@ -88,6 +112,9 @@ test.describe('Security by design — unauthenticated caller', () => {
         [401, 403].includes(resp.status()),
         `unauthenticated /${tool} status=${resp.status()} body=${text}`
       ).toBeTruthy();
+
+      const { delta, detail } = await probeDelta(probe);
+      expect(delta, `unauthenticated /${tool} must not dial upstream. ${detail}`).toBe(0);
 
       const forbidden = bodyContainsForbidden(
         json,
@@ -121,10 +148,6 @@ test.describe('Security by design — Editor allowed on tool routes', () => {
         json = text;
       }
 
-      expect(
-        resp.status(),
-        `Editor /${tool} must not be role-denied. body=${text}`
-      ).not.toBe(403);
       expect(resp.status(), `Editor /${tool} should reach the tool proxy. body=${text}`).toBe(200);
       expect(isStableEnvelope(json)).toBeTruthy();
       const env = asEnvelope(json);
@@ -162,61 +185,63 @@ test.describe('Security by design — Admin allowed on tool routes', () => {
 });
 
 test.describe('Security by design — Test-connection Admin gate', () => {
+  /**
+   * A draft apiUrl pointed at the stub with a unique DIALPROBE path segment:
+   * test-connection forwards only the draft URL (body is `{}` upstream), so the
+   * probe has to ride in the path. A denial that still dialled would show up as
+   * `probes[token] === 1`.
+   */
+  const draftProbeUrl = (probe: string) => `http://dot-ai-stub.svc:8080/${probe}`;
+
   test('Admin can test-connection against saved settings', async ({ request }) => {
     const resp = await request.post(resourcePath('test-connection'), { data: {} });
     const text = await resp.text();
-    // Saved settings probe is allowed; stub version returns connected.
-    expect(resp.ok() || resp.status() === 200, text).toBeTruthy();
+    const json = JSON.parse(text) as Record<string, unknown>;
+
+    // Saved-settings probe is allowed and answers on the test-connection contract.
+    expect(resp.status(), text).toBe(200);
+    expect(json.status, text).toBe('ok');
+    expect(json.connected, text).toBe(true);
+    expect(json.upstreamStatus, text).toBe(200);
+    expect(bodyContainsForbidden(text, PROVISIONED_API_KEY, UPSTREAM_SECRET_MARKER), text).toEqual([]);
   });
 
-  test('Viewer cannot probe a draft apiUrl (Admin-only)', async ({ browser }) => {
-    const context = await browser.newContext({ storageState: viewerState });
-    const resp = await context.request.post(resourcePath('test-connection'), {
-      data: { apiUrl: 'http://127.0.0.1:9', apiKey: 'draft-key' },
-    });
-    const text = await resp.text();
-    expect(resp.status(), text).toBe(403);
-    expect(text).not.toContain(UPSTREAM_SECRET_MARKER);
-    expect(text).not.toContain(PROVISIONED_API_KEY);
-    await context.close();
-  });
+  for (const [role, state] of [
+    ['Viewer', viewerState],
+    ['Editor', editorState],
+  ] as const) {
+    test(`${role} cannot probe a draft apiUrl (Admin-only, no dial)`, async ({ browser }) => {
+      const probe = dialProbe(`${role.toLowerCase()}-testconn`);
+      const before = await stubHealth();
+      expect(before.probes[probe], 'probe token must be unused before the request').toBeUndefined();
 
-  test('Editor cannot probe a draft apiUrl (Admin-only)', async ({ browser }) => {
-    const context = await browser.newContext({ storageState: editorState });
-    const resp = await context.request.post(resourcePath('test-connection'), {
-      data: { apiUrl: 'http://127.0.0.1:9', apiKey: 'draft-key' },
+      const context = await browser.newContext({ storageState: state });
+      const resp = await context.request.post(resourcePath('test-connection'), {
+        data: { apiUrl: draftProbeUrl(probe), apiKey: 'draft-key' },
+      });
+      const text = await resp.text();
+      expect(resp.status(), text).toBe(403);
+
+      const { delta, detail } = await probeDelta(probe);
+      expect(delta, `${role} test-connection denial must not dial upstream. ${detail}`).toBe(0);
+
+      expect(text).not.toContain(UPSTREAM_SECRET_MARKER);
+      expect(text).not.toContain(PROVISIONED_API_KEY);
+      await context.close();
     });
-    const text = await resp.text();
-    expect(resp.status(), text).toBe(403);
-    await context.close();
-  });
+  }
 });
 
 test.describe('Security by design — upstream errors never dump raw body', () => {
   test.use({ storageState: adminState });
 
-  test('upstream 5xx becomes stable envelope without secret fields', async ({ request }) => {
-    const resp = await request.post(resourcePath('query'), {
-      data: { intent: 'TRIGGER_UPSTREAM_5XX please' },
-    });
-    const text = await resp.text();
-    const json = JSON.parse(text);
-
-    expect(isStableEnvelope(json)).toBeTruthy();
-    expect(resp.status()).toBe(503);
-    const env = asEnvelope(json);
-    expect(env.ok).toBe(false);
-
-    const forbidden = bodyContainsForbidden(
-      json,
-      UPSTREAM_SECRET_MARKER,
-      UPSTREAM_INTERNAL_FIELD,
-      PROVISIONED_API_KEY,
-      'debug_stack'
-    );
-    expect(forbidden, text).toEqual([]);
-  });
-
+  /**
+   * Upstream 5xx → stable envelope is asserted once, in
+   * tests/reliability-by-design.spec.ts ("upstream 5xx degrades to stable
+   * envelope"), whose assertions are a superset of the copy that used to live
+   * here. Unit coverage: pkg/plugin/resources_test.go:751
+   * (TestProxyTools/upstream_error_envelope).
+   */
   test('upstream 403 is remapped to 502 envelope (not session-looking 403)', async ({ request }) => {
     const resp = await request.post(resourcePath('query'), {
       data: { intent: 'TRIGGER_UPSTREAM_403 please' },
@@ -242,7 +267,7 @@ test.describe('Security by design — remediate allowlist (no execute)', () => {
         intent: 'scale deployment',
         execute: true,
         apply: true,
-        mode: 'auto',
+        mode: 'execute',
         confirm: 'yes',
       },
     });
@@ -251,14 +276,10 @@ test.describe('Security by design — remediate allowlist (no execute)', () => {
 
     expect(resp.status(), text).toBe(200);
     expect(isStableEnvelope(json)).toBeTruthy();
-    const summary = String(asEnvelope(json).summary || '');
-    // Stub would echo STUB_SAW_EXECUTE_KEYS if allowlist leaked.
-    expect(summary).not.toContain('STUB_SAW_EXECUTE_KEYS');
-    expect(summary).toContain('stub-remediate-ok');
+    const env = asEnvelope(json);
+    expect(env.ok).toBe(true);
+    // Stub plants STUB_SAW_EXECUTE_KEYS if any execute-ish key survives the allowlist.
+    expect(String(env.summary || ''), text).not.toMatch(/STUB_SAW_EXECUTE_KEYS/);
+    expect(String(env.summary || '')).toContain('stub-remediate-ok');
   });
-});
-
-// Reference plugin id so a rename fails loudly.
-test('plugin id is stable for resource paths', async () => {
-  expect(PLUGIN_ID).toBe('devopstoolkit-dotai-app');
 });

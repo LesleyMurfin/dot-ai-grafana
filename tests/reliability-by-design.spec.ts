@@ -25,6 +25,14 @@ const adminState = 'playwright/.auth/admin.json';
 test.describe('Reliability by design — upstream degradation envelope', () => {
   test.use({ storageState: adminState });
 
+  /**
+   * Single e2e copy of upstream-5xx → stable envelope; the near-identical case
+   * that lived in tests/security-by-design.spec.ts was removed rather than run
+   * twice per matrix cell. Unit equivalent (envelope shape, error mapping, no
+   * raw upstream body): pkg/plugin/resources_test.go:751
+   * (TestProxyTools/upstream_error_envelope). This case adds what the unit test
+   * cannot see: the response really traverses Grafana's resource HTTP path.
+   */
   test('upstream 5xx degrades to stable envelope (not raw error page)', async ({ request }) => {
     const resp = await request.post(resourcePath('query'), {
       data: { intent: 'TRIGGER_UPSTREAM_5XX reliability' },

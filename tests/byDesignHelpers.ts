@@ -44,3 +44,44 @@ export function bodyContainsForbidden(body: unknown, ...needles: string[]): stri
   const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
   return needles.filter((n) => n && text.includes(n));
 }
+
+/**
+ * Host-reachable base URL of the dot-ai stub (docker-compose.yaml publishes
+ * container port 8080 on host 18080). Overridable for non-default setups.
+ */
+export const STUB_BASE_URL = process.env.DOT_AI_STUB_URL || 'http://localhost:18080';
+
+export type StubCounters = Record<string, number>;
+
+export type StubHealth = {
+  /** Per-tool POST counters (version/query/remediate/other). */
+  hits: StubCounters;
+  /** Per-request `DIALPROBE-<id>` counters, one key per probe the stub has seen. */
+  probes: StubCounters;
+};
+
+/**
+ * Upstream hit counters from the stub's GET /healthz — the measurement behind
+ * #44's "403 with no upstream dial". A gate that dialled upstream and then
+ * discarded the result would still bump these.
+ *
+ * Deny-path specs assert on `probes[token]` rather than `hits[tool]`: the suite
+ * is `fullyParallel`, so allow-path tests move the per-tool totals concurrently,
+ * while a probe token is unique to one request.
+ */
+export async function stubHealth(): Promise<StubHealth> {
+  const resp = await fetch(`${STUB_BASE_URL}/healthz`);
+  if (!resp.ok) {
+    throw new Error(`dot-ai stub /healthz returned HTTP ${resp.status} at ${STUB_BASE_URL}`);
+  }
+  const body = (await resp.json()) as Partial<StubHealth>;
+  if (!body || typeof body.hits !== 'object' || body.hits === null) {
+    throw new Error(`dot-ai stub /healthz payload has no hits map: ${JSON.stringify(body)}`);
+  }
+  return { hits: body.hits, probes: body.probes ?? {} };
+}
+
+/** Unique per-request dial probe token, planted in the request body. */
+export function dialProbe(label: string): string {
+  return `DIALPROBE-${label}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
