@@ -6,8 +6,6 @@ sidebar_position: 1
 
 **AI-powered Kubernetes cluster intelligence inside Grafana — query and analysis-only remediate with natural language.**
 
-This page describes the plugin after the ready-to-merge access-control and Prior-packing changes land; it is not a snapshot of today's `main` alone.
-
 ---
 
 ## What is the Grafana Plugin?
@@ -118,7 +116,7 @@ Query and remediate calls use a **120s** ceiling; version/health probes use **15
 |---------|---------|
 | >= 11.0 | Minimum supported |
 | 11.4 | Reference host (`@grafana/*` libraries pinned here) |
-| Later majors | Exercised via the project's dynamic CI e2e Grafana image matrix; local docker default is currently **13.1.0** |
+| Later majors | CI e2e exercises **11.0.x**, **11.3.x**, **12.0.x**, **12.4.x**, **13.2.x**, and **nightly** |
 
 ## Releasing
 
