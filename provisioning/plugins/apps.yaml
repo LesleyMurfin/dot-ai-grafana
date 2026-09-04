@@ -6,6 +6,16 @@ apps:
     org_name: 'devopstoolkit'
     disabled: false
     jsonData:
-      apiUrl: http://127.0.0.1:3456
+      # .svc suffix satisfies allowPlainHTTPHost (in-cluster DNS shape).
+      # Compose alias maps this name to the stub service.
+      #
+      # LOAD-BEARING HOSTNAME — do not "tidy" this value. tests/appConfig.spec.ts:42
+      # only skips its save-and-clobber flow while looksLikeLiveMcpUrl(currentUrl)
+      # is true, and it matches on the `dot-ai` / `.svc` substrings. Drop either
+      # substring and that spec starts overwriting apiUrl/apiKey mid-run under
+      # playwright.config.ts `fullyParallel: true`, breaking the by-design specs
+      # non-deterministically.
+      apiUrl: http://dot-ai-stub.svc:8080
     secureJsonData:
-      apiKey: 'dev-token'
+      # Unique value used by privacy specs: must never appear in settings/resources/bundle.
+      apiKey: 'bydesign-e2e-bearer-token-do-not-leak'

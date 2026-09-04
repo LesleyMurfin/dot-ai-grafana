@@ -3,3 +3,30 @@ services:
     extends:
       file: .config/docker-compose-base.yaml
       service: grafana
+    environment:
+      # Keep anonymous off so Viewer/Editor org roles are real (matches CI).
+      GF_AUTH_ANONYMOUS_ENABLED: ${ANONYMOUS_AUTH_ENABLED:-false}
+      # Form/API login used by plugin-e2e createUser + login fixtures.
+      GF_AUTH_BASIC_ENABLED: 'true'
+    depends_on:
+      - dot-ai-stub
+
+  # Stub dot-ai tools REST so authorization assertions are not dial failures.
+  dot-ai-stub:
+    # Pinned by digest (index digest of python:3.12-alpine, resolved 2026-09-04),
+    # matching how this repo pins GitHub Actions by SHA.
+    image: python:3.12-alpine@sha256:b64631e04e4920160c50fbe8d8df828f7f35f06f425cb44aa09bca53e708a35a
+    container_name: dot-ai-stub
+    volumes:
+      - ./tests/harness/dot_ai_stub.py:/app/dot_ai_stub.py:ro
+    command: ['python', '/app/dot_ai_stub.py']
+    # Published (not just `expose`d) so Playwright on the host can read
+    # GET /healthz hit counters and assert a zero delta on deny paths.
+    # 18080 avoids Grafana (3000) and delve (2345).
+    ports:
+      - '18080:8080'
+    networks:
+      default:
+        aliases:
+          # Matches provisioning apiUrl host; passes plugin allowPlainHTTPHost.
+          - dot-ai-stub.svc
