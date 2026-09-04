@@ -12,7 +12,9 @@ sidebar_position: 1
 
 The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin brings AI-powered cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of the pair: Grafana owns **query** and **analysis-only remediate**; the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp) owns operate / execute.
 
-The plugin follows **Grafana's own user authentication and authorization model**: operators sign in to Grafana as usual, and the plugin authorizes them by their Grafana **org role**. **Editor or above** runs Query and Remediate; **Admin** configures the plugin and runs Test connection. There is no separate plugin login, user directory, or per-user credential. The Auth Token is the plugin backend credential to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API — stored in Grafana encrypted settings and sent as `Authorization: Bearer` (not the Headlamp `X-Dot-AI-Authorization` Kubernetes-proxy header). Use an analysis-only token with no apply rights.
+Grafana's own AI surfaces reason about **Grafana**: [Grafana Assistant](https://grafana.com/docs/grafana-cloud/machine-learning/assistant/) holds guided conversations for dashboard creation, analytics, and troubleshooting; the [LLM app](https://grafana.com/docs/grafana-cloud/machine-learning/llm/) is a proxy that centralizes authenticated LLM requests for other Grafana components; the [Grafana MCP server](https://grafana.com/docs/grafana/latest/developer-resources/mcp/) gives an external AI client tools over your Grafana instance. This plugin reasons about the **Kubernetes cluster those dashboards describe**: it takes the alert or log line you are already looking at, packs it as evidence, and asks a Kubernetes-aware engine — running its own kubectl/MCP tool loop against live cluster state — what is actually wrong, without leaving Grafana or re-pasting context into a separate tool. It also runs in whatever Grafana you already operate: it needs Grafana >= 11.0 and a reachable engine, while Assistant runs in Grafana Cloud or in a self-managed Grafana 13.0.0+ connected to a Grafana Cloud Assistant backend.
+
+Operators sign in to Grafana as usual and are authorized by their Grafana org role — there is no separate plugin login (see [Configure](#configure)).
 
 Open the app from Grafana's left navigation as **dot-ai** (`/a/devopstoolkit-dotai-app/`). Admins reach **Configuration** from the same nav entry or **Administration → Plugins → dot-ai**.
 
@@ -85,7 +87,7 @@ As Grafana Admin: open **dot-ai → Configuration** in the left nav, or **Admini
 | Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts and the page shows a consent info Alert. Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Admin-only. Probes `POST /api/v1/tools/version` through the plugin backend |
 
-**Authentication and authorization.** The plugin uses Grafana's signed-in user and org role. **Editor or Admin** runs Query and Remediate. **Admin** opens Configuration and runs **Test connection**. The Auth Token is the plugin's engine credential only (encrypted settings, `Authorization: Bearer`); scope it analysis-only with no apply rights.
+**Authentication and authorization.** The plugin follows Grafana's own user authentication and authorization model: it uses the signed-in Grafana user and their **org role**, with no separate plugin login, user directory, or per-user credential. **Editor or above** runs Query and Remediate; **Admin** opens Configuration and runs **Test connection**. The **Auth Token** row above is the plugin backend's own credential to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API — not a user identity.
 
 ## How It Works
 
