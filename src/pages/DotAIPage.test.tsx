@@ -597,32 +597,92 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
   });
 
-  test('sendGrafanaEvidence false hides consent and skips stack fetch', async () => {
+  test('evidence off: the notice still discloses Prior, and Prior is still POSTed', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
-      summary: '3 pods failing',
+      summary:
+        'pod checkout-api in namespace prod logs FATAL password authentication failed for user "billing"',
       raw: {},
     });
 
     render(<DotAIPage sendGrafanaEvidence={false} />);
-    expect(screen.queryByTestId(testIds.dotai.consent)).not.toBeInTheDocument();
 
-    typeIntent('show failing pods');
+    // The operator who opted out of evidence still gets a notice, because prior-turn
+    // question and answer text still leaves the browser. The toggle does not cover it.
+    const notice = screen.getByTestId(testIds.dotai.consent);
+    expect(notice).toHaveTextContent(/Send Grafana evidence is off, so Asks read no datasource/);
+    expect(notice).toHaveTextContent(
+      /condensed Prior block of up to 240 characters taken from your earlier questions and dot-ai’s earlier answers/
+    );
+    expect(notice).toHaveTextContent(/quote log, metric and alert lines verbatim/);
+    expect(notice).toHaveTextContent(/The toggle does not cover Prior, Current or Map/);
+    expect(notice).toHaveTextContent(/Full History stays in this browser/);
+
+    typeIntent('status of pod checkout-api in namespace prod');
     clickSubmit();
-
     await waitFor(() => {
-      expect(mockCallDotAITool).toHaveBeenCalled();
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
     });
+
+    typeIntent('why is pod checkout-api restarting in namespace prod?');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(2);
+    });
+
+    // Measured egress, not inferred: with the toggle off no datasource is read …
     expect(mockFetchStackContext).not.toHaveBeenCalled();
-    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
+    const packed = mockCallDotAITool.mock.calls[1][1];
+    expect(packed).not.toContain('Loki last 15m');
+    // … but the prior question, and quoted log text from the prior answer, do leave.
+    expect(packed).toMatch(/^Prior:/m);
+    expect(packed).toContain('status of pod checkout-api');
+    expect(packed).toContain('password authentication failed');
   });
 
-  test('sendGrafanaEvidence default shows consent banner', () => {
+  test('evidence on: the notice names every block the follow-up Ask actually POSTs', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary:
+        'pod checkout-api in namespace prod logs FATAL password authentication failed for user "billing"',
+      raw: {},
+    });
+
     render(<DotAIPage />);
-    expect(screen.getByTestId(testIds.dotai.consent)).toBeInTheDocument();
-    expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(
-      'Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.'
+    const notice = screen.getByTestId(testIds.dotai.consent);
+    expect(notice).toHaveTextContent(
+      /Grafana datasource facts read now \(Loki, Prometheus, Tempo, Alertmanager\)/
     );
+    expect(notice).toHaveTextContent(/the session Current summary and Map of resource names/);
+    expect(notice).toHaveTextContent(
+      /condensed Prior block of up to 240 characters taken from your earlier questions and dot-ai’s earlier answers/
+    );
+    expect(notice).toHaveTextContent(
+      /Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too/
+    );
+    expect(notice).toHaveTextContent(/Full History stays in this browser/);
+
+    typeIntent('status of pod checkout-api in namespace prod');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
+    });
+
+    typeIntent('why is pod checkout-api restarting in namespace prod?');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(2);
+    });
+
+    const packed = mockCallDotAITool.mock.calls[1][1];
+    // Every block the notice names is in the POST body, and nothing it omits is.
+    expect(packed).toContain('Loki last 15m');
+    expect(packed).toMatch(/^Current:/m);
+    expect(packed).toMatch(/^Prior:/m);
+    expect(packed).toContain('status of pod checkout-api');
+    expect(packed).toContain('password authentication failed');
+    expect(packed).not.toMatch(/^History:/m);
   });
 });

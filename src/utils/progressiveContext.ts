@@ -152,9 +152,11 @@ export const MAX_PRIOR_CHARS = 240;
  * entirely, then a cap of the Current block itself. The packed tail holds the box,
  * and is never blind-capped.
  *
- * Prior outranks fresh evidence: it is only dropped after Tempo is gone and log,
- * metric and alert lines have been peeled, so keeping a follow-up resolvable costs
- * live evidence lines. Map is convenience chips, so it goes first.
+ * Prior outranks fresh evidence: while it survives, evidence lines are peeled to make
+ * room for it. But evidence is never spent on a Prior that does not ship — when Prior
+ * is dropped, the evidence reduction restarts from the untouched Current, so a pack
+ * without Prior carries exactly the evidence it would have carried with no history at
+ * all (`reduceEvidence`).
  */
 export function buildRequestText(args: {
   tool: DotAITool;
@@ -171,7 +173,7 @@ export function buildRequestText(args: {
 }): string {
   const box = args.box.trim();
   const instructions = (args.instructions ?? []).map((line) => line.trim()).filter(Boolean);
-  let current = args.current.trim();
+  const fullCurrent = args.current.trim();
   let map = args.map.trim();
   let prior = condensePriorTurns(args.history ?? [], MAX_PRIOR_CHARS);
 
@@ -190,7 +192,29 @@ export function buildRequestText(args: {
     return parts.join('\n');
   };
 
-  let text = pack(current, map, prior, instructions);
+  /**
+   * Reduce evidence for one Prior value, always starting from the untouched Current:
+   * drop the Tempo block, then peel Loki, Prometheus and Alertmanager body lines.
+   * Map is already gone by the time this runs. Returns the reduced Current and the
+   * packed string, whether or not it fits, so the caller can retry with less Prior.
+   */
+  const reduceEvidence = (p: string, instr: string[]): { current: string; text: string } => {
+    let current = dropTempoSection(fullCurrent);
+    let text = pack(current, '', p, instr);
+    if (text.length <= MAX_INTENT_CHARS) {
+      return { current, text };
+    }
+    for (const head of TRIM_ORDER) {
+      current = trimSection(current, head, (c) => pack(c, '', p, instr).length, MAX_INTENT_CHARS);
+      text = pack(current, '', p, instr);
+      if (text.length <= MAX_INTENT_CHARS) {
+        return { current, text };
+      }
+    }
+    return { current, text };
+  };
+
+  let text = pack(fullCurrent, map, prior, instructions);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
@@ -200,18 +224,18 @@ export function buildRequestText(args: {
   //    Measured Prior-free: Prior is sheddable further down the ladder, so counting
   //    it here would shed instruction lines that the pack can still afford.
   let instr = instructions;
-  const floor = current ? Math.min(MIN_CURRENT_CHARS, current.length) + CURRENT_LABEL_CHARS : 0;
+  const floor = fullCurrent ? Math.min(MIN_CURRENT_CHARS, fullCurrent.length) + CURRENT_LABEL_CHARS : 0;
   while (instr.length > 0 && MAX_INTENT_CHARS - pack('', '', '', instr).length < floor) {
     instr = instr.slice(0, -1);
   }
-  text = pack(current, map, prior, instr);
+  text = pack(fullCurrent, map, prior, instr);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
   // 1. Drop Map (chips are convenience; Prior keeps follow-up referents)
   map = '';
-  text = pack(current, map, prior, instr);
+  text = pack(fullCurrent, map, prior, instr);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
@@ -219,49 +243,42 @@ export function buildRequestText(args: {
   // 2. Shrink Prior to the single latest turn, tighter budget
   if (prior) {
     prior = condensePriorTurns(args.history ?? [], Math.min(160, MAX_PRIOR_CHARS), 1);
-    text = pack(current, map, prior, instr);
+    text = pack(fullCurrent, map, prior, instr);
     if (text.length <= MAX_INTENT_CHARS) {
       return text;
     }
   }
 
-  // 3. Drop Tempo section from Current
-  current = dropTempoSection(current);
-  text = pack(current, map, prior, instr);
-  if (text.length <= MAX_INTENT_CHARS) {
-    return text;
+  // 3. Reduce Current evidence while Prior is still in the pack: those peeled lines
+  //    are what Prior costs, and that cost is documented in the egress contract.
+  let reduced = reduceEvidence(prior, instr);
+  if (reduced.text.length <= MAX_INTENT_CHARS) {
+    return reduced.text;
   }
 
-  // 4. Peel Loki, then Prometheus, then Alertmanager body lines. Stopping at Loki
-  //    was what let metric and alert lines crowd the question out of the budget.
-  //    Prior is still in the pack here, so these lines pay for it — deliberate, and
-  //    documented in the egress contract.
-  for (const head of TRIM_ORDER) {
-    current = trimSection(current, head, (c) => pack(c, map, prior, instr).length, MAX_INTENT_CHARS);
-    text = pack(current, map, prior, instr);
-    if (text.length <= MAX_INTENT_CHARS) {
-      return text;
-    }
-  }
-
-  // 5. Drop Prior only after Current evidence has been reduced
+  // 4. Drop Prior — and refund the evidence it was charged for. Reducing again from
+  //    the untouched Current is the difference between "Prior cost three log lines"
+  //    and "three log lines were peeled for a Prior block that then did not ship".
   if (prior) {
     prior = '';
-    text = pack(current, map, prior, instr);
-    if (text.length <= MAX_INTENT_CHARS) {
-      return text;
+    reduced = reduceEvidence(prior, instr);
+    if (reduced.text.length <= MAX_INTENT_CHARS) {
+      return reduced.text;
     }
   }
 
-  // 6. Cap the Current block — the evidence — never the packed string, whose tail
+  // 5. Cap the Current block — the evidence — never the packed string, whose tail
   //    is the box. Capping the pack is what silently deleted the question.
-  current = cap(current, current.length - (text.length - MAX_INTENT_CHARS));
-  text = pack(current, map, prior, instr);
+  const capped = cap(
+    reduced.current,
+    reduced.current.length - (reduced.text.length - MAX_INTENT_CHARS)
+  );
+  text = pack(capped, map, prior, instr);
   if (text.length <= MAX_INTENT_CHARS) {
     return text;
   }
 
-  // 7. Preamble + question alone overflow: no evidence is left to cut, so cap the
+  // 6. Preamble + question alone overflow: no evidence is left to cut, so cap the
   //    question deliberately rather than letting a blind cap eat its tail.
   const overhead = pack('', '', '', []).length - box.length;
   return pack('', '', '', [], cap(box, MAX_INTENT_CHARS - overhead));

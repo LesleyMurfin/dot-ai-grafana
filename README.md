@@ -8,7 +8,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 
 - **Query** — Ask questions about your cluster in plain English. Responses are text (`data.result.summary`).
 - **Remediate (analysis only)** — Get AI-powered issue analysis. No execute, apply, or mutation UI.
-- **Progressive context** — On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources (`getDataSourceSrv`, no hardcoded uids) and packs **Current** + **Map** into the same `{intent}` string. A condensed **Prior:** block (up to `MAX_PRIOR_CHARS` = 240 characters, built from recent turns) is also included in the intent inside the unchanged 1000-char budget; under pressure Prior is shed before the hard cap (Map drops first). Full History remains on screen (last 5 turns). No `sessionId`. One Ask may issue up to 3 dot-ai POSTs (unscoped question or answer vs Current). Remediate is one hop and reuses Query Current. JSONL ask log: `/var/lib/grafana/dotai-ask.log` (no tokens; hop meta stripped before upstream).
+- **Progressive context** — On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources (`getDataSourceSrv`, no hardcoded uids) and packs **Current** + **Map** into the same `{intent}` string. A condensed **Prior:** block (up to `MAX_PRIOR_CHARS` = 240 characters, built from the 2 most recent turns) is also included in the intent inside the unchanged 1000-char budget. Full History remains on screen (last 5 turns). No `sessionId`. One Ask may issue up to 3 dot-ai POSTs (unscoped question or answer vs Current). Remediate is one hop and reuses Query Current. JSONL ask log: `/var/lib/grafana/dotai-ask.log` (no tokens; hop meta stripped before upstream). What Prior actually contains, and what the evidence toggle does and does not cover, is in [Data egress](#data-egress).
 
 ## Requirements
 
@@ -143,7 +143,7 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
 | Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** JSONL may include packed Current (Loki/Prom lines). Each line records the Grafana user `login` and org `role`; never the user's email or display name. No Grafana tokens. Credentials inside *application* logs can appear. |
 | Show context | Show Current, Map, and History panels on the page. **On by default.** Toggles on-page display only; independent of Send Grafana evidence. Does not control intent packing (Current/Map/Prior). |
-| Send Grafana evidence | `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, Asks do not pack Grafana DS facts. Independent of Show context. |
+| Send Grafana evidence | `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, no datasource is read, so Asks pack no fresh Grafana DS facts — the question, the session **Current** summary, **Map**, and the condensed **Prior:** block are still sent. The toggle does not cover Prior (see [Data egress](#data-egress)). Independent of Show context. |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |
 
 **Who can use Query / Remediate.** Grafana org **Editor** or **Admin**. Viewer and org role
@@ -157,6 +157,49 @@ service-account token, passes it.
 Do not point `apiUrl` at agentgateway or Context Forge — only the dot-ai tools REST base.
 
 No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes / dashboard deep-links are future. Related alerts are already in Current from Alertmanager when send is on. Dashboard-to-open is not built (would be Grafana `/apis` dashboards later).
+
+## Data egress
+
+Every Ask POSTs one `{intent}` (Query) or `{issue}` (Remediate) string to the configured
+dot-ai server. That string is the whole egress surface. It carries:
+
+| Block | Content | Bound |
+|---|---|---|
+| Stable preamble | Fixed instruction text, including "quote the concrete Loki/Prometheus/Tempo/Alertmanager lines" | fixed |
+| `Current:` | Grafana datasource facts read for **this** Ask when evidence is on; otherwise the session's rewritten Current, which holds `Asked:` (your previous question, ≤180 chars) and `What's true now:` (dot-ai's previous answer, ≤500 chars) | `MAX_CURRENT_CHARS` = 700 |
+| `Prior:` | The 2 most recent turns, condensed: **your own question text** (≤90 chars per turn) and **prose from dot-ai's answers**. Because the preamble tells the model to quote log, metric and alert lines, answers routinely contain verbatim log text — so anything credential-shaped in an application log can travel here | `MAX_PRIOR_CHARS` = 240 |
+| `Map:` | Resource-name and namespace chips accumulated across **every** turn of the session, harvested from both questions and answers | `MAX_MAP_CHARS` = 400 |
+| `Question:` / `Issue:` | The box text, verbatim | reserved first |
+
+Total intent: `MAX_INTENT_CHARS` = 1000. **Counted in UTF-16 code units, not bytes** — a
+1000-unit intent of mostly non-BMP text measures ~1808 UTF-8 bytes on the wire, so the cap
+bounds neither bytes nor tokens. Truncation is surrogate-safe: a cut tail never emits a lone
+surrogate.
+
+Full **History** (last 5 turns, verbatim) stays in the browser and is never POSTed as such;
+the condensed `Prior:` block is what leaves.
+
+**Which toggle covers what.**
+
+- **Send Grafana evidence** off (`skipStack`) stops the datasource *read*. It does **not** stop
+  `Prior:`, `Map:`, or the rewritten `Current:` — so prior-turn question and answer text still
+  leaves the browser with the toggle off.
+- **Show context** controls on-page display only. It never changes what is packed.
+
+**Shedding order, measured.** When the packed string exceeds 1000, blocks are shed in this
+order: plugin-written follow-up instruction lines (down to a Current floor of
+`MIN_CURRENT_CHARS` = 240) → `Map:` → `Prior:` shrunk to its latest turn (≤160) → the Tempo
+section → Loki, then Prometheus, then Alertmanager body lines → `Prior:` entirely → a cap of
+the `Current:` block → and only if the preamble plus the question alone overflow, a deliberate
+cap of the question. The question is reserved before evidence is packed and the packed string
+is never blind-capped, so growing datasource output cannot delete what you asked.
+
+**Prior outranks fresh evidence.** Because `Prior:` is dropped only after log, metric and alert
+lines have been peeled, keeping a follow-up resolvable costs live evidence. Measured on a
+stack Current at real caps (30 Loki lines, 8 Prometheus series, no alerts) with a three-turn
+history: the Prior-carrying pack retained **0** Loki lines where the identical no-history pack
+retained 3. On a busy shape (alerts firing at `ALERT_CAP`) Prior still survives and the pack
+keeps 5 of 8 alert lines and no Loki or Prometheus lines.
 
 ## Timeouts
 
