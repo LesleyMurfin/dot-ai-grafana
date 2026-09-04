@@ -18,9 +18,9 @@ The Grafana plugin backend talks to the [dot-ai MCP server](https://devopstoolki
 
 ### Query
 
-Ask natural language questions about your cluster. Responses are text summaries from the plugin's flat resource envelope (`ok`, `status`, `summary`, `error`) — not a nested `data.result.*` shape.
+Ask natural language questions about your cluster. Responses are text summaries.
 
-On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources via `getDataSourceSrv` (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** is display-only (last 5 turns) and is never POSTed. There is no `sessionId`. One Ask may issue up to 3 dot-ai POSTs (for example an unscoped question or an answer that conflicts with Current).
+On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources via Grafana's datasource service (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** is display-only (last 5 turns) and is never POSTed. There is no chat `sessionId`. One Ask may issue up to 3 dot-ai POSTs (for example an unscoped question or an answer that conflicts with Current).
 
 [Query tool documentation](https://devopstoolkit.ai/docs/ai-engine/tools/query)
 
@@ -34,7 +34,7 @@ Get AI-powered issue analysis. Remediate is one hop and reuses Query Current. Re
 
 ### Prerequisites
 
-- [Grafana](https://grafana.com) >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.0)
+- [Grafana](https://grafana.com) >= 11.0 (reference host **11.4**)
 - A reachable [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine/setup/deployment) (tools REST, typically port 3456)
 
 ### Install
@@ -74,8 +74,8 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 | Auth Token | _(empty)_ | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`). Use a no-apply token — analysis only. |
 | Debug Log | Off | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. |
 | Show context | On | Show Current, Map, and History on the page. Display-only; independent of Send Grafana evidence. Packing still runs when this is off. |
-| Send Grafana evidence | On | `jsonData.sendGrafanaEvidence`. Missing/undefined = send. When off, Asks do not pack Grafana datasource facts. Independent of Show context. |
-| Test connection | — | `POST /api/v1/tools/version` through the plugin backend |
+| Send Grafana evidence | On | When on, Asks pack Loki/Prometheus/Tempo/Alertmanager facts. Missing/undefined = send. Independent of Show context. |
+| Test connection | — | Probes `POST /api/v1/tools/version` through the plugin backend |
 
 ## How It Works
 
@@ -97,27 +97,26 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 ```text
 Browser
   └── Grafana plugin resource API
-        └── Go backend (grafana-plugin-sdk-go httpclient)
+        └── Go backend (Grafana plugin SDK HTTP client)
               └── dot-ai :3456 tools REST
                     (/api/v1/tools/query, /remediate, /version)
 ```
 
 Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). Auth for this Grafana path is `Authorization: Bearer` (not `X-Dot-AI-Authorization`, which is the Headlamp Kubernetes API proxy header).
 
-Grafana plugin resource calls use the Grafana SDK HTTP client with a **120s** ceiling for query/remediate and **15s** for version/health. That is shorter than Headlamp's long AI tool window because Grafana does not expose an equivalent long-poll proxy. v1 does **not** implement async `202` + job poll; if a call hits 120s, retry or narrow the question.
+Query and remediate calls use a **120s** ceiling; version/health probes use **15s**. That is shorter than Headlamp's long AI tool window because Grafana does not expose an equivalent long-poll proxy. The plugin does **not** implement async `202` + job poll; if a call hits 120s, retry or narrow the question.
 
 ## Compatibility
 
 | Grafana | Support |
 |---------|---------|
-| >= 11.0 | Minimum (`plugin.json` `grafanaDependency`) |
-| 11.4 | Reference host; `@grafana/*` libraries pinned to 11.4.0 |
-| CI e2e matrix | Dynamic images from `grafana/plugin-actions/e2e-version` (not a fixed version list in-repo) |
-| Local docker default | `GRAFANA_VERSION` defaults to **13.1.0** (`grafana-enterprise` image) for `npm run server` |
+| >= 11.0 | Minimum supported |
+| 11.4 | Reference host (`@grafana/*` libraries pinned here) |
+| Later majors | Exercised via the project's dynamic CI e2e Grafana image matrix; local docker default is currently **13.1.0** |
 
 ## Releasing
 
-Release process, changelog assembly, and fragment naming live in the repository [README Releasing section](https://github.com/vfarcic/dot-ai-grafana/blob/main/README.md#releasing). User-visible changes land as `changelog.d/<issue>.<type>.md` fragments (`feature`, `bugfix`, `breaking`, `doc`, `misc`); do not duplicate that process here.
+Release process, changelog assembly, and fragment naming live in the repository [README Releasing section](https://github.com/vfarcic/dot-ai-grafana/blob/main/README.md#releasing). User-visible changes land as `changelog.d/<issue>.<type>.md` fragments (`feature`, `bugfix`, `breaking`, `doc`, `misc`); this page does not duplicate that process.
 
 ## Support
 
