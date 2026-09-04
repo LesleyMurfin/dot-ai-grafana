@@ -368,7 +368,6 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 ## Milestones
 
 > **SSOT for milestone completion.** Progress (below) is evidence only and must not be read as a second checklist.
-
 - [x] **Plugin scaffolding and build pipeline** — Grafana app plugin project created with `@grafana/create-plugin`, builds successfully, loads in Grafana dev environment
 - [x] **Plugin configuration page** — Admin can configure MCP server URL and auth token via Grafana plugin settings, with connection test
 - [x] **Backend proxy (Go)** — Backend plugin component proxies requests to MCP server with configured auth, handles errors gracefully
@@ -566,7 +565,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 7. **Grafana Cloud (optional, not planned here)** (Design Decision 10 / [Deployment targets](#expansion-deployment-targets-self-managed-vs-grafana-cloud)) — does the maintainer or community want a **later** Cloud track (catalog signing, Cloud-reachable dot-ai HTTPS, install path)? This contribution will not take it on; answer only if someone is volunteering to own that follow-on.
 8. **Kubeshark / evidence ownership** (Design Decision 11 / [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives)) — confirm: **core `dot-ai` PRD + platform MOP** for connectivity; this companion only presents server output (optional M16). Reject putting a Kubeshark client in the Grafana plugin.
 
-## Progress
+## Progress (evidence log only — not a second milestone list; SSOT is ## Milestones above)
 
 > **Evidence log only — not a second milestone list.** Checkbox completion state is authoritative solely under [Milestones](#milestones) (including the original checklist and any `### Expansion:` milestone detail). Rows below cite commits/PRs/proof; they must not be used to tick milestones. Status values mirror the Milestones SSOT and are not an independent tracker.
 
@@ -605,9 +604,6 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-01 | **Public-surface strip:** CI forbids internal host/marker/secret leakage on public docs and shipped surfaces | `scripts/public-surface-check.sh` + `.github/workflows/ci.yml` job `public-surface` (`6e08d39`) |
 | 2026-09-01 | **SDK httpclient** for backend outbound HTTP (`grafana-plugin-sdk-go/backend/httpclient`); probe 15s / tools 120s; DefaultMiddlewares + DefaultTimeoutOptions | `pkg/plugin/app.go` `newPluginHTTPClient`; replaces ad-hoc `http.Client` construction |
 | 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | Live Ask window evidence for v1 Ask path; execute stays separate GitOps-PR roadmap item (upstream issue #5) |
-
-
-
 
 
 ## Work Log

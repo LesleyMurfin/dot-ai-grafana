@@ -292,5 +292,4 @@ describe('Components/AppConfig', () => {
       sendGrafanaEvidence: false,
     });
   });
-
 });

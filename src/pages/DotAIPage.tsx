@@ -14,11 +14,10 @@ import {
 } from '@grafana/ui';
 import { testIds } from '../components/testIds';
 import { ResponseMarkdown } from '../components/ResponseMarkdown';
-import { DotAITool } from '../utils/dotaiApi';
+import { ASK_TIMEOUT_MESSAGE, DotAITool } from '../utils/dotaiApi';
 import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
-
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -50,10 +49,9 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const activeThread = threads[tool];
 
   const placeholder = useMemo(() => {
-    if (tool === 'remediate') {
-      return 'Describe the issue (e.g. why is checkout-api CrashLooping in prod?)';
-    }
-    return 'Ask about cluster resources (e.g. show failing pods in production)';
+    return tool === 'query'
+      ? 'Ask about cluster resources (plain language, no prefixes)'
+      : 'Describe the issue for analysis (no execute)';
   }, [tool]);
 
   const runAsk = async (trimmed: string) => {
@@ -87,10 +85,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         setResponseText(result.summary);
         setIntent('');
       } else {
-        setError(result.errorMessage || 'Request failed');
-        if (result.summary) {
-          setResponseText(result.summary);
-        }
+        setError(result.errorMessage || ASK_TIMEOUT_MESSAGE);
       }
     } catch (e) {
       if (ac.signal.aborted) {
@@ -199,26 +194,17 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
               />
             </div>
           </Field>
-
-          <Field
-            label={tool === 'remediate' ? 'Issue description' : 'Question'}
-            description={
-              tool === 'remediate'
-                ? 'Analysis only — this plugin never executes changes.'
-                : 'Plain-language intent sent to dot-ai query.'
-            }
-          >
+          <Field label={tool === 'query' ? 'Question' : 'Issue'}>
             <TextArea
               data-testid={testIds.dotai.intent}
               value={intent}
               onChange={(e) => setIntent(e.currentTarget.value)}
               onKeyDown={onIntentKeyDown}
               placeholder={placeholder}
-              rows={5}
+              rows={6}
               disabled={loading}
             />
           </Field>
-
           <div className={styles.actions}>
             <Button type="submit" data-testid={testIds.dotai.submit} disabled={loading || !intent.trim()}>
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
@@ -269,7 +255,6 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
             )}
           </Alert>
         )}
-
         {responseText && (
           <div className={styles.response} data-testid={testIds.dotai.response}>
             <h3 className={styles.responseTitle}>Answer</h3>
@@ -350,10 +335,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     margin-bottom: ${theme.spacing(2)};
   `,
   loading: css`
-    display: inline-flex;
-    align-items: center;
-    gap: ${theme.spacing(1)};
-    color: ${theme.colors.text.secondary};
+    margin-top: ${theme.spacing(2)};
   `,
   block: css`
     margin-top: ${theme.spacing(2)};
@@ -381,14 +363,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
   `,
   response: css`
     margin-top: ${theme.spacing(2)};
-    padding: ${theme.spacing(2)};
-    border: 1px solid ${theme.colors.border.weak};
-    border-radius: ${theme.shape.radius.default};
-    background: ${theme.colors.background.secondary};
   `,
   responseTitle: css`
-    margin: 0 0 ${theme.spacing(1)} 0;
-    font-size: ${theme.typography.h5.fontSize};
+    font-weight: ${theme.typography.fontWeightMedium};
   `,
   drilldowns: css`
     display: flex;
@@ -400,10 +377,7 @@ const getStyles = (theme: GrafanaTheme2) => ({
     color: ${theme.colors.text.link};
   `,
   pre: css`
-    margin: 0;
     white-space: pre-wrap;
-    word-break: break-word;
     font-family: ${theme.typography.fontFamilyMonospace};
-    font-size: ${theme.typography.bodySmall.fontSize};
   `,
 });

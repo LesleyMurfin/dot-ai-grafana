@@ -1,6 +1,6 @@
-# dot-ai Grafana App Plugin
+# DevOps AI Toolkit Grafana Plugin
 
-Grafana **App plugin with backend** for AI-powered Kubernetes cluster intelligence via [dot-ai](https://github.com/vfarcic/dot-ai) REST tools (`query`, analysis-only `remediate`).
+AI-powered Kubernetes cluster intelligence inside [Grafana](https://grafana.com) — powered by [DevOps AI Toolkit](https://devopstoolkit.ai).
 
 - **Plugin ID:** `devopstoolkit-dotai-app`
 - **Grafana floor:** `grafanaDependency: ">=11.0.0"` (reference host **11.4**)
@@ -10,19 +10,37 @@ Grafana **App plugin with backend** for AI-powered Kubernetes cluster intelligen
 
 Admin configuration page: `jsonData.apiUrl` (MCP Server URL) + `secureJsonData.apiKey` (Auth Token) + **Test connection** (`POST /api/v1/tools/version` via backend resource). Tools UI (Query/Remediate selector, shared input/response layout, loading lock, single error alert) is wired to the Go backend proxies `POST /query` and `POST /remediate`, which forward to dot-ai tools REST with Bearer auth. Query packs the Grafana stack into **Current** and may iterate up to 3 dot-ai hops per Ask; Remediate is a single analysis-only hop.
 
-## Develop
+Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): Grafana is for diagnosis (query + analysis-only remediate). Headlamp is for operate / execute.
+
+## What It Does
+
+- **Query** — Ask questions about your cluster in plain English. Responses are text (`data.result.summary`).
+- **Remediate (analysis only)** — Get AI-powered issue analysis. No execute, apply, or mutation UI.
+
+## Requirements
+
+- Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.0)
+- [DevOps AI Toolkit](https://devopstoolkit.ai) MCP server reachable from the Grafana plugin backend
+- Unsigned load until the plugin is signed:
+
+```bash
+GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=devopstoolkit-dotai-app
+```
+
+## Installation
 
 ```bash
 npm install
 npm run build
-# backend
-mage -v build:linux   # or: mage -v
+mage -v build:linux
 ```
 
-Optional local Grafana:
+Copy `dist/` into Grafana's plugin directory as `devopstoolkit-dotai-app`, then restart Grafana.
+
+Local Grafana (create-plugin docker):
 
 ```bash
-npm run server   # docker compose
+npm run server
 ```
 
 ## Install (unsigned / private)
@@ -78,14 +96,17 @@ Live Query/Remediate specs skip cleanly if the plugin or MCP is unreachable. Con
 ## Product PRDs
 
 Upstream / fork PRD text lives under `prds/`.
-
 ## Configuration
 
-1. As Grafana Admin open **Administration → Plugins → dot-ai → Configuration** (or the Configuration nav item).
-2. Set **MCP Server URL** to the dot-ai **tools REST** base (e.g. `http://dot-ai.dot-ai.svc:3456`). Do **not** point this at agentgateway or Context Forge.
-3. Set **Auth Token** (encrypted) — use a **no-apply** token (analysis only).
-4. Click **Test connection** (calls `POST /api/v1/tools/version` with `Authorization: Bearer`).
-5. Save settings, then open the app page from the sidebar.
+As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
+
+| Setting | Description |
+|---|---|
+| MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API (example: `http://dot-ai.dot-ai.svc:3456`) |
+| Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
+| Test connection | `POST /api/v1/tools/version` through the plugin backend |
+
+Do not point `apiUrl` at agentgateway or Context Forge — only the dot-ai tools REST base.
 
 ## Usage
 
@@ -103,18 +124,20 @@ Upstream / fork PRD text lives under `prds/`.
    - **Clear thread** resets the active tool’s Current/Map/History only.
 5. Errors (auth, connectivity, upstream `EXECUTION_ERROR`) appear in an alert; loading shows a spinner.
 
-## Architecture (Phase 1)
+## Timeouts
 
-- Frontend app page → Grafana plugin resource API → Go backend → dot-ai `:3456` tools REST.
-- Secrets never leave Grafana encrypted store to the browser after save.
-- Remediate is **analysis only** — no execute UI.
+Grafana plugin resource calls are limited by the plugin host. This plugin uses the Grafana SDK HTTP client with a **120s** ceiling for query/remediate (15s for version/health). That is shorter than Headlamp's 30-minute AI tool timeout because Grafana does not expose an equivalent long-poll proxy. v1 does **not** implement async `202` + job poll; if a call hits 120s, retry or narrow the question.
 
-## Screenshots
+## How It Works
 
-Add screenshots after a signed/private install on Grafana 11.4+ (M9).
+Browser → Grafana plugin resource API → Go backend (`grafana-plugin-sdk-go` `httpclient`) → dot-ai `:3456` tools REST (`/api/v1/tools/query`, `/api/v1/tools/remediate`, `/api/v1/tools/version`).
 
-## Compatibility
+Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). Auth for this Grafana path is `Authorization: Bearer` (not `X-Dot-AI-Authorization`, which is the Headlamp Kubernetes API proxy header).
 
-- **Floor:** `grafanaDependency: ">=11.0.0"`
-- **Reference pins:** `@grafana/data|ui|runtime|schema@11.4.0` (must-pass host **11.4**)
-- **Also target:** current Grafana 13.x via CI `plugin-e2e` matrix when runners available
+The published OpenAPI document for dot-ai includes execute/operate/recommend. This plugin does **not** generate a client from that full schema — that would pull mutation tools into an analysis-only Grafana app. Outbound HTTP uses the Grafana plugin SDK `httpclient` for the three read paths above.
+
+## Related Projects
+
+- [AI Engine](https://devopstoolkit.ai/docs/ai-engine) — MCP server this plugin connects to
+- [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp) — operate / execute companion
+- [Web UI](https://devopstoolkit.ai/docs/ui) · [CLI](https://devopstoolkit.ai/docs/cli) · [Controller](https://devopstoolkit.ai/docs/controller)

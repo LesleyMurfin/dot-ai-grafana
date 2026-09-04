@@ -74,7 +74,7 @@ describe('Pages/DotAIPage', () => {
 
     await selectTool('Remediate (analysis only)');
 
-    expect(screen.getByText(/analysis only — this plugin never executes changes/i)).toBeInTheDocument();
+    expect(screen.getByText(/remediate never executes changes/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /analyze$/i })).toBeInTheDocument();
   });
 
@@ -528,7 +528,7 @@ describe('Pages/DotAIPage', () => {
     fireEvent.click(analyzeBtn);
 
     // Switched to remediate
-    expect(screen.getByText(/analysis only — this plugin never executes changes/i)).toBeInTheDocument();
+    expect(screen.getByText(/remediate never executes changes/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^analyze$/i })).toBeInTheDocument();
 
     // Box filled from Current

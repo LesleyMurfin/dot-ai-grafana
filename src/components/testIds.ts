@@ -26,6 +26,5 @@ export const testIds = {
     cancel: 'data-testid dotai-cancel',
     consent: 'data-testid dotai-consent',
     drilldown: 'data-testid dotai-drilldown',
-
   },
 };

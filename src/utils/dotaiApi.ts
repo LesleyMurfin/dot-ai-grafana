@@ -117,6 +117,9 @@ async function fetchResource(
   meta?: AskCallMeta,
   signal?: AbortSignal
 ): Promise<FetchResponseLike> {
+  // Query uses {intent}; remediate requires upstream {issue}. Send both on remediate
+  // so the Go proxy and tools REST stay aligned (analysis-only; no execute flags).
+  // Meta fields are for ask-log only; backend strips them before upstream.
   const data: Record<string, unknown> =
     tool === 'remediate' ? { issue: text, intent: text } : { intent: text };
   if (meta) {
@@ -155,6 +158,7 @@ export async function callDotAITool(
 ): Promise<ToolCallResult> {
   try {
     const body = await fetchResource(tool, intent, meta, signal);
+    // Grafana FetchResponse wraps JSON in `.data`; tolerate bare contract too.
     const payload = body && typeof body === 'object' && 'data' in body ? body.data : body;
     const contract = asContract(payload);
     if (contract) {
