@@ -52,6 +52,21 @@
       "reason": "documented Map token cap does not match the slice the Map builders apply"
     },
     {
+      "id": "history-turns",
+      "kind": "equals",
+      "numeric": true,
+      "source": {
+        "file": "src/utils/progressiveContext.ts",
+        "regex": "export const MAX_HISTORY_TURNS = (\\d+);",
+        "mode": "one"
+      },
+      "doc": {
+        "anchor": "\\bturns?\\b",
+        "extract": "\\b(\\d+|one|two|three|four|five|six|seven|eight|nine|ten)\\s+turns?\\b"
+      },
+      "reason": "documented History depth does not match MAX_HISTORY_TURNS"
+    },
+    {
       "id": "grafana-floor",
       "kind": "equals",
       "source": {
