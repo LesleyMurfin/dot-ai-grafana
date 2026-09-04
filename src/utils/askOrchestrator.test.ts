@@ -676,6 +676,26 @@ describe('runAskOrchestrator', () => {
     ]);
     expect(result.summary).toMatch(/Map links/i);
   });
+
+  test('show me the logs fails when the Grafana stack read failed (no evidence to show)', async () => {
+    const fetchStack = jest.fn(async () => {
+      throw new Error('ds.query exploded');
+    });
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Grafana stack read failed/);
+    expect(result.errorMessage).toMatch(/ds\.query exploded/);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.summary).not.toMatch(/Map links/i);
+  });
 });
 
 /**

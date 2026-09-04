@@ -351,6 +351,7 @@ export async function runAskOrchestrator(args: {
   let stackEmpty = true;
   let currentEmpty = !args.thread.current.trim();
   let drilldowns: DrilldownLink[] = args.thread.drilldowns ?? [];
+  let stackLoadError = '';
 
 
   const loadStack = async (q: string) => {
@@ -360,6 +361,7 @@ export async function runAskOrchestrator(args: {
     try {
       const stack = await fetchStack(q);
       stackSnapshot = stack.current;
+      stackLoadError = '';
       stackEmpty = stack.currentEmpty;
       currentEmpty = stack.currentEmpty;
       map = mergeMap(stack.mapHint, map, q);
@@ -368,6 +370,7 @@ export async function runAskOrchestrator(args: {
     } catch (e) {
       const why = e instanceof Error ? e.message : 'Grafana stack query failed';
       stackSnapshot = `Grafana stack read failed:\n${why}`;
+      stackLoadError = why;
       stackEmpty = true;
       currentEmpty = true;
       map = mergeMap(map, q);
@@ -450,6 +453,10 @@ export async function runAskOrchestrator(args: {
     // Always Grafana stack for observability Asks (cluster-wide if no pod/ns).
     await loadStack(question);
     if (isShowMeOnly(question)) {
+      // 0-hop navigation carries no evidence when the stack read failed: fail loudly.
+      if (stackLoadError) {
+        return finish(false, `Grafana stack read failed: ${stackLoadError}`);
+      }
       lastSummary = 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
       history = appendHistory(history, question, lastSummary);
       return {
