@@ -236,8 +236,8 @@ describe('Components/AppConfig', () => {
     // @ts-ignore
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.debugLog)).getByRole('checkbox'));
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.showContext)).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId(testIds.appConfig.debugLog)).getByRole('switch'));
+    fireEvent.click(within(screen.getByTestId(testIds.appConfig.showContext)).getByRole('switch'));
     fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
 
     await waitFor(() => {
@@ -276,7 +276,7 @@ describe('Components/AppConfig', () => {
     // @ts-ignore
     render(<AppConfig plugin={plugin} query={props.query} />);
 
-    fireEvent.click(within(screen.getByTestId(testIds.appConfig.sendGrafanaEvidence)).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId(testIds.appConfig.sendGrafanaEvidence)).getByRole('switch'));
     fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
 
     await waitFor(() => {
