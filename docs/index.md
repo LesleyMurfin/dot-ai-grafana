@@ -10,7 +10,7 @@ sidebar_position: 1
 
 ## What is the Grafana Plugin?
 
-The DevOps AI Toolkit Grafana Plugin brings AI-powered cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of the pair: Grafana owns **query** and **analysis-only remediate**; the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp) owns operate / execute.
+The [DevOps AI Toolkit](https://devopstoolkit.ai) Grafana Plugin brings AI-powered cluster diagnosis into [Grafana](https://grafana.com). It is the diagnosis half of the pair: Grafana owns **query** and **analysis-only remediate**; the [Headlamp plugin](https://devopstoolkit.ai/docs/headlamp) owns operate / execute.
 
 The Grafana plugin backend talks to the [dot-ai MCP server](https://devopstoolkit.ai/docs/ai-engine) tools REST API over `Authorization: Bearer` (not the Headlamp `X-Dot-AI-Authorization` Kubernetes-proxy header). The token is stored in Grafana encrypted settings.
 
