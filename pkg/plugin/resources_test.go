@@ -51,9 +51,10 @@ func TestCallResource(t *testing.T) {
 	t.Run("query_unconfigured", func(t *testing.T) {
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -83,6 +84,12 @@ func adminPluginContext() backend.PluginContext {
 func editorPluginContext() backend.PluginContext {
 	return backend.PluginContext{
 		User: &backend.User{Login: "editor", Role: "Editor"},
+	}
+}
+
+func viewerPluginContext() backend.PluginContext {
+	return backend.PluginContext{
+		User: &backend.User{Login: "viewer", Role: "Viewer"},
 	}
 }
 
@@ -708,9 +715,10 @@ func TestProxyTools(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			var resp backend.CallResourceResponse
 			err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-				Path:   tc.path,
-				Method: http.MethodPost,
-				Body:   []byte(`{"intent":"test"}`),
+				PluginContext: editorPluginContext(),
+				Path:          tc.path,
+				Method:        http.MethodPost,
+				Body:          []byte(`{"intent":"test"}`),
 			}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 				resp = *r
 				return nil
@@ -758,9 +766,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -810,9 +819,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(`{"intent":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -855,9 +865,10 @@ func TestProxyTools(t *testing.T) {
 		defer app2.Dispose()
 		var resp backend.CallResourceResponse
 		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`{"issue":"x"}`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"issue":"x"}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -874,6 +885,303 @@ func TestProxyTools(t *testing.T) {
 		}
 		if env.OK || env.Status != http.StatusBadGateway {
 			t.Fatalf("envelope=%+v", env)
+		}
+	})
+}
+
+// TestToolRoleGate is the DOTAI-SEC-001 control matrix.
+// Routes /query and /remediate must require org Editor or above (case-insensitive),
+// deny Viewer / None / empty / unknown / nil-user with HTTP 403 and the plugin
+// {ok,status,summary,error} envelope, and MUST NOT dial the upstream engine on deny
+// (fail-closed). GrafanaAuthModel (SDK v0.296.1): 403 not 401; Role is a raw string
+// compared case-insensitively; no IsGrafanaAdmin on the SDK user — server-admin with
+// Viewer org role is undeniable and is not asserted here.
+func TestToolRoleGate(t *testing.T) {
+	const upstreamLeak = "UPSTREAM_BODY_MUST_NOT_LEAK"
+
+	call := func(t *testing.T, app *App, path string, pctx backend.PluginContext) backend.CallResourceResponse {
+		t.Helper()
+		var resp backend.CallResourceResponse
+		body := []byte(`{"intent":"role-gate"}`)
+		if path == "remediate" {
+			body = []byte(`{"issue":"role-gate"}`)
+		}
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: pctx,
+			Path:          path,
+			Method:        http.MethodPost,
+			Body:          body,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	assertDeniedNoDial := func(t *testing.T, path string, pctx backend.PluginContext) {
+		t.Helper()
+		var hits int32
+		// Real upstream that would succeed if reached — proves fail-closed when hits stay 0.
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"` + upstreamLeak + `"}}}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		resp := call(t, app, path, pctx)
+
+		// Collect all fail-closed violations before failing so the RED report is complete.
+		if resp.Status != http.StatusForbidden {
+			t.Errorf("status=%d want 403 body=%s", resp.Status, string(resp.Body))
+		}
+		var env toolProxyResponse
+		if err := json.Unmarshal(resp.Body, &env); err != nil {
+			t.Errorf("envelope json: %v body=%s", err, string(resp.Body))
+		} else {
+			if env.OK {
+				t.Errorf("expected ok=false body=%+v", env)
+			}
+			if env.Status != http.StatusForbidden {
+				t.Errorf("envelope status=%d want 403 body=%+v", env.Status, env)
+			}
+			if env.Error == "" {
+				t.Errorf("expected role-gate error message, body=%+v", env)
+			} else {
+				low := strings.ToLower(env.Error)
+				if !strings.Contains(low, "editor") && !strings.Contains(low, "role") &&
+					!strings.Contains(low, "forbidden") && !strings.Contains(low, "permission") {
+					t.Errorf("expected clear role-denial message, got %q", env.Error)
+				}
+			}
+			if env.Summary != "" && env.Summary != upstreamLeak {
+				// Non-empty summary that is not the leak still fails the deny contract.
+				t.Errorf("summary must be empty on deny, got %q", env.Summary)
+			}
+			if env.Summary == upstreamLeak {
+				t.Errorf("upstream summary leaked into denial envelope: %q", env.Summary)
+			}
+		}
+		if bytes.Contains(resp.Body, []byte(upstreamLeak)) {
+			t.Errorf("upstream body leaked into denial response: %s", string(resp.Body))
+		}
+		if bytes.Contains(resp.Body, []byte(`"success"`)) {
+			t.Errorf("raw upstream shape leaked: %s", string(resp.Body))
+		}
+		if n := atomic.LoadInt32(&hits); n != 0 {
+			t.Errorf("fail-closed violated: upstream contacted %d times", n)
+		}
+	}
+
+	assertAllowed := func(t *testing.T, path string, pctx backend.PluginContext) {
+		t.Helper()
+		var hits int32
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"allowed"}}}`))
+		}))
+		defer upstream.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "tok"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		resp := call(t, app, path, pctx)
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		var env toolProxyResponse
+		if err := json.Unmarshal(resp.Body, &env); err != nil {
+			t.Fatal(err)
+		}
+		if !env.OK || env.Summary != "allowed" {
+			t.Fatalf("envelope=%+v", env)
+		}
+		if env.Error != "" {
+			t.Fatalf("expected empty error, got %q", env.Error)
+		}
+		if atomic.LoadInt32(&hits) != 1 {
+			t.Fatalf("upstream hits=%d want 1", hits)
+		}
+	}
+
+	type callerCase struct {
+		name  string
+		pctx  backend.PluginContext
+		allow bool
+	}
+	callers := []callerCase{
+		{name: "admin", pctx: adminPluginContext(), allow: true},
+		{name: "editor", pctx: editorPluginContext(), allow: true},
+		// Case-insensitive ALLOW: Grafana sends Title Case; implementation folds case.
+		{name: "editor_lowercase", pctx: backend.PluginContext{User: &backend.User{Login: "ed", Role: "editor"}}, allow: true},
+		{name: "viewer", pctx: viewerPluginContext(), allow: false},
+		{name: "role_none", pctx: backend.PluginContext{User: &backend.User{Login: "n", Role: "None"}}, allow: false},
+		{name: "empty_role", pctx: backend.PluginContext{User: &backend.User{Login: "e", Role: ""}}, allow: false},
+		{name: "unknown_role_superuser", pctx: backend.PluginContext{User: &backend.User{Login: "s", Role: "Superuser"}}, allow: false},
+		{name: "nil_user", pctx: backend.PluginContext{}, allow: false},
+	}
+
+	for _, path := range []string{"query", "remediate"} {
+		path := path
+		for _, tc := range callers {
+			tc := tc
+			suffix := "_allow"
+			if !tc.allow {
+				suffix = "_deny_403_no_dial"
+			}
+			t.Run(tc.name+"_"+path+suffix, func(t *testing.T) {
+				if tc.allow {
+					assertAllowed(t, path, tc.pctx)
+				} else {
+					assertDeniedNoDial(t, path, tc.pctx)
+				}
+			})
+		}
+	}
+}
+
+// TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
+// gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
+
+
+
+// TestTestConnectionAdminGatePinned re-states the existing Admin-only draft-URL
+// gate so a regression is caught alongside the Editor tool gate. Unchanged by SEC-001.
+func TestTestConnectionAdminGatePinned(t *testing.T) {
+	t.Run("draft_editor_denied_no_dial", func(t *testing.T) {
+		var hits int32
+		draft := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer draft.Close()
+
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&hits, 1)
+			t.Fatal("HTTP client must not be used for non-admin draft URL")
+			return nil, nil
+		})}
+
+		payload, _ := json.Marshal(map[string]string{"apiUrl": draft.URL, "apiKey": "draft-key"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: editorPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("draft host contacted %d times", hits)
+		}
+	})
+
+	t.Run("draft_viewer_denied_no_dial", func(t *testing.T) {
+		var hits int32
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		app.httpClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&hits, 1)
+			return nil, nil
+		})}
+		payload, _ := json.Marshal(map[string]string{"apiUrl": "http://draft.example", "apiKey": "k"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: viewerPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("hits=%d", hits)
+		}
+	})
+
+	t.Run("draft_admin_allowed", func(t *testing.T) {
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"connected":true}`))
+		}))
+		defer upstream.Close()
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"http://saved.example"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "stored"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+		payload, _ := json.Marshal(map[string]string{"apiUrl": upstream.URL, "apiKey": "draft-token"})
+		var resp backend.CallResourceResponse
+		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: adminPluginContext(),
+			Path:          "test-connection",
+			Method:        http.MethodPost,
+			Body:          payload,
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
 		}
 	})
 }
@@ -900,9 +1208,10 @@ func TestProxyBodyLimits(t *testing.T) {
 		oversized := []byte(`{"intent":"` + strings.Repeat("x", (1<<20)+1) + `"}`)
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   oversized,
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          oversized,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -939,9 +1248,10 @@ func TestProxyBodyLimits(t *testing.T) {
 
 		var resp backend.CallResourceResponse
 		err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   []byte(``),
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(``),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -995,9 +1305,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		}`)
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   payload,
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          payload,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1038,9 +1349,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		gotPath, gotBody = "", nil
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`not-json`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`not-json`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1060,9 +1372,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		gotPath, gotBody = "", nil
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "remediate",
-			Method: http.MethodPost,
-			Body:   []byte(`{}`),
+			PluginContext: editorPluginContext(),
+			Path:          "remediate",
+			Method:        http.MethodPost,
+			Body:          []byte(`{}`),
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1094,9 +1407,10 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		payload := []byte(`{"intent":"list pods","execute":true,"mode":"execute"}`)
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   "query",
-			Method: http.MethodPost,
-			Body:   payload,
+			PluginContext: editorPluginContext(),
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          payload,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1372,9 +1686,10 @@ func TestRejectsUnsafeAPIURLBeforeDial(t *testing.T) {
 
 				var resp backend.CallResourceResponse
 				err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-					Path:   path,
-					Method: http.MethodPost,
-					Body:   []byte(`{"intent":"x"}`),
+					PluginContext: editorPluginContext(),
+					Path:          path,
+					Method:        http.MethodPost,
+					Body:          []byte(`{"intent":"x"}`),
 				}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 					resp = *r
 					return nil
@@ -1440,9 +1755,10 @@ func TestAskLogFile(t *testing.T) {
 		t.Helper()
 		var resp backend.CallResourceResponse
 		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
-			Path:   path,
-			Method: http.MethodPost,
-			Body:   body,
+			PluginContext: editorPluginContext(),
+			Path:          path,
+			Method:        http.MethodPost,
+			Body:          body,
 		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 			resp = *r
 			return nil
@@ -1544,9 +1860,10 @@ func TestAskLogFile(t *testing.T) {
 	defer app2.Dispose()
 	var resp backend.CallResourceResponse
 	err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
-		Path:   "query",
-		Method: http.MethodPost,
-		Body:   []byte(`{"intent":"fail please"}`),
+		PluginContext: editorPluginContext(),
+		Path:          "query",
+		Method:        http.MethodPost,
+		Body:          []byte(`{"intent":"fail please"}`),
 	}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
 		resp = *r
 		return nil
@@ -1608,9 +1925,10 @@ func TestAskLogDisabledByDefault(t *testing.T) {
 	defer app.Dispose()
 
 	err = app.CallResource(context.Background(), &backend.CallResourceRequest{
-		Path:   "query",
-		Method: http.MethodPost,
-		Body:   []byte(`{"intent":"list pods"}`),
+		PluginContext: editorPluginContext(),
+		Path:          "query",
+		Method:        http.MethodPost,
+		Body:          []byte(`{"intent":"list pods"}`),
 	}, callResourceResponseSenderFunc(func(*backend.CallResourceResponse) error { return nil }))
 	if err != nil {
 		t.Fatal(err)
@@ -1634,7 +1952,7 @@ func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	appendAskLog("query", []byte(`{"intent":"after-rotate"}`), http.StatusOK, "rotated-summary", "")
+	appendAskLog(context.Background(), "query", []byte(`{"intent":"after-rotate"}`), http.StatusOK, "rotated-summary", "")
 
 	info, err := os.Stat(logPath)
 	if err != nil {
@@ -1738,3 +2056,206 @@ func TestAskMetaFromBodyReadsBranch(t *testing.T) {
 		t.Fatalf("branch leaked into body preview")
 	}
 }
+
+// TestAskLogUserAttribution asserts debug ask-log lines record login + role,
+// never email (PII), and use the explicit "unauthenticated" marker when a
+// completed log line is written with no user on the context.
+// GrafanaAuthModel: backend.User has Login/Name/Email/Role only; Email must not be logged.
+func TestAskLogUserAttribution(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	const secret = "attribution-test-token"
+	const piiEmail = "alice@example.com"
+	const unauthMarker = "unauthenticated"
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"result":{"summary":"ok"}}}`))
+	}))
+	defer upstream.Close()
+
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData:                []byte(`{"apiUrl":"` + upstream.URL + `","debugLog":true}`),
+		DecryptedSecureJSONData: map[string]string{"apiKey": secret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	defer app.Dispose()
+
+	callOK := func(t *testing.T, pctx backend.PluginContext) {
+		t.Helper()
+		var resp backend.CallResourceResponse
+		err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+			PluginContext: pctx,
+			Path:          "query",
+			Method:        http.MethodPost,
+			Body:          []byte(`{"intent":"who am i"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+	}
+
+	readLastLine := func(t *testing.T) string {
+		t.Helper()
+		raw, err := os.ReadFile(logPath)
+		if err != nil {
+			t.Fatalf("read ask log: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			t.Fatal("ask log empty")
+		}
+		return lines[len(lines)-1]
+	}
+
+	t.Run("authenticated_user_login_and_role_no_email", func(t *testing.T) {
+		callOK(t, backend.PluginContext{
+			User: &backend.User{
+				Login: "alice",
+				Name:  "Alice Example",
+				Email: piiEmail,
+				Role:  "Editor",
+			},
+		})
+		line := readLastLine(t)
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("json: %v raw=%s", err, line)
+		}
+		login, _ := raw["login"].(string)
+		role, _ := raw["role"].(string)
+		if login != "alice" {
+			t.Fatalf("login=%v want alice full=%s", raw["login"], line)
+		}
+		if role != "Editor" {
+			t.Fatalf("role=%v want Editor full=%s", raw["role"], line)
+		}
+		if strings.Contains(line, piiEmail) {
+			t.Fatalf("email leaked into ask log: %s", line)
+		}
+		if strings.Contains(line, "Alice Example") {
+			t.Fatalf("name leaked into ask log: %s", line)
+		}
+		if _, ok := raw["email"]; ok {
+			t.Fatalf("email field present in log line: %s", line)
+		}
+		if strings.Contains(line, secret) {
+			t.Fatalf("token leaked: %s", line)
+		}
+	})
+
+	t.Run("nil_user_denied_before_proxy_no_email", func(t *testing.T) {
+		var hits int32
+		denyUp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&hits, 1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		}))
+		defer denyUp.Close()
+		inst2, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"apiUrl":"` + denyUp.URL + `","debugLog":true}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": secret},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app2 := inst2.(*App)
+		defer app2.Dispose()
+
+		before, _ := os.ReadFile(logPath)
+		beforeN := 0
+		if len(bytes.TrimSpace(before)) > 0 {
+			beforeN = len(strings.Split(strings.TrimSpace(string(before)), "\n"))
+		}
+
+		var resp backend.CallResourceResponse
+		err = app2.CallResource(context.Background(), &backend.CallResourceRequest{
+			// PluginContext.User intentionally omitted (nil).
+			Path:   "query",
+			Method: http.MethodPost,
+			Body:   []byte(`{"intent":"who am i"}`),
+		}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+			resp = *r
+			return nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.Status != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s", resp.Status, string(resp.Body))
+		}
+		if atomic.LoadInt32(&hits) != 0 {
+			t.Fatalf("nil user must not dial upstream, hits=%d", hits)
+		}
+		after, err := os.ReadFile(logPath)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		afterN := 0
+		if len(bytes.TrimSpace(after)) > 0 {
+			afterN = len(strings.Split(strings.TrimSpace(string(after)), "\n"))
+		}
+		// Prefer no log line on deny; if a line is written it must still never contain email
+		// and must use the unauthenticated marker rather than a blank/missing identity.
+		if afterN > beforeN {
+			line := strings.Split(strings.TrimSpace(string(after)), "\n")[afterN-1]
+			if strings.Contains(line, piiEmail) {
+				t.Fatalf("email leaked on denied nil-user log: %s", line)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal([]byte(line), &raw); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if login, _ := raw["login"].(string); login != unauthMarker {
+				t.Fatalf("denied/nil log login=%q want %q line=%s", login, unauthMarker, line)
+			}
+		}
+	})
+
+	t.Run("unauthenticated_marker_contract_and_empty_login_not_forged", func(t *testing.T) {
+		// Nil-user tool calls are denied before ask-log. The marker contract is:
+		// when a completed ask-log line is produced with no user on the context,
+		// login must be exactly "unauthenticated". Pin the marker string here and
+		// prove a non-nil user with empty Login is NOT rewritten to that marker
+		// (and still never logs email).
+		if unauthMarker != "unauthenticated" {
+			t.Fatalf("marker constant drifted: %q", unauthMarker)
+		}
+		callOK(t, backend.PluginContext{
+			User: &backend.User{Login: "", Email: piiEmail, Role: "Editor"},
+		})
+		line := readLastLine(t)
+		if strings.Contains(line, piiEmail) {
+			t.Fatalf("email leaked: %s", line)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("json: %v raw=%s", err, line)
+		}
+		if _, ok := raw["login"]; !ok {
+			t.Fatalf("login field missing on completed ask-log line: %s", line)
+		}
+		login, _ := raw["login"].(string)
+		if login == unauthMarker {
+			t.Fatalf("empty Login on non-nil user must not be rewritten to %q: %s", unauthMarker, line)
+		}
+		role, _ := raw["role"].(string)
+		if role != "Editor" {
+			t.Fatalf("role=%q want Editor line=%s", role, line)
+		}
+	})
+}
+

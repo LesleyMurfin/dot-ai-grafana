@@ -13,6 +13,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 ## Requirements
 
 - Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.0)
+- Grafana org **Editor** or **Admin** to use Query / Remediate; **Admin** for Configuration and Test connection (see [Configuration](#configuration))
 - [DevOps AI Toolkit](https://devopstoolkit.ai) MCP server reachable from the Grafana plugin backend
 - Unsigned load until the plugin is signed:
 
@@ -97,10 +98,18 @@ As Grafana Admin: **Administration → Plugins → dot-ai → Configuration**.
 |---|---|
 | MCP Server URL | Absolute `http(s)` base for the dot-ai tools REST API. HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local` (example: `http://dot-ai.dot-ai.svc:3456`). Public `http` is rejected. |
 | Auth Token | Bearer token stored in Grafana encrypted settings (`Authorization: Bearer`) |
-| Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** JSONL may include packed Current (Loki/Prom lines). No Grafana tokens. Credentials inside *application* logs can appear. |
+| Debug Log | Enable/disable JSONL ask log at `/var/lib/grafana/dotai-ask.log`. **Off by default.** JSONL may include packed Current (Loki/Prom lines). Each line records the Grafana user `login` and org `role`; never the user's email or display name. No Grafana tokens. Credentials inside *application* logs can appear. |
 | Show context | Show Current, Map, and History on the page. **On by default.** Display-only; independent of Send Grafana evidence. |
 | Send Grafana evidence | `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, Asks do not pack Grafana DS facts. Independent of Show context. |
 | Test connection | `POST /api/v1/tools/version` through the plugin backend |
+
+**Who can use Query / Remediate.** Grafana org **Editor** or **Admin**. Viewer and org role
+`None` receive `HTTP 403` with `error: "Editor role required"`, refused in the plugin backend
+before any call to the dot-ai server. Configuration and Test connection remain **Admin**-only.
+A Grafana *server* admin whose org role is Viewer is also denied: the plugin SDK's
+`backend.User` exposes only `Login`, `Name`, `Email`, `Role` — no `IsGrafanaAdmin`. The gate
+trusts Grafana's org-role assignment, so anonymous auth with `org_role = Editor`, or an Editor
+service-account token, passes it.
 
 Do not point `apiUrl` at agentgateway or Context Forge — only the dot-ai tools REST base.
 
@@ -137,7 +146,7 @@ The published OpenAPI document for dot-ai includes execute/operate/recommend. Th
 
 ## Ask log (troubleshooting)
 
-**Debug Log** in plugin settings (`jsonData.debugLog`) enables it. **Off by default.** When on, every query/remediate hop appends one JSON line to `/var/lib/grafana/dotai-ask.log` (rotate at 1MiB → `.1`): `time`, `tool`, truncated `body`, `status`, `summary`, `hop`, `hops`, `first_hop`, `branch`, `current_empty`. Tokens never written. Hop meta stripped before dot-ai.
+**Debug Log** in plugin settings (`jsonData.debugLog`) enables it. **Off by default.** When on, every query/remediate hop appends one JSON line to `/var/lib/grafana/dotai-ask.log` (rotate at 1MiB → `.1`): `time`, `tool`, truncated `body`, `status`, `summary`, `hop`, `hops`, `first_hop`, `branch`, `current_empty`, `login`, `role`. The Grafana user `login` and org `role` are recorded on every line (`unauthenticated` when a line is written with no user on the context); the user's email address and display name are never written. Tokens never written. Hop meta stripped before dot-ai.
 
 Grafana plugin debug (`GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug`) is separate and only set in create-plugin docker for `npm run server`.
 
