@@ -18,7 +18,7 @@ The Grafana plugin backend talks to the [dot-ai MCP server](https://devopstoolki
 
 ### Query
 
-Ask natural language questions about your cluster. Responses are text (`data.result.summary`).
+Ask natural language questions about your cluster. Responses are text summaries from the plugin's flat resource envelope (`ok`, `status`, `summary`, `error`) — not a nested `data.result.*` shape.
 
 On Query, the page reads configured Loki, Prometheus, Tempo, and Alertmanager datasources via `getDataSourceSrv` (no hardcoded UIDs) and packs **Current** + **Map** into the same `{intent}` string. **History** is display-only (last 5 turns) and is never POSTed. There is no `sessionId`. One Ask may issue up to 3 dot-ai POSTs (for example an unscoped question or an answer that conflicts with Current).
 
