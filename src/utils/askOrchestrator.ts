@@ -373,6 +373,9 @@ export async function runAskOrchestrator(args: {
       stackLoadError = why;
       stackEmpty = true;
       currentEmpty = true;
+      // A failed read must not publish a previous ask's drilldown links alongside this
+      // ask's error: those links were scoped to whatever question last succeeded.
+      drilldowns = [];
       map = mergeMap(map, q);
     }
   };
@@ -469,10 +472,19 @@ export async function runAskOrchestrator(args: {
       if (stackLoadError) {
         return finish(false, `Grafana stack read failed: ${stackLoadError}`);
       }
-      // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and no
-      // drilldown link was rebuilt: there is no Current to read and no Map link to open.
+      // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m). If no
+      // drilldown link was rebuilt either, there is no Current to read and no Map link to
+      // open. drilldowns is built from configured datasource UIDs (see buildDrilldownLinks),
+      // not from query results, so it can be non-empty even when stackEmpty is true — do not
+      // let that non-emptiness stand in for "evidence exists".
       if (stackEmpty && drilldowns.length === 0) {
         return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
+      }
+      if (stackEmpty) {
+        return finish(
+          false,
+          'No Grafana evidence lines in the last 15m for this target. Map links open Explore/Drilldown for the datasource, but there is nothing to review yet.'
+        );
       }
       lastSummary = 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
       history = appendHistory(history, question, lastSummary);

@@ -891,7 +891,8 @@ describe('runAskOrchestrator', () => {
   test('show me the logs fails when the stack read is empty and there are no drilldowns', async () => {
     const fetchStack = jest.fn(async () =>
       stackResult({
-        current: '',
+        current:
+          'Loki last 15m:\nLoki datasource missing\n\nPrometheus last 15m:\nPrometheus datasource missing\n\nTempo last 15m:\nTempo datasource missing\n\nAlertmanager:\nAlertmanager datasource missing',
         mapHint: '',
         logLines: [],
         promLines: [],
@@ -913,6 +914,65 @@ describe('runAskOrchestrator', () => {
     expect(fetchStack).toHaveBeenCalledTimes(1);
     expect(callTool).not.toHaveBeenCalled();
     expect(result.summary).not.toMatch(/Map links/i);
+  });
+
+  // B2c — the read succeeded and Grafana IS configured (a Loki UID exists, so
+  // buildDrilldownLinks rebuilt an "Explore logs" link — see grafanaExplore.ts), but
+  // there are no evidence lines in the last 15m. drilldowns are built from configured
+  // datasource UIDs, not from query results, so a non-empty drilldowns list here does
+  // not mean there is anything in Current to point at. This is the realistic quiet-
+  // cluster shape the old `stackEmpty && drilldowns.length === 0` guard could not see,
+  // because it only fired when there were zero configured datasources.
+  test('show me the logs does not claim evidence in Current when the window is quiet but a datasource is configured', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current:
+          'Loki last 15m:\nno log lines in the last 15m\n\nPrometheus last 15m:\nno metric samples\n\nTempo last 15m:\nno traces\n\nAlertmanager:\nno alerts',
+        mapHint: 'Loki Loki',
+        logLines: [],
+        promLines: [],
+        currentEmpty: true,
+        drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.summary).not.toMatch(/evidence is in Current/i);
+    expect(result.errorMessage).toMatch(/no Grafana evidence lines/i);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    // The links are still config-backed and still published — just not claimed as evidence.
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+    ]);
+  });
+
+  test('a failed stack read clears drilldowns instead of publishing the previous asks links', async () => {
+    const fetchStack = jest.fn(async () => {
+      throw new Error('ds.query exploded');
+    });
+    const callTool = jest.fn();
+    const staleThread = {
+      ...emptyThread(),
+      drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=prev' }],
+    };
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: staleThread,
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Grafana stack read failed/);
+    expect(result.thread.drilldowns).toEqual([]);
   });
 });
 
