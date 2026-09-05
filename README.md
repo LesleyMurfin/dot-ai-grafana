@@ -167,7 +167,7 @@ dot-ai server. That string is the whole egress surface. It carries:
 |---|---|---|
 | Stable preamble | Fixed instruction text, including "quote the concrete Loki/Prometheus/Tempo/Alertmanager lines" | fixed |
 | `Current:` | Grafana datasource facts read for **this** Ask when evidence is on; otherwise the session's rewritten Current, which holds `Asked:` (your previous question, ≤180 chars) and `What's true now:` (dot-ai's previous answer, ≤500 chars) | `MAX_CURRENT_CHARS` = 700 |
-| `Prior:` | The 2 most recent turns, condensed: **your own question text** (≤90 chars per turn) and **prose from dot-ai's answers**. Because the preamble tells the model to quote log, metric and alert lines, answers routinely contain verbatim log text — so anything credential-shaped in an application log can travel here | `MAX_PRIOR_CHARS` = 240 |
+| `Prior:` | The 2 most recent turns, condensed: **your question text, which can also carry follow-up instructions this page added automatically** (≤90 chars per turn), and **prose from dot-ai's answers**. Because the preamble tells the model to quote log, metric and alert lines, answers routinely contain verbatim log text — so anything credential-shaped in an application log can travel here | `MAX_PRIOR_CHARS` = 240 |
 | `Map:` | Resource-name and namespace chips accumulated across **every** turn of the session, harvested from both questions and answers | `MAX_MAP_CHARS` = 400 |
 | `Question:` / `Issue:` | The box text, verbatim | reserved first |
 
@@ -231,7 +231,7 @@ Remediate bodies are allowlisted to analysis-only fields (`issue` / `intent`). A
 
 The published OpenAPI document for dot-ai includes execute/operate/recommend. This plugin does **not** generate a client from that full schema — that would pull mutation tools into an analysis-only Grafana app. Outbound HTTP uses the Grafana plugin SDK `httpclient` for the three read paths above.
 
-**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into the same `{intent}` / `{issue}` string, plus a condensed **Prior:** block from the 2 most recent turns (≤ `MAX_PRIOR_CHARS` = 240 chars inside the 1000-char intent budget; shed only after Tempo, log, metric and alert lines have been peeled — see [Data egress](#data-egress)). Full History stays on screen. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
+**Progressive context vs Headlamp.** Headlamp Query is one POST of the box text; remediate/operate on a resource detail page pass that **Kubernetes object**. This plugin packs **Grafana datasource** facts (Loki, Prometheus, Tempo, Alertmanager) into `{intent}` when a Query Ask reads them, replacing Current rather than sending both; `{issue}` (Remediate) reuses whatever Current already holds and never triggers a fresh datasource read. Either string also carries a condensed **Prior:** block from the 2 most recent turns (≤ `MAX_PRIOR_CHARS` = 240 chars inside the 1000-char intent budget; shed only after Tempo, log, metric and alert lines have been peeled — see [Data egress](#data-egress)). Full History stays on screen. No `sessionId` chat protocol. Engine-side Prom/Grafana evidence would be [dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463), not this UI.
 
 ## Ask log (troubleshooting)
 
