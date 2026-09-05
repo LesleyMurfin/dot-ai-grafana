@@ -708,6 +708,104 @@ describe('runAskOrchestrator', () => {
     expect(result.errorMessage).toMatch(/cancelled/i);
     expect(callTool).not.toHaveBeenCalled();
   });
+
+  test('show me the logs skips dot-ai and keeps Current', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Loki last 15m:\nboom',
+        drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.current).toContain('boom');
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+    ]);
+    expect(result.summary).toMatch(/Map links/i);
+  });
+
+  test('show me the logs fails when the Grafana stack read failed (no evidence to show)', async () => {
+    const fetchStack = jest.fn(async () => {
+      throw new Error('ds.query exploded');
+    });
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Grafana stack read failed/);
+    expect(result.errorMessage).toMatch(/ds\.query exploded/);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.summary).not.toMatch(/Map links/i);
+  });
+
+  // B2a — "Send Grafana evidence" off (DotAIPage passes skipStack). loadStack returns early
+  // without setting stackLoadError, so a read-failure guard alone leaves a confident no-op:
+  // ok, Map links advertised, Current empty, dot-ai never called.
+  test('show me the logs fails when Grafana evidence is disabled in config', async () => {
+    const fetchStack = jest.fn(async () => stackResult());
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+      skipStack: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Grafana evidence is disabled in plugin configuration/i);
+    expect(result.errorMessage).toMatch(/Send Grafana evidence/i);
+    expect(result.hops).toBe(0);
+    expect(fetchStack).not.toHaveBeenCalled();
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.summary).not.toMatch(/Map links/i);
+    expect(result.thread.drilldowns).toEqual([]);
+  });
+
+  // B2b — the read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and
+  // no drilldown was rebuilt: pointing at Map links that do not exist is the same false claim.
+  test('show me the logs fails when the stack read is empty and there are no drilldowns', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: '',
+        mapHint: '',
+        logLines: [],
+        promLines: [],
+        currentEmpty: true,
+        drilldowns: [],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/no Grafana evidence in the last 15m/i);
+    expect(result.hops).toBe(0);
+    expect(fetchStack).toHaveBeenCalledTimes(1);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.summary).not.toMatch(/Map links/i);
+  });
 });
 
 /**

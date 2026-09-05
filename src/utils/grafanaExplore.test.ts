@@ -1,5 +1,5 @@
 import { config } from '@grafana/runtime';
-import { buildDrilldownLinks, exploreUrl } from './grafanaExplore';
+import { buildDrilldownLinks, exploreUrl, isShowMeOnly } from './grafanaExplore';
 
 jest.mock('@grafana/runtime', () => ({
   config: {
@@ -8,6 +8,80 @@ jest.mock('@grafana/runtime', () => ({
     bootData: { user: { orgId: 1 } },
   },
 }));
+
+describe('isShowMeOnly', () => {
+  // One test per PRD #3 matching-contract clause (names fail the clause).
+
+  test('clause: lowercase + strip surrounding .?! — SHOW ME LOGS.', () => {
+    expect(isShowMeOnly('SHOW ME LOGS.')).toBe(true);
+  });
+
+  test('clause: complete phrase only — show me dashboards', () => {
+    expect(isShowMeOnly('show me dashboards')).toBe(true);
+  });
+
+  test('clause: complete phrase verbs — open the traces / display the metrics', () => {
+    expect(isShowMeOnly('open the traces')).toBe(true);
+    expect(isShowMeOnly('display the metrics')).toBe(true);
+  });
+
+  test('clause: no for-resource tail — show me the logs for pod api-7f', () => {
+    // Contract production has no `for <resource>`; must POST (not 0-hop skip).
+    expect(isShowMeOnly('show me the logs for pod api-7f')).toBe(false);
+  });
+
+  test('clause: diagnosis wins — show me the logs — why is checkout-api crashing?', () => {
+    // Interior em-dash/punctuation must survive; why/crash force POST.
+    expect(isShowMeOnly('show me the logs — why is checkout-api crashing?')).toBe(false);
+  });
+
+  test('clause: diagnosis token analyze', () => {
+    expect(isShowMeOnly('analyze the logs')).toBe(false);
+  });
+
+  test('clause: no partial-word hits', () => {
+    expect(isShowMeOnly('showcase logs')).toBe(false);
+    expect(isShowMeOnly('show me the logging')).toBe(false);
+    expect(isShowMeOnly('showmen logs')).toBe(false);
+  });
+
+  test('pure navigation phrases still match', () => {
+    expect(isShowMeOnly('show me the logs')).toBe(true);
+    expect(isShowMeOnly('open traces')).toBe(true);
+    expect(isShowMeOnly('display alerts')).toBe(true);
+  });
+
+  // Former widened-form cases (`for …`) previously expected true; contract rejects them.
+  test('widened for-tail no longer skips (was depending on optional for-clause)', () => {
+    expect(isShowMeOnly('show me the alerts for checkout')).toBe(false);
+    expect(isShowMeOnly('show me metrics for ns/prod')).toBe(false);
+    expect(isShowMeOnly('show logs for pod api')).toBe(false);
+    expect(isShowMeOnly('list namespaces')).toBe(false);
+  });
+
+  test('diagnosis extras still force POST', () => {
+    expect(isShowMeOnly('why are there errors for pod api')).toBe(false);
+    expect(isShowMeOnly('how do we improve alerts')).toBe(false);
+    expect(isShowMeOnly('show failing pods')).toBe(false);
+    expect(
+      isShowMeOnly('show me the logs for the top issue we need to address in our environment')
+    ).toBe(false);
+  });
+
+  test('clause: collapse internal whitespace — "show  me   the  logs"', () => {
+    expect(isShowMeOnly('show  me   the  logs')).toBe(true);
+    expect(isShowMeOnly('  open\tthe   traces  ')).toBe(true);
+    expect(isShowMeOnly('display\nthe\nmetrics')).toBe(true);
+  });
+
+  test('clause: strip surrounding ? and ! — "show me the logs?" / "open alerts!"', () => {
+    expect(isShowMeOnly('show me the logs?')).toBe(true);
+    expect(isShowMeOnly('open alerts!')).toBe(true);
+    expect(isShowMeOnly('Display The Dashboards?!')).toBe(true);
+    // Interior punctuation is not stripped, so this is not the complete phrase.
+    expect(isShowMeOnly('show me the logs? and metrics')).toBe(false);
+  });
+});
 
 describe('exploreUrl', () => {
   test('Explore panes include datasource uid and query', () => {
