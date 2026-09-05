@@ -372,10 +372,7 @@ describe('fetchStackContext', () => {
     // 200 distinct valid uids — an alert-per-dashboard cluster far past the 5-link
     // cap buildDrilldownLinks already enforces, and past DASHBOARD_UID_CAP.
     const manyUids = Array.from({ length: 200 }, (_, i) => `dash-uid-${String(i).padStart(3, '0')}`);
-    mockStack([
-      { name: 'alertname', type: 'string', values: manyUids.map((_, i) => `Alert${i}`) },
-      { name: 'dashboardUid', type: 'string', values: manyUids },
-    ]);
+    mockStack(manyUids.map((uid, i) => alertmanagerAlert({ alertname: `Alert${i}` }, { dashboardUID: uid })));
 
     const result = await fetchStackContext('top issues in the cluster');
 

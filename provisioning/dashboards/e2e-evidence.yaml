@@ -1,0 +1,16 @@
+apiVersion: 1
+
+# Backs the dashboardUID annotation on the always-firing alert in
+# provisioning/alerting/e2e-evidence.yaml, so the /d/<uid> drilldown link
+# built from real firing-alert evidence (src/utils/grafanaExplore.ts
+# buildDrilldownLinks) resolves to a real dashboard end to end.
+providers:
+  - name: e2e-evidence
+    orgId: 1
+    folder: E2E Evidence
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

@@ -1,0 +1,20 @@
+{
+  "uid": "e2etestdash1",
+  "title": "E2E Test Dashboard",
+  "tags": ["e2e-evidence"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "E2E evidence dashboard",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Target of the dashboardUID annotation on the E2E Always Firing alert."
+      }
+    }
+  ]
+}
