@@ -348,6 +348,11 @@ export async function runAskOrchestrator(args: {
   let stackSnapshot = '';
   let stackEmpty = true;
   let currentEmpty = !args.thread.current.trim();
+  // Carried from the prior thread, replaced only on a successful loadStack below.
+  // Deliberate: a failed stack read leaves this ask's Map panel showing the previous
+  // ask's links beside the failure note, mirroring how `map` itself carries forward
+  // on failure (line below). The links stay valid Grafana URLs, so surfacing stale
+  // evidence beats surfacing none.
   let drilldowns: DrilldownLink[] = args.thread.drilldowns ?? [];
 
   const loadStack = async (q: string) => {
@@ -366,6 +371,7 @@ export async function runAskOrchestrator(args: {
       stackSnapshot = `Grafana stack read failed:\n${why}`;
       stackEmpty = true;
       currentEmpty = true;
+      // drilldowns intentionally NOT cleared here — see comment at its declaration.
       map = mergeMap(map, q);
     }
   };
