@@ -3,6 +3,7 @@ import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
   CLUSTER_LOGQL,
+  DASHBOARD_UID_CAP,
   dashboardHintFromUids,
   dashboardUidsFromAlertFrames,
   fetchStackContext,
@@ -11,6 +12,7 @@ import {
   LOG_LINE_CAP,
   parsePodNamespace,
 } from './grafanaStack';
+import { buildRequestText } from './progressiveContext';
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
@@ -365,6 +367,37 @@ describe('fetchStackContext', () => {
     expect(JSON.stringify(mockAmFetch.mock.calls)).not.toMatch(/api\/search/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/api\/search/);
   });
+
+  test('hundreds of firing-alert dashboard uids stay bounded and real evidence survives the pack', async () => {
+    // 200 distinct valid uids — an alert-per-dashboard cluster far past the 5-link
+    // cap buildDrilldownLinks already enforces, and past DASHBOARD_UID_CAP.
+    const manyUids = Array.from({ length: 200 }, (_, i) => `dash-uid-${String(i).padStart(3, '0')}`);
+    mockStack([
+      { name: 'alertname', type: 'string', values: manyUids.map((_, i) => `Alert${i}`) },
+      { name: 'dashboardUid', type: 'string', values: manyUids },
+    ]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    // Bounded at the source: no matter how many distinct dashboard uids the firing
+    // alerts carry, the Dashboards block in both Current and Map never grows past
+    // DASHBOARD_UID_CAP.
+    expect(result.current.match(/\/d\//g) ?? []).toHaveLength(DASHBOARD_UID_CAP);
+    expect(result.mapHint.match(/\/d\//g) ?? []).toHaveLength(DASHBOARD_UID_CAP);
+
+    // With the cap in place, real Loki evidence survives the actual packer. TRIM_ORDER
+    // never peels the Dashboards block, so an uncapped list of 200 "/d/dash-uid-NNN"
+    // lines (~2.6KB) would alone blow the 700-char Current budget and force every real
+    // Loki/Prometheus/Alertmanager line to be shed before the packer ever touched a
+    // dashboard link.
+    const packed = buildRequestText({
+      tool: 'query',
+      current: result.current,
+      map: result.mapHint,
+      box: 'top issues in the cluster',
+    });
+    expect(packed).toContain('k8s error line');
+  });
 });
 
 describe('getDataSourceByType selection', () => {
@@ -455,5 +488,14 @@ describe('dashboardUidsFromAlertFrames', () => {
       } as never,
     ]);
     expect(uids).toEqual(['ok-uid-1']);
+  });
+
+  test('caps extraction at DASHBOARD_UID_CAP even when hundreds of distinct uids are present', () => {
+    const many = Array.from({ length: 200 }, (_, i) => `dash-uid-${String(i).padStart(3, '0')}`);
+    const uids = dashboardUidsFromAlertFrames([
+      { fields: [{ name: 'dashboardUid', type: 'string', values: many }] } as never,
+    ]);
+    expect(uids).toHaveLength(DASHBOARD_UID_CAP);
+    expect(uids).toEqual(many.slice(0, DASHBOARD_UID_CAP));
   });
 });

@@ -27,6 +27,13 @@ export const WINDOW_MS = 15 * 60 * 1000;
 export const PROM_SERIES_CAP = 8;
 export const TEMPO_TRACE_CAP = 5;
 export const ALERT_CAP = 8;
+/**
+ * Cap on dashboard uids extracted from firing alerts. Matches buildDrilldownLinks'
+ * own 5-link limit, so nothing extracted here ever goes unused downstream, and it
+ * bounds the growth of the Current/Map text these uids feed before the packer ever
+ * sees them — see dashboardUidsFromAlertFrames.
+ */
+export const DASHBOARD_UID_CAP = 5;
 
 export type PodNamespaceTarget = {
   pod?: string;
@@ -349,6 +356,9 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
 const DASHBOARD_UID_KEYS = ['dashboardUID', 'dashboardUid', '__dashboardUid__', 'dashboard_uid'];
 
 function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[]) {
+  if (uids.length >= DASHBOARD_UID_CAP) {
+    return;
+  }
   const s = String(raw ?? '').trim();
   if (!s || seen[s] || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
     return;
@@ -357,15 +367,28 @@ function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[
   uids.push(s);
 }
 
-/** v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search. */
+/**
+ * v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search.
+ * Capped at DASHBOARD_UID_CAP: a cluster with many firing alerts can carry a distinct
+ * dashboardUID label per alert, and both dashboardHintFromUids (mapHint) and
+ * formatCurrent render every uid this returns with no cap of their own — an unbounded
+ * list here grows the Current block past its packer budget and starves the packer
+ * into shedding real Loki/Prometheus/Alertmanager evidence lines instead.
+ */
 export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
   const uids: string[] = [];
   const seen: Record<string, true> = {};
   for (const frame of frames) {
+    if (uids.length >= DASHBOARD_UID_CAP) {
+      break;
+    }
     for (const field of frame.fields ?? []) {
+      if (uids.length >= DASHBOARD_UID_CAP) {
+        break;
+      }
       if (DASHBOARD_UID_KEYS.includes(field.name)) {
         const len = fieldLength(field.values);
-        for (let i = 0; i < len; i++) {
+        for (let i = 0; i < len && uids.length < DASHBOARD_UID_CAP; i++) {
           addDashboardUid(fieldGet(field.values, i), seen, uids);
         }
       }
@@ -602,7 +625,8 @@ function formatCurrent(args: {
   // model inventing a link for an alert it can see. On a cluster with no firing alerts
   // the block is omitted: there it cost 65 chars of the fixed 700-char MAX_CURRENT_CHARS
   // budget to announce nothing, and the packer paid for it by shedding the last Loki
-  // line that still fitted.
+  // line that still fitted. dashboardUids is already capped at DASHBOARD_UID_CAP by
+  // dashboardUidsFromAlertFrames, so this block's own growth is bounded too.
   const dashboardHint =
     args.dashboardUids.length > 0
       ? args.dashboardUids.map((u) => '/d/' + u).join('\n')

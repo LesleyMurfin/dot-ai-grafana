@@ -153,4 +153,18 @@ describe('buildDrilldownLinks', () => {
     expect(links[0].href).toBe('/d/ok-uid-1');
     expect(JSON.stringify(links)).not.toMatch(/javascript:|\.\.\//);
   });
+
+  test('5 invalid uids ahead of a valid one do not starve it out of the 5-link budget', () => {
+    // Old behavior sliced to 5 BEFORE validating, so 5 invalid entries ahead of a
+    // valid uid consumed the whole budget and the valid uid never rendered.
+    const links = buildDrilldownLinks({
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: [],
+      dashboardUids: ['ab', '../../etc/passwd', 'javascript:alert(1)', '', 'x', 'ok-uid-1'],
+    });
+    expect(links.map((l) => l.id)).toEqual(['dash-ok-uid-1']);
+    expect(links[0].href).toBe('/d/ok-uid-1');
+  });
 });

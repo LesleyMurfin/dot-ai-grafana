@@ -138,12 +138,12 @@ export function buildDrilldownLinks(args: {
 
   // Model/alert-authored text must never become part of a link href. dashboardUids
   // already passed dashboardUidsFromAlertFrames' own shape check on the way in
-  // (src/utils/grafanaStack.ts), but this loop re-validates at the point the URL is
+  // (src/utils/grafanaStack.ts), but this re-validates at the point the URL is
   // actually built so buildDrilldownLinks stays safe for any future caller too.
-  for (const uid of args.dashboardUids.slice(0, 5)) {
-    if (!/^[A-Za-z0-9_-]{5,40}$/.test(uid)) {
-      continue;
-    }
+  // Filter BEFORE slicing to 5: an invalid entry ahead of a valid one must not
+  // consume a slot from the budget and starve a valid uid past index 4.
+  const validDashboardUids = args.dashboardUids.filter((uid) => /^[A-Za-z0-9_-]{5,40}$/.test(uid));
+  for (const uid of validDashboardUids.slice(0, 5)) {
     links.push({
       id: `dash-${uid}`,
       label: `Dashboard ${uid}`,
