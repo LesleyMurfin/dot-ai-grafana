@@ -613,7 +613,10 @@ describe('Pages/DotAIPage', () => {
     const notice = screen.getByTestId(testIds.dotai.consent);
     expect(notice).toHaveTextContent(/Send Grafana evidence is off, so Asks read no datasource/);
     expect(notice).toHaveTextContent(
-      /condensed Prior block of up to 240 characters taken from your earlier questions and dot-ai’s earlier answers/
+      /condensed Prior block of up to 240 characters built from your earlier questions and dot-ai’s earlier answers/
+    );
+    expect(notice).toHaveTextContent(
+      /the question side can also carry follow-up instructions this page adds automatically/
     );
     expect(notice).toHaveTextContent(/quote log, metric and alert lines verbatim/);
     expect(notice).toHaveTextContent(/The toggle does not cover Prior, Current or Map/);
@@ -653,11 +656,15 @@ describe('Pages/DotAIPage', () => {
     render(<DotAIPage />);
     const notice = screen.getByTestId(testIds.dotai.consent);
     expect(notice).toHaveTextContent(
-      /Grafana datasource facts read now \(Loki, Prometheus, Tempo, Alertmanager\)/
+      /Query Asks that need live data replace Current with Grafana datasource facts read at that moment \(Loki, Prometheus, Tempo, Alertmanager\)/
     );
+    expect(notice).toHaveTextContent(/Remediate Asks read no datasource/);
     expect(notice).toHaveTextContent(/the session Current summary and Map of resource names/);
     expect(notice).toHaveTextContent(
-      /condensed Prior block of up to 240 characters taken from your earlier questions and dot-ai’s earlier answers/
+      /condensed Prior block of up to 240 characters built from your earlier questions and dot-ai’s earlier answers/
+    );
+    expect(notice).toHaveTextContent(
+      /the question side can also carry follow-up instructions this page adds automatically/
     );
     expect(notice).toHaveTextContent(
       /Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too/

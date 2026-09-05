@@ -200,6 +200,42 @@ describe('progressiveContext', () => {
     expect(MAX_PRIOR_CHARS).toBe(240);
   });
 
+  test('buildRequestText caps the Prior block it actually emits at MAX_PRIOR_CHARS, not just the constant', () => {
+    // Astral characters are surrogate pairs; sliceUnits must not cut mid-pair or the
+    // truncated tail would carry a lone surrogate (renders as U+FFFD).
+    const astral = '𝕏😀🔥🚀'.repeat(20);
+    let history = appendHistory(
+      [],
+      `show pods failing in prod ${astral} ${'q'.repeat(300)}`,
+      `pod/alpha-api is CrashLooping in ns/prod ${astral} ${'a'.repeat(300)}`
+    );
+    history = appendHistory(
+      history,
+      `and what about pod beta in prod ${astral} ${'q'.repeat(300)}`,
+      `pod/beta-api is OOMKilled in ns/prod ${astral} ${'a'.repeat(300)}`
+    );
+
+    const text = buildRequestText({
+      tool: 'query',
+      current: 'pod/gamma-api is Running',
+      map: 'ns/prod',
+      box: 'status of pod gamma?',
+      history,
+    });
+
+    expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+
+    // Extract the Prior block the way a consumer of the wire text would: everything
+    // between the "Prior:" label and the next section (or Question/Issue if Map was
+    // dropped). This is the bound the PR exists to guarantee — the emitted bytes,
+    // not the MAX_PRIOR_CHARS constant asserted above.
+    const match = text.match(/Prior:\n([\s\S]*?)\n\n(?:Map:|Question:|Issue:)/);
+    expect(match).not.toBeNull();
+    const priorBlock = match![1];
+    expect(priorBlock.length).toBeGreaterThan(0);
+    expect(priorBlock.length).toBeLessThanOrEqual(MAX_PRIOR_CHARS);
+  });
+
   test('buildRequestText first turn is Stable + Question only', () => {
     const text = buildRequestText({
       tool: 'query',

@@ -355,7 +355,7 @@ describe('Components/AppConfig', () => {
     expect(description).toMatch(/the session Current summary/);
     expect(description).toMatch(/Map of resource names/);
     expect(description).toMatch(
-      /condensed Prior block \(up to 240 chars of earlier questions and answers\) are still sent/
+      /condensed Prior block \(up to 240 chars of earlier questions and answers, where the question side can also carry follow-up instructions this page adds automatically\) are still sent/
     );
   });
 });
