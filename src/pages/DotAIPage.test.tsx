@@ -31,6 +31,7 @@ const emptyStack = {
   tempoLines: [] as string[],
   alertLines: [] as string[],
   currentEmpty: false,
+  drilldowns: [],
 };
 
 
@@ -131,6 +132,7 @@ describe('Pages/DotAIPage', () => {
       tempoLines: [],
       alertLines: [],
       currentEmpty: false,
+      drilldowns: [],
     });
     mockCallDotAITool.mockResolvedValue({
       ok: true,

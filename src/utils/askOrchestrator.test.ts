@@ -22,6 +22,7 @@ function stackResult(overrides: Partial<StackContextResult> = {}): StackContextR
     tempoLines: overrides.tempoLines ?? [],
     alertLines: overrides.alertLines ?? [],
     currentEmpty: overrides.currentEmpty ?? false,
+    drilldowns: overrides.drilldowns ?? [],
   };
 }
 
