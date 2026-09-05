@@ -6,13 +6,19 @@ import {
   dateTime,
   TimeRange,
 } from '@grafana/data';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import { lastValueFrom, Observable } from 'rxjs';
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
-// Stack reads go through getDataSourceSrv + ds.query (Explore path). If we later
-// add "open this dashboard", use Grafana 12+ Dashboard /apis only.
+// Loki/Prometheus/Tempo reads go through getDataSourceSrv + ds.query (Explore path).
+// Alertmanager evidence cannot: Grafana's built-in `alertmanager`-type datasource's
+// query() is a stub that always resolves `{ data: [] }` and never issues a request
+// (verified against Grafana 13.1.0), so firing-alert evidence instead reads Grafana's
+// own unified-alerting HTTP API (GET /api/alertmanager/grafana/api/v2/alerts) — a
+// read-only alert-state endpoint, not the Alerting Provisioning API (rule CRUD) and
+// not GET /api/search. If we later add "open this dashboard", use Grafana 12+
+// Dashboard /apis only.
 
 
 export const LOG_LINE_CAP = 30;
@@ -54,7 +60,6 @@ type DsQueryable = {
 type LokiTarget = { refId: string; expr: string; queryType: string; maxLines: number };
 type PromTarget = { refId: string; expr: string; instant?: boolean; format?: string };
 type TempoTarget = { refId: string; queryType?: string; query?: string; limit?: number };
-type AlertTarget = { refId: string; expr?: string; queryType?: string };
 
 /** Resource-kind / filler words that must never become a pod or namespace. */
 const NAME_DENY: Record<string, true> = {
@@ -244,7 +249,11 @@ export async function getDataSourceByType(
   const srv = getDataSourceSrv();
   let list: DataSourceInstanceSettings[] = [];
   try {
-    const raw = srv.getList({ type } as never);
+    // getList() defaults to excluding datasources whose plugin meta reports every
+    // capability flag (metrics/annotations/tracing/logs/alerting) false — that is
+    // exactly the built-in `alertmanager` datasource type, so it needs `all: true`
+    // or it is silently invisible to this lookup (verified against Grafana 13.1.0).
+    const raw = srv.getList(type === 'alertmanager' ? ({ type, all: true } as never) : ({ type } as never));
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
@@ -400,6 +409,77 @@ export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
   return out;
 }
 
+const ALERTMANAGER_ALERTS_URL = '/api/alertmanager/grafana/api/v2/alerts';
+
+type AlertmanagerAlert = {
+  status?: { state?: string };
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+};
+
+/**
+ * Grafana's unified-alerting alert-state mirror (read-only; requires only Viewer).
+ * Always the Grafana-managed alertmanager — "grafana" is a fixed literal here, not a
+ * datasource uid, so this works whether or not an Alertmanager-type datasource is
+ * configured at all.
+ */
+async function fetchAlertmanagerAlerts(): Promise<AlertmanagerAlert[]> {
+  const response = await lastValueFrom(
+    getBackendSrv().fetch({
+      url: ALERTMANAGER_ALERTS_URL,
+      method: 'GET',
+      showErrorAlert: false,
+      showSuccessAlert: false,
+    }) as unknown as Observable<{ data: unknown }>
+  );
+  const data = response?.data;
+  return Array.isArray(data) ? (data as AlertmanagerAlert[]) : [];
+}
+
+function alertMatchesTarget(alert: AlertmanagerAlert, target: PodNamespaceTarget): boolean {
+  const labels = alert.labels ?? {};
+  if (target.namespace && labels.namespace !== target.namespace) {
+    return false;
+  }
+  if (target.pod) {
+    const podLabel = (labels.pod || labels.pod_name || '').toLowerCase();
+    if (!podLabel.startsWith(target.pod.toLowerCase())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function linesFromAlertmanagerAlerts(alerts: AlertmanagerAlert[], cap: number): string[] {
+  const lines: string[] = [];
+  for (const alert of alerts) {
+    if (lines.length >= cap) {
+      break;
+    }
+    const name = alert.labels?.alertname || 'alert';
+    const detail = alert.annotations?.summary || alert.annotations?.description || 'firing';
+    lines.push(`${name}: ${detail}`.replace(/\s+/g, ' ').trim());
+  }
+  return lines;
+}
+
+/** Real Alertmanager evidence for Current. See the module header for why this bypasses ds.query(). */
+async function queryAlertmanagerEvidence(target: PodNamespaceTarget): Promise<{ lines: string[]; note?: string }> {
+  try {
+    const alerts = (await fetchAlertmanagerAlerts())
+      // Firing right now — excludes suppressed/silenced/unprocessed Alertmanager states.
+      .filter((a) => (a.status?.state ?? 'active') === 'active')
+      .filter((a) => alertMatchesTarget(a, target));
+    const lines = linesFromAlertmanagerAlerts(alerts, ALERT_CAP);
+    if (lines.length === 0) {
+      return { lines, note: 'no alerts' };
+    }
+    return { lines };
+  } catch (e) {
+    return { lines: [], note: `no alerts (${e instanceof Error ? e.message : 'query failed'})` };
+  }
+}
+
 function scopeSuffix(target: PodNamespaceTarget): string {
   const where = [
     target.pod ? `pod/${target.pod}` : undefined,
@@ -449,8 +529,9 @@ function formatCurrent(args: {
 
 /**
  * Grafana stack → Current/Map for Query (connect-only).
- * Pattern: getDataSourceSrv().getList({ type }) → get(ref) → ds.query(DataQueryRequest).
- * Packs DataFrame text into Current. No hardcoded uids, no proxy URLs, no picker UI.
+ * Loki/Prometheus/Tempo: getDataSourceSrv().getList({ type }) → get(ref) → ds.query(DataQueryRequest).
+ * Alertmanager: getBackendSrv().fetch() against the unified-alerting HTTP API (see module header).
+ * Packs frame/alert text into Current. No hardcoded uids, no proxy URLs, no picker UI.
  * Always queries Loki + Prometheus (cluster-wide when no pod/ns). Alertmanager cluster-wide too.
  */
 export async function fetchStackContext(question: string): Promise<StackContextResult> {
@@ -554,22 +635,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       const lines = tracesFromTempoFrames(framesOf(resp));
       return { lines, emptyNote: 'no traces for this target in the last 15m' };
     }),
-    queryOne(am, 'Alertmanager datasource missing', 'no alerts', async () => {
-      const exprParts: string[] = [];
-      if (target.namespace) {
-        exprParts.push(`namespace="${target.namespace}"`);
-      }
-      if (target.pod) {
-        exprParts.push(`pod=~"${escapeRegex(target.pod)}.*"`);
-      }
-      const expr = exprParts.length > 0 ? `{${exprParts.join(',')}}` : undefined;
-      const resp = await runDsQuery(
-        am!.ds!,
-        baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
-      );
-      const lines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
-      return { lines, emptyNote: 'no alerts' };
-    }),
+    queryAlertmanagerEvidence(target),
   ]);
 
   logLines = lokiRes.lines;

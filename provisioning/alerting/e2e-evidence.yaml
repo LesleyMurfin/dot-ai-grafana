@@ -1,0 +1,48 @@
+apiVersion: 1
+
+# Always-firing Grafana-managed alert, provisioned declaratively so any Grafana
+# instance started from this repo's harness (docker-compose or the rootless
+# recipe) has real evidence for the unified-alerting HTTP API — the mechanism
+# src/utils/grafanaStack.ts uses for Alertmanager evidence (see its module
+# header). Backs tests/alertmanagerEvidence.spec.ts.
+groups:
+  - orgId: 1
+    name: e2e_evidence_group
+    folder: E2E Evidence
+    interval: 10s
+    rules:
+      - uid: e2ealwaysfiring1
+        title: E2E Always Firing
+        condition: C
+        data:
+          - refId: A
+            datasourceUid: testdata-1
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              refId: A
+              scenarioId: csv_content
+              csvContent: "value\n100\n"
+          - refId: C
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              refId: C
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 0s
+        annotations:
+          summary: Always firing E2E test alert
+          dashboardUID: e2etestdash1
+        labels:
+          severity: critical
+          namespace: e2e-ns

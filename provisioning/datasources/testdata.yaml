@@ -1,0 +1,13 @@
+apiVersion: 1
+
+# Grafana's built-in synthetic datasource — no external dependency, safe for e2e.
+# Backs the always-firing alert rule in provisioning/alerting/e2e-evidence.yaml so
+# tests/alertmanagerEvidence.spec.ts has a real firing Grafana-managed alert to
+# assert on without any live cluster or external Alertmanager.
+datasources:
+  - name: TestData
+    type: grafana-testdata-datasource
+    uid: testdata-1
+    access: proxy
+    isDefault: false
+    editable: false

@@ -1,5 +1,5 @@
 import { of } from 'rxjs';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
   CLUSTER_LOGQL,
@@ -12,10 +12,12 @@ import {
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
+  getBackendSrv: jest.fn(),
 }));
 
 const mockGet = jest.fn();
 const mockGetList = jest.fn();
+const mockAmFetch = jest.fn();
 
 function frameWithLineField(lines: string[]) {
   return {
@@ -30,12 +32,22 @@ function frameWithValue(labels: Record<string, string>, value: number) {
   };
 }
 
+/** Real Alertmanager v2 shape (GET /api/alertmanager/grafana/api/v2/alerts response). */
+function alertmanagerAlert(labels: Record<string, string>, annotations: Record<string, string> = {}) {
+  return { status: { state: 'active' }, labels, annotations };
+}
+
 beforeEach(() => {
   mockGet.mockReset();
   mockGetList.mockReset();
+  mockAmFetch.mockReset();
+  mockAmFetch.mockReturnValue(of({ data: [] }));
   (getDataSourceSrv as jest.Mock).mockReturnValue({
     get: mockGet,
     getList: mockGetList,
+  });
+  (getBackendSrv as jest.Mock).mockReturnValue({
+    fetch: mockAmFetch,
   });
   mockGetList.mockImplementation((opts?: { type?: string }) => {
     const all = [
@@ -132,7 +144,7 @@ describe('linesFromLokiFrames', () => {
 });
 
 describe('fetchStackContext', () => {
-  test('Current includes mocked Loki log lines via ds.query', async () => {
+  test('Current includes Loki/Prometheus/Tempo via ds.query and Alertmanager via the unified-alerting API', async () => {
     const lokiLines = ['OOMKilled container', 'Back-off restarting failed container'];
     mockGet.mockImplementation(async (ref: string) => {
       if (ref === 'loki-1' || ref === 'Loki') {
@@ -156,16 +168,21 @@ describe('fetchStackContext', () => {
             }),
         };
       }
-      if (ref === 'am-1' || ref === 'Alertmanager') {
-        return {
-          query: () =>
-            of({
-              data: [{ fields: [{ name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] }] }],
-            }),
-        };
-      }
       return { query: () => of({ data: [] }) };
     });
+    // ds.query() on the built-in `alertmanager` datasource is a stub that always resolves
+    // `{ data: [] }` on real Grafana (verified against 13.1.0) — the real mechanism is
+    // GET /api/alertmanager/grafana/api/v2/alerts via getBackendSrv().fetch().
+    mockAmFetch.mockReturnValue(
+      of({
+        data: [
+          alertmanagerAlert(
+            { alertname: 'KubePodCrashLooping', pod: 'checkout-api', namespace: 'prod' },
+            { summary: 'back-off restarting failed container' }
+          ),
+        ],
+      })
+    );
 
     const result = await fetchStackContext('why is pod checkout-api crashing in namespace prod?');
 
@@ -179,12 +196,39 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('trace abc123');
     expect(result.current).toContain('Alertmanager');
     expect(result.current).toContain('KubePodCrashLooping');
+    expect(result.current).toContain('back-off restarting failed container');
     expect(result.mapHint).toMatch(/Loki/);
     expect(result.mapHint).toMatch(/Prometheus/);
     expect(result.mapHint).toMatch(/Tempo/);
     expect(result.mapHint).toMatch(/Alertmanager/);
+    expect(mockAmFetch).toHaveBeenCalledWith(
+      expect.objectContaining({ url: '/api/alertmanager/grafana/api/v2/alerts', method: 'GET' })
+    );
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/P8E80F9AEF21F6940/);
     expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/datasources\/proxy/);
+    // Narrowed invariant: dashboard/folder discovery never goes through the deprecated
+    // Search API — Alertmanager evidence itself legitimately calls unified-alerting HTTP.
+    expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/api\/search/);
+    expect(JSON.stringify(mockAmFetch.mock.calls)).not.toMatch(/api\/search/);
+  });
+
+  test('Alertmanager evidence is scoped to the target pod/namespace and excludes non-matching alerts', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockAmFetch.mockReturnValue(
+      of({
+        data: [
+          alertmanagerAlert({ alertname: 'KubePodCrashLooping', pod: 'checkout-api', namespace: 'prod' }),
+          alertmanagerAlert({ alertname: 'HighMemory', pod: 'billing-api', namespace: 'prod' }),
+          alertmanagerAlert({ alertname: 'DiskFull', pod: 'checkout-api', namespace: 'staging' }),
+        ],
+      })
+    );
+
+    const result = await fetchStackContext('why is pod checkout-api crashing in namespace prod?');
+
+    expect(result.alertLines).toEqual(['KubePodCrashLooping: firing']);
+    expect(result.current).not.toContain('HighMemory');
+    expect(result.current).not.toContain('DiskFull');
   });
 
   test('one-line note when Loki datasource missing', async () => {
