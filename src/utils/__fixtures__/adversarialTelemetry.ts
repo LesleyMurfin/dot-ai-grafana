@@ -88,7 +88,7 @@ export const ADVERSARIAL_TELEMETRY_CASES: readonly AdversarialTelemetryCase[] = 
     content:
       'span.attributes["http.referrer"] = \'<a href="https://example.invalid/next" target="_blank">see runbook</a>\'',
     mustNotRender:
-      'no anchor with target="_blank" lacking rel="noopener noreferrer"; and no anchor whose href scheme is outside the allowlist (http, https, mailto)',
+      'no anchor with target="_blank" lacking rel="noopener noreferrer"; and no anchor whose href scheme is outside the allowlist (https, or a same-origin path)',
   },
   {
     id: 'instruction-override',
@@ -133,6 +133,87 @@ export const ADVERSARIAL_TELEMETRY_CASES: readonly AdversarialTelemetryCase[] = 
       'annotation note="<p style=\'background-image:url(//example.invalid/bg.png)\'>ok</p><span style="background:url(https://example.invalid/bg2.png)">ok</span>"',
     mustNotRender:
       'no style attribute on any rendered node: CSS url() fetches when the node paints, with no click and no script, so an inherited whitelist that permits `style` on every tag leaves the beacon path open',
+  },
+  {
+    id: 'obfuscated-scheme-mixed-case',
+    label: 'mixed-case javascript: scheme evading a case-sensitive scheme check (I1)',
+    source: 'loki',
+    content: 'level=warn msg="support link" body="[click here](JaVaScRiPt:alert(document.domain))"',
+    mustNotRender:
+      'no anchor element at all — the link must be demoted to plain text, exactly as with the lower-case scheme, since a case-insensitive scheme check is the only correct one',
+  },
+  {
+    id: 'obfuscated-scheme-embedded-tab',
+    label: 'javascript: scheme split by a literal tab character (I1)',
+    source: 'loki',
+    content: 'level=warn msg="malformed markdown link" body="[click here](java\tscript:alert(1))"',
+    mustNotRender:
+      'no anchor element — whether the tab breaks markdown link recognition outright or survives into the href, the result must never be a live link',
+  },
+  {
+    id: 'obfuscated-scheme-html-entity',
+    label: 'javascript: scheme spelled with an HTML numeric entity (I1)',
+    source: 'alertmanager',
+    content: 'summary: Escalate now [details](&#106;avascript:alert(1))',
+    mustNotRender:
+      'no anchor element — an entity-decoded scheme must be rejected exactly as the literal spelling is, not treated as an unrecognised opaque string that happens to pass through',
+  },
+  {
+    id: 'obfuscated-scheme-percent-encoded',
+    label: 'javascript: scheme with a percent-encoded character (I1)',
+    source: 'trace',
+    content: 'span.attributes["http.url"] = \'[details](j%61vascript:alert(1))\'',
+    mustNotRender:
+      'no anchor element — a percent-encoded scheme is not a valid https: URL either way, so it must be demoted to text, not left as an opaque-but-live link',
+  },
+  {
+    id: 'obfuscated-scheme-nul-embedded',
+    label: 'javascript: scheme with an embedded NUL byte (I1)',
+    source: 'k8s-metadata',
+    content: 'annotation link="[details](java\0script:alert(1))"',
+    mustNotRender:
+      'no anchor element — a NUL byte inside the scheme must not let the check skip past the executable prefix',
+  },
+  {
+    id: 'vbscript-link',
+    label: 'legacy vbscript: scheme link (I1)',
+    source: 'loki',
+    content: 'level=error msg="ie legacy scheme" body="[open](vbscript:msgbox(1))"',
+    mustNotRender: 'no anchor element with a vbscript: href — the link must be demoted to plain text',
+  },
+  {
+    id: 'data-svg-payload',
+    label: 'data:image/svg+xml, in both image and link position (I1)',
+    source: 'alertmanager',
+    content:
+      'summary: ![preview](data:image/svg+xml;base64,PHN2Zy8+) and [download](data:image/svg+xml;base64,PHN2Zy8+)',
+    mustNotRender:
+      'no <img> element (markdown image syntax never emits one regardless of scheme) and no anchor whose href starts with "data:" — an SVG data URI can itself carry a <script>, so it must be rejected exactly like any other non-https scheme',
+  },
+  {
+    id: 'reference-style-link-javascript',
+    label: 'reference-style link definition carrying a javascript: href (I1)',
+    source: 'loki',
+    content: 'level=info msg="see [details][ref] for context"\n\n[ref]: javascript:alert(document.cookie)',
+    mustNotRender:
+      'no anchor element — a reference-style link resolves through the same link renderer as an inline link, so it must be demoted to text exactly the same way',
+  },
+  {
+    id: 'raw-html-object-embed-base-meta-form',
+    label: 'object/embed/base/meta/form elements in object metadata (I1)',
+    source: 'k8s-metadata',
+    content:
+      'annotation description="<object data=\'https://example.invalid/x.swf\'></object><embed src=\'https://example.invalid/x.swf\'><base href=\'https://example.invalid/\'><meta http-equiv=\'refresh\' content=\'0;url=https://example.invalid/\'><form action=\'https://example.invalid/x\'><input type=\'text\'></form>"',
+    mustNotRender:
+      'no object, embed, base, meta, form or input element — each is raw HTML and must be re-escaped to visible text at the parser, the same as script and iframe',
+  },
+  {
+    id: 'style-element-payload',
+    label: '<style> element (not attribute) fetching remote CSS (I1)',
+    source: 'k8s-metadata',
+    content: 'annotation note="<style>body{background:url(https://example.invalid/x.png)}</style>"',
+    mustNotRender:
+      'no <style> element anywhere in the DOM — distinct from style-url-fetch above, which covers the style *attribute*; the style *element* must also never be emitted, since DROP_SUBTREE removes it wholesale',
   },
 ];
 

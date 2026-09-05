@@ -2,7 +2,7 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { renderMarkdown } from '@grafana/data';
 import { ADVERSARIAL_TELEMETRY_CASES } from '../utils/__fixtures__/adversarialTelemetry';
-import { EXTERNAL_LINK_MARKER, ResponseMarkdown, renderAnswerHtml } from './ResponseMarkdown';
+import { EXTERNAL_LINK_MARKER, ResponseMarkdown, renderAnswerHtml, sanitizeAnswerHtml } from './ResponseMarkdown';
 
 /**
  * The dot-ai answer is untrusted input: it is model output derived from telemetry that anyone
@@ -320,5 +320,27 @@ describe('ResponseMarkdown — fail closed', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('ResponseMarkdown — sanitizer idempotency (SEC-002 f)', () => {
+  test('sanitizeAnswerHtml is stable under re-application for the whole adversarial corpus', () => {
+    for (const testCase of ADVERSARIAL_TELEMETRY_CASES) {
+      const html = renderAnswerHtml(testCase.content) ?? '';
+      const once = sanitizeAnswerHtml(html);
+      const twice = sanitizeAnswerHtml(once);
+      expect(twice).toBe(once);
+    }
+  });
+
+  test('sanitizeAnswerHtml is stable under re-application for a raw-HTML mXSS-shaped input', () => {
+    // Not corpus content: an already-sanitized fragment fed back in, the mutation-XSS shape —
+    // a serializer round-trip must not resurrect anything a first pass removed.
+    const html =
+      '<p><a href="https://example.invalid/x" rel="noopener noreferrer" target="_blank">' +
+      'link<script>window.__pwned=1</script></a></p><style>body{background:url(https://example.invalid/x.png)}</style>';
+    const once = sanitizeAnswerHtml(html);
+    const twice = sanitizeAnswerHtml(once);
+    expect(twice).toBe(once);
   });
 });
