@@ -1,0 +1,1 @@
+Query and Remediate Asks that produce Grafana stack evidence now render Explore and Drilldown links (logs, metrics, traces) in the Map panel, and the "Current" evidence block is collapsed by default behind a toggle so evidence-heavy answers do not push the response off screen.
