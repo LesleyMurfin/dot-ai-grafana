@@ -7,7 +7,7 @@ import {
   TimeRange,
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
-import { lastValueFrom, Observable } from 'rxjs';
+import { isObservable, lastValueFrom, Observable } from 'rxjs';
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
@@ -275,7 +275,7 @@ async function runDsQuery(ds: DsQueryable, request: DataQueryRequest): Promise<D
   if (result && typeof (result as Promise<DataQueryResponse>).then === 'function') {
     return result as Promise<DataQueryResponse>;
   }
-  if (result && typeof (result as Observable<DataQueryResponse>).subscribe === 'function') {
+  if (result && isObservable(result)) {
     return lastValueFrom(result as Observable<DataQueryResponse>);
   }
   return undefined;
