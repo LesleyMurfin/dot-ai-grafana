@@ -284,3 +284,46 @@ describe('getDataSourceByType selection', () => {
     expect(picked?.settings?.uid).toBe('loki-a');
   });
 });
+
+describe('getDataSourceByType real getList filtering (issue #47)', () => {
+  // Mirrors grafana/grafana public/app/features/plugins/datasource_srv.ts DatasourceSrv.getList:
+  // without `all: true`, a datasource is excluded unless its plugin meta declares at least one of
+  // metrics/annotations/tracing/logs/alerting. Grafana's built-in Alertmanager datasource plugin
+  // (public/app/plugins/datasource/alertmanager/plugin.json) declares none of those — only
+  // `"metrics": false` — so it is invisible to getList({ type: 'alertmanager' }) unless `all: true`
+  // is passed.
+  type FakeMeta = {
+    metrics: boolean;
+    logs: boolean;
+    tracing: boolean;
+    annotations: boolean;
+    alerting: boolean;
+  };
+  type FakeEntry = { uid: string; name: string; type: string; meta: FakeMeta };
+
+  function realisticGetList(opts?: { type?: string; all?: boolean }) {
+    const noMeta: FakeMeta = { metrics: false, logs: false, tracing: false, annotations: false, alerting: false };
+    const all: FakeEntry[] = [
+      { uid: 'loki-1', name: 'Loki', type: 'loki', meta: { ...noMeta, logs: true, metrics: true } },
+      { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { ...noMeta, metrics: true, alerting: true } },
+      { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { ...noMeta, tracing: true } },
+      { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', meta: { ...noMeta, metrics: false } },
+    ];
+    return all.filter((s) => {
+      if (opts?.type && s.type !== opts.type) {
+        return false;
+      }
+      const queryable = s.meta.metrics || s.meta.logs || s.meta.tracing || s.meta.annotations || s.meta.alerting;
+      return opts?.all || queryable;
+    });
+  }
+
+  test('finds the built-in Alertmanager datasource under real getList capability filtering', async () => {
+    mockGetList.mockImplementation(realisticGetList);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('alertmanager');
+
+    expect(picked?.settings?.uid).toBe('am-1');
+  });
+});

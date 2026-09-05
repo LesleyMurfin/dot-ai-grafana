@@ -244,8 +244,13 @@ export async function getDataSourceByType(
   const srv = getDataSourceSrv();
   let list: DataSourceInstanceSettings[] = [];
   try {
-    const raw = srv.getList({ type } as never);
-    list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
+    // getList() excludes datasources whose plugin.json declares none of
+    // metrics/annotations/tracing/logs/alerting — that is exactly Grafana's built-in
+    // Alertmanager datasource (grafana/grafana public/app/plugins/datasource/alertmanager/plugin.json
+    // only sets "metrics": false). Pass all: true so a real, configured Alertmanager datasource is
+    // still returned; pickDataSource()'s default/name/first ordering below is unaffected because it
+    // already narrows to `type` first.
+    list = srv.getList({ type, all: true });
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
