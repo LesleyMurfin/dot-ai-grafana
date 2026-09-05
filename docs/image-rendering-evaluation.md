@@ -23,9 +23,10 @@ future dot-ai-grafana workstreams (PRDs #1–#5)?
 - **Ownership** — deploying the renderer, if ever justified, is a platform/host decision beside
   the Grafana instance, made by whoever owns that Grafana deployment (self-managed per
   `prds/1-grafana-ai-cluster-intelligence.md:188`) — not a dot-ai-grafana plugin change.
-- **Reachability** — the one open item that even mentions "screenshots" (PRD #1 M8, still
-  `src/plugin.json` `screenshots: []`) is install-guide documentation screenshots taken by a
-  human for the README, not server-rendered dashboard images.
+- **Reachability** — no `grafana` and no `grafana-image-renderer` workload exists in any cluster
+  reachable through the context-forge gateways; the Grafana this project targets is hosted
+  outside them, so adopting the renderer would be an ops change on that external platform, not a
+  change to this repository (see Environment findings below).
 
 ## What the renderer is
 
@@ -36,7 +37,8 @@ and Windows binaries — no macOS binary, and the binaries do not bundle a brows
 Chromium yourself via `--browser.path`. Grafana talks to it over `[rendering] server_url` plus a
 required secret `renderer_token` (env `GF_RENDERING_SERVER_URL` /
 `GF_RENDERING_RENDERER_TOKEN`); the renderer itself authenticates render requests with
-`--server.auth-token` / `AUTH_TOKEN` (default `-`, i.e. disabled unless set) and exposes metrics
+`--server.auth-token` / `AUTH_TOKEN` (the service requires a secret token on every render
+request; `-` is simply the default token value) and exposes metrics
 on `/metrics`. The historical distribution as a Grafana *plugin* is deprecated and no longer
 updated — only the standalone service, and only its latest version, is supported. Grafana's own
 `get_panel_image` MCP tool requires this service to be installed.
@@ -46,9 +48,9 @@ updated — only the standalone service, and only its latest version, is support
 | PRD | Workstream | Needs server-side rendering? | Reason | Citation |
 |---|---|---|---|---|
 | #1 | Grafana AI cluster intelligence (Query/Remediate plugin) | No | Explicitly text-response-only; rich visualizations are out of scope | `prds/1-grafana-ai-cluster-intelligence.md:62`, `:252` |
-| #2 | GitOps-PR execute (superseded upstream by vfarcic#5) | No | Mechanism is opening a Git PR that a human merges; the plugin never runs `kubectl apply` and carries no image payload | FACTS §D (vfarcic#5) |
-| #3 | M7 Map/Explore/show-me/markdown, 0.2.x (superseded upstream by vfarcic#6) | No | Design sends the operator INTO a live, authenticated Grafana session via `/d/<uid>`, Explore panes, or Drilldown apps — never a static export; explicitly excludes inventory-style API calls, let alone rendering | FACTS §D (vfarcic#6) |
-| #4 | Evidence-grounded change safety (superseded upstream by vfarcic#7) | No | Pre-flight/blast-radius/post-merge evidence attaches to the engine's existing `operate` change-safety envelope as data, not images; open question is engine vs. plugin placement, not rendering | FACTS §D (vfarcic#7) |
+| #2 | GitOps-PR execute (superseded upstream by vfarcic#5) | No | Mechanism is opening a Git PR that a human merges; the plugin never runs `kubectl apply` and carries no image payload | [vfarcic/dot-ai-grafana#5](https://github.com/vfarcic/dot-ai-grafana/issues/5) |
+| #3 | M7 Map/Explore/show-me/markdown, 0.2.x (superseded upstream by vfarcic#6) | No | Design sends the operator INTO a live, authenticated Grafana session via `/d/<uid>`, Explore panes, or Drilldown apps — never a static export; explicitly excludes inventory-style API calls, let alone rendering | [vfarcic/dot-ai-grafana#6](https://github.com/vfarcic/dot-ai-grafana/issues/6), [#23](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) |
+| #4 | Evidence-grounded change safety (superseded upstream by vfarcic#7) | No | Pre-flight/blast-radius/post-merge evidence attaches to the engine's existing `operate` change-safety envelope as data, not images; open question is engine vs. plugin placement, not rendering | [vfarcic/dot-ai-grafana#7](https://github.com/vfarcic/dot-ai-grafana/issues/7) |
 | #5 | Plugin usability / shipping polish (superseded upstream by vfarcic#8) | No | "Docs, screenshots, compatibility matrix" — the screenshots are human-authored README images (PRD #1 M8), not server-rendered dashboard exports | `prds/1-grafana-ai-cluster-intelligence.md:403`, `:579` (`src/plugin.json` `screenshots: []`) |
 
 Also relevant: PRD #1's dashboard deep-link milestone (M7) pre-fills an intent from a panel
