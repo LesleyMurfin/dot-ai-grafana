@@ -25,6 +25,21 @@ updates:
       - dependency-name: '@grafana/*'
         update-types:
           - 'version-update:semver-major'
+      # eslint-plugin-react is a direct devDependency (also required by
+      # @grafana/eslint-config) and caps its eslint peer range at "^9.7",
+      # so a major bump breaks peer resolution outright - npm ci fails
+      # with ERESOLVE, as it did in #38. @grafana/eslint-config@10 does
+      # not rescue this: it still permits the incompatible plugin, and
+      # it dropped the ./flat.js export the scaffolded
+      # .config/eslint.config.mjs imports. Lift once eslint-plugin-react
+      # ships an eslint-10 peer range (jsx-eslint/eslint-plugin-react#3977,
+      # fix #4022, both open) and create-plugin scaffolds an
+      # eslint-config@10-compatible config - as of create-plugin@7.10.0 it
+      # still emits the flat.js import and pins eslint ^9.32.0, so
+      # cp-update won't fix this on its own.
+      - dependency-name: 'eslint'
+        update-types:
+          - 'version-update:semver-major'
     groups:
       unit-test:
         patterns:
