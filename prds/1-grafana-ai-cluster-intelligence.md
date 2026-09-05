@@ -446,6 +446,107 @@ The North Star is explicit: **Grafana diagnoses; Headlamp operates** — and Hea
 
 Reporting channel for content-derived findings: [`SECURITY.md`](../SECURITY.md).
 
+<a id="ai-security-strategy"></a>
+
+### Expansion: AI-security strategy — what the plugin owns and what the engine owns
+
+This PRD's threat model (above) inventories the impact classes. This section is the maintainer-facing
+follow-on: what to build, in which repo, and in what order — read for `vfarcic/dot-ai-grafana` and
+`vfarcic/dot-ai` together, since several of the recommended controls are structurally unbuildable on one
+side of that boundary.
+
+#### Horizon — today, tomorrow, future
+
+**Today.** I1 (exfiltration without script execution), I6 (the accidental case — no attacker required),
+and I9 (the browser as confused deputy against internal origins) are all live on the render path right
+now, with the plugin shipping in its current, undated-fix state. I11 (downstream automation compromise
+via a machine relay) is also reachable **today** — it needs no Phase 2 wiring at all, only an existing
+chatops bot, ticket automation, or scheduled report that forwards an answer without a human in the loop.
+None of these four wait on a future milestone; they are properties of the plugin as designed.
+
+**Tomorrow.** I3 (agent actuation) activates the day an execute surface is wired to this plugin's output —
+Phase 2 / PRD #2, `Headlamp operate`/`executeRemediation`, remediate → GitOps PR. I4 (persistence via
+knowledge poisoning) activates if an answer, or evidence derived from one, is ever ingested back into a
+knowledge store that later Asks read from. Neither is live yet; both are one integration away, which is
+why C1/C2/S4 are stated as prerequisites to that wiring rather than follow-on hardening.
+
+**Future.** I7 — silent decision corruption, where the answer is subtly wrong rather than exploited —
+is the horizon that outlasts every render-side or prompt-side fix, because it is not a rendering failure
+or a fetch: it is a plausible-but-false causal claim, or an innocent neighbour named as the culprit, with
+nothing about the answer looking abnormal. The threat model above is explicit that **there is no detection
+story for this class at all** — no URL is fetched, no destructive verb appears, no CI assertion or log
+line would notice. The same failure mode extends to model- and prompt-template configuration drift and to
+diagnostic skew (the system silently becoming less accurate over time rather than being attacked): both
+are indistinguishable from I7 at the render layer, because in every case the output looks like a normal
+answer. Provenance (C1) is the only partial answer available today — it makes a claim traceable to its
+source so a wrong claim can at least be checked — and it is a partial answer precisely because
+traceable is not the same property as correct.
+
+#### The design principle
+
+Controls that **drop** structure beat controls that **validate** content. This is not a stylistic
+preference: on this exact surface, URL/content *inspection* has already been defeated three times
+(GrafanaGhost's protocol-relative bypass of a client-side image-URL validator, CVE-2026-17033's
+comment-hidden `://` bypass of a click-interceptor heuristic, and the inherited sanitizer's own
+allowlist-by-construction permitting the embed tags it was meant to guard), documented above under
+*Published precedent*. A control set that relies on inspecting content for badness is the configuration
+that keeps failing; a control that removes the structure a payload needs (no embed elements, no raw HTML,
+a separate non-instruction field) cannot be bypassed by a cleverer payload, because there is nothing left
+for the payload to be clever about. Every recommendation below is a consequence of this one preference.
+
+#### Recommendations — this plugin (`dot-ai-grafana`)
+
+The plugin owns the render path, evidence-pack assembly, and the operator-facing UI. Every row below is
+something the plugin can implement without depending on an engine change.
+
+| Recommendation | Why it belongs plugin-side | Mapped IDs | Status |
+|---|---|---|---|
+| Drop-not-validate rendering: no `iframe`/`img`/`video`/`audio`/`object`/`embed`, strip `style`, no automatic fetch of any model-authored URL | The render path — the DOM the operator's browser receives — exists only in the plugin frontend; the engine never touches it | S1, I1, I6, I9 | open |
+| Output contract / destructive-verb quarantine: commands are inert, copy-only, never one-click; a banner names that a suggestion derives from untrusted content | The presentation layer that decides what an operator sees and how it invites action is plugin UI, not engine output | S4, I2, I3 | open |
+| Per-claim provenance in the UI: every claim attributable to a named evidence source, visible to the operator | Provenance only has to be *displayed* to be useful to the operator reading it; the plugin already assembles the evidence pack and knows which source fed which claim | C1, I2, I3, I7, I11 | open — no-actuation half shipped; per-claim provenance not built |
+| Per-source caps and visible truncation in the evidence pack | The plugin is what assembles the pack from Loki/Prometheus/Tempo/Alertmanager/K8s reads, so the cap and the truncation banner are both operations on data the plugin already holds | S3, R2, I5, I10 | open |
+| Redaction pass over the evidence pack before it enters the prompt (secrets, tokens, PII in log bodies) | Redaction has to run before the pack leaves the plugin's process, since it is the last point that still has the raw, unpacked telemetry | P2, I1, I4 | open |
+| Adversarial-telemetry corpus as a CI gate against the rendering path | The render path is plugin code; a regression suite for it runs in the plugin's own CI | G1, I1, I6, I9 | planned |
+| New-evidence-source gate: any new source (traces, additional datasources, ticket/chatops relays) is checked for "does this add attacker-writable input?" before it is wired | The plugin decides what sources it reads from and forwards, so this is a plugin-side design review gate, exercised each time the evidence pack's inputs change | G2, I4, I11 | planned |
+| Emit an `integrity` label (`operator` \| `vendor` \| `attacker-influenced`) per evidence item at pack-assembly time | The plugin is the only component that knows, at the point of collection, which bytes came from a Loki log body versus the operator's own typed intent versus a vendor-supplied document — that knowledge does not survive into the engine unless the plugin states it explicitly | I2, I3, I7 | planned — producer half only; see engine table for the half that must carry it |
+
+#### Recommendations — dot-ai core engine
+
+These cannot be fixed from the plugin at any level of effort, because the plugin does not compose the
+prompt, does not hold the knowledge base, and does not gate tool calls — all three live in the engine.
+
+```ts
+type Integrity = 'operator' | 'vendor' | 'attacker-influenced';
+
+interface EvidenceItem {
+  content: string;
+  integrity: Integrity;   // required, no default
+  source: string;         // datasource / tool / KB entry id
+}
+```
+
+| Recommendation | Why it belongs engine-side | Mapped IDs | Status |
+|---|---|---|---|
+| Carry the `integrity` label through prompt composition and consult it at tool gating; a **missing** label defaults to `attacker-influenced`, never `vendor` | Prompt composition and tool gating happen inside the engine; the plugin can emit the label but cannot make it survive composition or reach a gate it never touches. A label that defaults to trusted quietly disappears at every integration point not yet updated — the fail-closed default is what makes the field load-bearing rather than decorative | C1, C2, I2, I3, I7, I11 | open |
+| A separate `evidence` field on `POST /api/v1/tools/{tool}`, distinct from `intent`, so untrusted telemetry text does not share a field with instruction | The request schema is engine-owned; today untrusted text and operator instruction are tagged in-band inside the same field, which is a visible workaround rather than a structural separation | S3, I2, I6 | open |
+| Per-operator credential propagation, replacing today's single shared service token | Credential handling and RBAC live in the engine's auth layer; the plugin has no mechanism to attribute a request to an individual operator once it reaches the engine. Today's shared token means the I1 exfiltration primitive crosses an **authorization boundary** — the model can answer from a superset of what the asking operator is authorized to see | P1, I1, I8 | open — accepted v1 risk (NFR → Identity) |
+| Expose provider/model identity in the `version` response body | Model/provider selection is an engine-side routing decision (the engine routes models via a gateway, per its own design docs); the plugin can only surface what the body contains, and today reads `version` and discards everything except `connected` (`resources.go:447-463`) | I7 | planned — whether `version` currently carries provider/model fields is `[UNVERIFIED]` |
+
+#### What this deliberately does not recommend
+
+Pursuing a management-system certification (e.g. an ISO information-security or AI-management-system
+certification) is not recommended here: those certify an *organisation's* processes, not a plugin's code,
+and would not change anything an operator's browser renders or an engine's tool gate consults. Aligning
+the project to a standard whose treatment of AI observability assumes it is purely a monitoring
+*capability* is also not recommended, because on this surface the observability pipeline is the attack
+surface — the same Loki/Prometheus/Tempo/Alertmanager reads that make diagnosis useful are exactly what
+make telemetry attacker-writable; a standard that does not model that duality would validate a posture
+this PRD's threat model has already shown to be insufficient. Finally, pinning any future governance gate
+to identifiers from a source still in beta or still subject to revision is not recommended: this PRD's own
+control IDs (`S`/`P`/`C`/`R`/`G`) are declared stable and reserved for that reason, and a gate built on
+numbers that can still renumber upstream would break silently the day they did.
+
+
 ## Success Criteria
 
 - Plugin installs cleanly into Grafana (9.x+/10.x/11.x)
@@ -742,6 +843,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-04 | **The telemetry channel is demonstrated, not theoretical** — the vector is published, OWASP-classified, and has one real-world case against a shipping observability product | **GrafanaGhost** (Noma Security, disclosed 2026-04-07, patched) is indirect prompt injection into **Grafana's own** AI assistant with the injection channel in **log content**: CSA AI Safety Initiative, *Indirect Prompt Injection Goes Operational* (2026-04-26) — "poison Grafana log entries with carefully crafted query parameters … exfiltration channel exploited Markdown image rendering with protocol-relative URLs (paths beginning with //), which passed Grafana's URL validation"; the OWASP GenAI Exploit Round-up Q1 2026 (2026-04-14) classifies it LLM01/LLM02/LLM05 · ASI01/ASI02/ASI09, "Hidden instructions in logs caused data exfiltration via Markdown". **LogJack** ([arXiv:2604.15368](https://arxiv.org/abs/2604.15368), 2026-04-15) benchmarks log-embedded payloads across 8 models: verbatim command execution 0%–86.2%, one model still at 30% under passive "do not execute" instructions, provider guardrails largely blind — so **model choice is not a control**. The premise is **vendor-conceded without any LLM**: CVE-2025-41117 (trace stack traces as raw HTML) and CVE-2026-17033 (alert `generatorURL` as an href). Still narrowly true and recorded as such: MITRE ATLAS has catalogued 0 of 57 case studies, and `grafana/mcp-grafana#680` is unanswered since 2026-03-24 — neither absence is evidence of safety. Render-side consequence is the next row. Hygiene: GrafanaGhost and CamoLeak have **no CVE**; CVE-2026-27876/27880 were published **2026-03-27 (NVD) / 2026-03-30 (Grafana advisory)** — before the 2026-04-07 disclosure on either register, so "simultaneously patched" is wrong — and are unrelated (a chained SQL-Expressions + Enterprise-plugin RCE gated on the `sqlExpressions` toggle, `PR:H`; and an OpenFeature unbounded-read OOM, `PR:N`); CVE-2025-59145 is an npm `color-name` advisory; EchoLeak's CVE-2025-32711 is verified |
 | 2026-09-04 | **Render-side control drops the embedding elements rather than validating their URLs** — and strips `style` as well; a domain allow-list is depth, never the control | URL *inspection* has been defeated three times on this surface: GrafanaGhost's protocol-relative `//host` beat Grafana's client-side image-URL validator (2026-04), **CVE-2026-17033** (2026-08-24, CWE-79, fixed `>=13.1.0`) beat the `://` click-interceptor heuristic by hiding the marker in a JavaScript comment on `alert.generatorURL`, and the inherited js-xss `safeAttrValue` accepts any `href`/`src` beginning with `/`. Two of those are the vendor's own non-AI code, four months apart. Separately verified: `style` survives the sanitizer applied to answer content and js-xss adds `class`+`style` to *every* allowed tag, so `background-image:url(...)` was a click-free fetch path **invisible from the element list** — an element allowlist alone would have missed it. So S1 removes `img`/`iframe`/`video`/`audio`/`object`/`embed` and `style` outright (the CamoLeak fix shape) and CSA's domain allow-list is retained only as a second layer for links the operator explicitly clicks. Pre-AI vendor precedent for the premise: **CVE-2025-41117** (2026-02-12, CWE-79, `PR:N`) — trace stack traces rendered as raw HTML in Explore, i.e. entry point 3 with no LLM involved |
 | 2026-09-04 | **The trust boundary is grounded in published research, not asserted here** — and our contribution is stated narrowly: the reflected-log channel that the leading published defence excludes, plus the render-side control | Prior art: **AIOpsDoom / AIOpsShield** (Pasquini et al., [arXiv:2508.06394](https://arxiv.org/abs/2508.06394), 2025-08-08, USENIX Security '26) coins "tainted telemetry", names the reflected-log fields (`User-Agent`, 404 request URLs) and evaluates on Kubernetes; **LogInject** ([arXiv:2607.14493](https://arxiv.org/abs/2607.14493), 2026-07-16) coins "passive prompt injection", reaches 88.2% peak ASR, fragments payloads across entries (defeating per-entry inspection) and supplies the confused-deputy framing (Hardy 1988) — "there is no architectural trust bit that marks system-prompt tokens as instructions and log tokens as data"; **LogJack** ([arXiv:2604.15368](https://arxiv.org/abs/2604.15368)) gives the cross-model benchmark; **GrafanaGhost** is the one disclosed incident in this product family. Ours is only: (a) AIOpsShield's premise of "the minimal role of user-generated content" does not hold for reflected logs, where the attacker-chosen field *is* the signal — entry point 1 — and (b) S1's drop-not-inspect render control. Also recorded: of 18 surveyed AIOps/observability-assistant products, 3 vendors publish any telemetry-specific trust statement, each scoped to one narrow control, and Grafana's Assistant/AI documentation set (124 pages, 802,622 bytes) contains no occurrence of "prompt injection" or "untrusted" — so there is no platform guarantee to defer to |
+| 2026-09-05 | **AI-security responsibility split recorded:** plugin owns the render path, evidence-pack assembly and the operator-facing UI (drop-not-validate rendering, output-contract quarantine, per-claim provenance display, per-source caps, redaction, adversarial-corpus CI gate, emitting the `integrity` label); engine owns carrying/consulting that label through prompt composition and tool gating, a separate `evidence` field distinct from `intent`, per-operator credential propagation, and provider/model identity in `version` | See [Expansion: AI-security strategy — what the plugin owns and what the engine owns](#ai-security-strategy); split follows the language/placement constraint already established (plugin composes no prompt, holds no tools, holds no KB) |
 
 
 
