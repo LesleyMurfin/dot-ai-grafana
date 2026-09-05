@@ -6,6 +6,8 @@ Live checkboxes: https://github.com/LesleyMurfin/dot-ai-grafana/issues/24
 PRD #1  v1 0.1.0   vfarcic#3 @ 179a7df   analysis-only pack
 PRD #2  GitOps     issue #13 / PR #18
 PRD #3  M7 0.2.x   issue #23 / PR #22
+PRD #4  Evidence-grounded change safety   issue #31 / PR #33
+PRD #5  Plugin usability                 issue #32 / PR #34
 nits    take-or-leave code             PR #26 (open → feat/upstream-plugin)
 ```
 
@@ -51,3 +53,20 @@ https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 | GitOps PR execute | [prds/2](2-gitops-pr-remediate.md) | [#13](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) | [#18](https://github.com/LesleyMurfin/dot-ai-grafana/pull/18) |
 
 v1 on Viktor stays **0.1.0**. M7 is **0.2.x**.
+
+## Superseded upstream (2026-09-03)
+
+All four fork PRD trackers — #13, #23, #31, #32 — were closed as superseded upstream. Future
+work on these workstreams lives upstream, not in this fork:
+
+| Fork PRD | Fork tracker | Superseded by |
+|---|---|---|
+| PRD #2 | issue #13 | [vfarcic/dot-ai-grafana#5](https://github.com/vfarcic/dot-ai-grafana/issues/5) |
+| PRD #3 | issue #23 | [vfarcic/dot-ai-grafana#6](https://github.com/vfarcic/dot-ai-grafana/issues/6) |
+| PRD #4 | issue #31 | [vfarcic/dot-ai-grafana#7](https://github.com/vfarcic/dot-ai-grafana/issues/7) |
+| PRD #5 | issue #32 | [vfarcic/dot-ai-grafana#8](https://github.com/vfarcic/dot-ai-grafana/issues/8) |
+
+## Other decisions
+
+- Image rendering (grafana/grafana-image-renderer) evaluated and **not adopted** — see
+  [../docs/image-rendering-evaluation.md](../docs/image-rendering-evaluation.md).
