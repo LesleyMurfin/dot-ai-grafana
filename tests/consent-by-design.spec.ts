@@ -3,6 +3,7 @@ import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
 import {
   type StubIntent,
+  PLUGIN_ID,
   asEnvelope,
   isStableEnvelope,
   resourcePath,
@@ -16,11 +17,13 @@ import {
  * The disclosure case asserts the notice against the stub's recorded request
  * bodies (GET /intents), so the copy cannot drift away from the egress it
  * describes. The "Send Grafana evidence" off variant is covered in jsdom rather
- * than here — see the second describe's note on why this file stays read-only on
- * plugin settings.
+ * than here — see the note above the "the notice matches what is POSTed"
+ * describe on why this file stays read-only on plugin settings.
  *
  * Deferred (see issue #44):
- * - debugLog opt-in default-off (main always writes ask log; gate branch adds the flag)
+ * - ask log file-write behaviour has no HTTP-readable surface in this harness;
+ *   the config-UI half of "opt-in, off by default" (P4/C1) is pinned in
+ *   tests/privacy-by-design.spec.ts, the backend half by Go unit tests.
  */
 
 const adminState = 'playwright/.auth/admin.json';
@@ -81,8 +84,58 @@ test.describe('Consent by design — no execute/operate surface', () => {
     expect(env.ok).toBe(true);
     expect(String(env.summary || '')).not.toMatch(/STUB_SAW_EXECUTE/i);
   });
+
+  test('no execute/operate resource route exists on the real HTTP path (S12, consent overlap C5)', async ({
+    request,
+  }) => {
+    for (const tool of ['execute', 'operate']) {
+      // pkg/plugin/resources.go registers only /health, /test-connection, /query
+      // and /remediate on its mux; an unmapped path 404s before any tool handler
+      // runs. This is the network half of "no execute control" — the UI-only
+      // assertion above cannot show that the route plainly does not exist.
+      const resp = await request.post(`/api/plugins/${PLUGIN_ID}/resources/${tool}`, {
+        data: { issue: 'consent check' },
+      });
+      expect(resp.status(), `POST /${tool} must not be a registered resource route`).toBe(404);
+    }
+  });
 });
 
+test.describe('Consent by design — Show context reveals full History on screen (C2)', () => {
+  test.use({ storageState: adminState });
+
+  /**
+   * The disclosure notice above (and README "Data egress") promises "Full
+   * History stays in this browser." This is the on-screen half of C2: Show
+   * context is on by default (jsonData.showContext unset in
+   * provisioning/plugins/apps.yaml) and no e2e spec in this fullyParallel suite
+   * writes plugin settings at all — see the note above the last describe — so a
+   * fresh Ask must render the History panel holding the
+   * verbatim question, not the ≤240-char, possibly-ellipsised condensed Prior:
+   * text that the wire actually carries (pinned separately as P7 in
+   * tests/privacy-by-design.spec.ts).
+   */
+  test('History panel shows the full verbatim question after an Ask', async ({ gotoPage, page }) => {
+    await gotoPage('/');
+
+    const marker = `historypanel-${Date.now().toString(36)}`;
+    const longQuestion =
+      `status of pod checkout-${marker} in namespace prod and please walk through every ` +
+      'plausible root cause before this gets escalated to the on-call team tonight';
+    // Longer than formatPriorPair's own 90-char per-turn question budget, so the
+    // wire's Prior: line (checked elsewhere) would have to truncate it even when
+    // the on-screen History panel below must not.
+    expect(longQuestion.length).toBeGreaterThan(90);
+
+    await page.getByTestId(testIds.dotai.intent).fill(longQuestion);
+    await page.getByTestId(testIds.dotai.submit).click();
+    await expect(page.getByTestId(testIds.dotai.response)).toBeVisible({ timeout: 20_000 });
+
+    const history = page.getByTestId(testIds.dotai.history);
+    await expect(history).toBeVisible();
+    await expect(history).toContainText(longQuestion);
+  });
+});
 
 /**
  * The notice at `testIds.dotai.consent` is the operator's only egress notice in the
