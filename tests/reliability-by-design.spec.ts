@@ -179,14 +179,21 @@ test.describe('Reliability by design — degrades without a configured Grafana d
    * This compose harness provisions no Loki/Prometheus/Tempo/Alertmanager
    * datasource at all (see provisioning/ — only provisioning/plugins exists),
    * so every Ask here already exercises src/utils/grafanaStack.ts's
-   * queryOne()'s "missing" branch for all four reads. R5 pins that this
-   * degrades to a visible, non-fatal Current note — not a page crash and not
-   * a silently blocked Ask — and checks it on both surfaces: what the page
-   * renders, and the actual POST body Playwright observes leaving the
-   * browser (not just the UI's own claim about it). "Misconfigured" (a
-   * datasource is provisioned but its query fails) exercises the same
-   * queryOne() catch branch; asserting that sub-case would require
-   * provisioning a real datasource (`.config/**`), out of scope here.
+   * queryOne()'s "missing" branch for all four reads (result.current contains
+   * "<Kind> datasource missing" — see grafanaStack.test.ts's "one-line note
+   * when Loki datasource missing"). R5 pins two things: (1) this degrades to
+   * a non-fatal Ask — a visible Current, a real answer, no error testid, not
+   * a page crash and not a silently blocked Ask; (2) the per-datasource
+   * "missing" notes really do leave the browser in the POST body dot-ai
+   * receives. They do NOT additionally survive in the rendered Current panel
+   * after a successful answer: progressiveContext.ts's rewriteCurrent()
+   * unconditionally replaces raw stack text with a "Resources/Asked/What's
+   * true now" summary once the Ask succeeds, by design, so the rendered
+   * panel is asserted only for non-fatal content, not the raw notes.
+   * "Misconfigured" (a datasource is provisioned but its query fails)
+   * exercises the same queryOne() catch branch; asserting that sub-case
+   * would require provisioning a real datasource (`.config/**`), out of
+   * scope here.
    */
   test('Ask completes with a non-fatal Current when no Grafana datasource is configured', async ({
     gotoPage,
@@ -211,14 +218,27 @@ test.describe('Reliability by design — degrades without a configured Grafana d
     await expect(response).toBeVisible();
     await expect(response).toContainText('stub-query-ok');
 
-    // Current still renders (showContext defaults true) with the graceful
-    // per-datasource notes instead of being blank or throwing.
+    // Current still renders (showContext defaults true) — non-fatal, not blank
+    // or crashed. After a successful Ask, rewriteCurrent()
+    // (src/utils/progressiveContext.ts) unconditionally replaces the raw
+    // Loki/Prometheus/Tempo/Alertmanager blocks with a "Resources/Asked/
+    // What's true now" summary, so the per-datasource "missing" notes never
+    // survive on this surface by design — assert non-fatal content instead.
     const current = page.getByTestId(testIds.dotai.current);
     await expect(current).toBeVisible();
-    await expect(current).toContainText(/datasource missing/i);
+    await expect(current).toContainText(/Asked:/);
+    await expect(current).toContainText(/What's true now:/);
 
-    // Same notes are what actually left the browser, not just on-screen text.
+    // The per-datasource "missing" notes (src/utils/grafanaStack.ts's
+    // queryOne()) do travel to dot-ai: askOrchestrator packs stack.current
+    // (which carries them) into the POST body for the one and only hop this
+    // question takes. This is the one surface where the notes are actually
+    // observable — assert on it directly, for all four sources, not a
+    // generic pattern match.
     expect(capturedBody, 'expected a captured POST body for the query route').toBeTruthy();
-    expect(capturedBody).toMatch(/datasource missing/i);
+    expect(capturedBody).toMatch(/Loki datasource missing/);
+    expect(capturedBody).toMatch(/Prometheus datasource missing/);
+    expect(capturedBody).toMatch(/Tempo datasource missing/);
+    expect(capturedBody).toMatch(/Alertmanager datasource missing/);
   });
 });
