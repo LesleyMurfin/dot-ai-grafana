@@ -22,6 +22,7 @@ function stackResult(overrides: Partial<StackContextResult> = {}): StackContextR
     tempoLines: overrides.tempoLines ?? [],
     alertLines: overrides.alertLines ?? [],
     currentEmpty: overrides.currentEmpty ?? false,
+    drilldowns: overrides.drilldowns ?? [],
   };
 }
 
@@ -638,7 +639,7 @@ describe('runAskOrchestrator', () => {
     const result = await runAskOrchestrator({
       tool: 'remediate',
       question: 'pod crash',
-      thread: { current: 'prior current', map: 'ns/x', history: [] },
+      thread: { current: 'prior current', map: 'ns/x', history: [], drilldowns: [] },
       callTool,
     });
 

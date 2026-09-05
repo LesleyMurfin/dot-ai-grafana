@@ -31,6 +31,7 @@ const emptyStack = {
   tempoLines: [] as string[],
   alertLines: [] as string[],
   currentEmpty: false,
+  drilldowns: [] as Array<{ id: string; label: string; href: string }>,
 };
 
 
@@ -131,6 +132,7 @@ describe('Pages/DotAIPage', () => {
       tempoLines: [],
       alertLines: [],
       currentEmpty: false,
+      drilldowns: [],
     });
     mockCallDotAITool.mockResolvedValue({
       ok: true,
@@ -212,6 +214,7 @@ describe('Pages/DotAIPage', () => {
     clickSubmit();
 
     expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/What's true now/i);
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('You');
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('cluster looks healthy');
@@ -251,6 +254,7 @@ describe('Pages/DotAIPage', () => {
 
     expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('llm unavailable');
     expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
   });
@@ -621,5 +625,53 @@ describe('Pages/DotAIPage', () => {
     expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(
       'Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.'
     );
+  });
+
+  test('renders Explore/Drilldown links returned by the Grafana stack read', async () => {
+    mockFetchStackContext.mockResolvedValue({
+      ...emptyStack,
+      current: 'Loki last 15m:\nboom',
+      mapHint: 'Loki Loki',
+      logLines: ['boom'],
+      drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?panes=x' }],
+    });
+    mockCallDotAITool.mockResolvedValue({
+      ok: false,
+      status: 500,
+      summary: '',
+      raw: {},
+      errorMessage: 'llm unavailable',
+    });
+
+    render(<DotAIPage />);
+    typeIntent('why is checkout-api crashing');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.drilldown)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Explore logs' });
+    expect(link).toHaveAttribute('href', '/explore?panes=x');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(mockCallDotAITool).toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
+    expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
+  });
+
+  test('Current evidence collapse starts closed and opens on click', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('how is the cluster?');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    expect(screen.getByTestId(testIds.dotai.current)).not.toHaveTextContent(/What's true now/i);
+
+    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
+    expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/What's true now/i);
   });
 });
