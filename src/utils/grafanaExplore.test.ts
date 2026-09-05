@@ -1,5 +1,5 @@
 import { config } from '@grafana/runtime';
-import { buildDrilldownLinks, exploreUrl } from './grafanaExplore';
+import { buildDrilldownLinks, dashboardUrl, exploreUrl } from './grafanaExplore';
 
 jest.mock('@grafana/runtime', () => ({
   config: {
@@ -40,10 +40,37 @@ describe('exploreUrl', () => {
         promql: 'up',
         tempoSearch: '',
         traceIds: [],
+        dashboardUids: [],
       });
       expect(links.find((l) => l.id === 'explore-logs')?.href.startsWith('/grafana/explore?')).toBe(
         true
       );
+    } finally {
+      config.appSubUrl = original;
+    }
+  });
+});
+
+describe('dashboardUrl', () => {
+  test('dashboard is /d/uid', () => {
+    expect(dashboardUrl('abc12def')).toBe('/d/abc12def');
+  });
+
+  test('appSubUrl prefix is kept on dashboard URLs', () => {
+    const original = config.appSubUrl;
+    config.appSubUrl = '/grafana';
+    try {
+      expect(dashboardUrl('abc12def')).toBe('/grafana/d/abc12def');
+    } finally {
+      config.appSubUrl = original;
+    }
+  });
+
+  test('trailing slash on appSubUrl is not doubled', () => {
+    const original = config.appSubUrl;
+    config.appSubUrl = '/grafana/';
+    try {
+      expect(dashboardUrl('abc12def')).toBe('/grafana/d/abc12def');
     } finally {
       config.appSubUrl = original;
     }
@@ -60,6 +87,7 @@ describe('buildDrilldownLinks', () => {
       promql: 'up',
       tempoSearch: 'checkout',
       traceIds: ['abcdef123456'],
+      dashboardUids: [],
     });
     const labels = links.map((l) => l.label);
     expect(labels).toContain('Explore logs');
@@ -77,6 +105,7 @@ describe('buildDrilldownLinks', () => {
       promql: '',
       tempoSearch: '',
       traceIds: ['abc123450000', 'abc123459999'],
+      dashboardUids: [],
     });
     const labels = links.filter((l) => l.id.startsWith('trace-')).map((l) => l.label);
     expect(labels).toEqual(['Trace abc123450000', 'Trace abc123459999']);
@@ -90,10 +119,38 @@ describe('buildDrilldownLinks', () => {
       promql: '',
       tempoSearch: '',
       traceIds: ['abc123450000', 'abc123450000', 'abc123450000'],
+      dashboardUids: [],
     });
     const traceLinks = links.filter((l) => l.id.startsWith('trace-'));
     expect(traceLinks).toHaveLength(1);
     expect(traceLinks[0].id).toBe('trace-abc123450000');
     expect(new Set(links.map((l) => l.id)).size).toBe(links.length);
+  });
+
+  test('renders a dashboard link for each valid dashboardUid', () => {
+    const links = buildDrilldownLinks({
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: [],
+      dashboardUids: ['dashuid1', 'k8s-workloads-overview-prod'],
+    });
+    const labels = links.map((l) => l.label);
+    expect(labels).toContain('Dashboard dashuid1');
+    expect(labels).toContain('Dashboard k8s-workloads-overview-prod');
+    expect(links.find((l) => l.id === 'dash-dashuid1')?.href).toBe('/d/dashuid1');
+  });
+
+  test('rejects a dashboardUid that fails the conservative shape check', () => {
+    const links = buildDrilldownLinks({
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: [],
+      dashboardUids: ['ok-uid-1', '../../etc/passwd', 'javascript:alert(1)', 'ab', ''],
+    });
+    expect(links.map((l) => l.id)).toEqual(['dash-ok-uid-1']);
+    expect(links[0].href).toBe('/d/ok-uid-1');
+    expect(JSON.stringify(links)).not.toMatch(/javascript:|\.\.\//);
   });
 });

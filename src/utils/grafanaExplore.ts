@@ -47,6 +47,10 @@ export function exploreUrl(args: {
   return `${appBase()}/explore?${params.toString()}`;
 }
 
+export function dashboardUrl(uid: string): string {
+  return `${appBase()}/d/${encodeURIComponent(uid)}`;
+}
+
 export function drilldownAppUrl(pluginId: string): string | undefined {
   if (!hasApp(pluginId)) {
     return undefined;
@@ -62,6 +66,8 @@ export function buildDrilldownLinks(args: {
   promql: string;
   tempoSearch: string;
   traceIds: string[];
+  /** Firing-alert-attached dashboard UIDs. Validated below — never trust text into a URL. */
+  dashboardUids: string[];
 }): DrilldownLink[] {
   const links: DrilldownLink[] = [];
 
@@ -128,6 +134,21 @@ export function buildDrilldownLinks(args: {
         }),
       });
     }
+  }
+
+  // Model/alert-authored text must never become part of a link href. dashboardUids
+  // already passed dashboardUidsFromAlertFrames' own shape check on the way in
+  // (src/utils/grafanaStack.ts), but this loop re-validates at the point the URL is
+  // actually built so buildDrilldownLinks stays safe for any future caller too.
+  for (const uid of args.dashboardUids.slice(0, 5)) {
+    if (!/^[A-Za-z0-9_-]{5,40}$/.test(uid)) {
+      continue;
+    }
+    links.push({
+      id: `dash-${uid}`,
+      label: `Dashboard ${uid}`,
+      href: dashboardUrl(uid),
+    });
   }
 
   return links;

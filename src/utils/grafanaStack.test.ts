@@ -3,6 +3,8 @@ import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
   CLUSTER_LOGQL,
+  dashboardHintFromUids,
+  dashboardUidsFromAlertFrames,
   fetchStackContext,
   getDataSourceByType,
   linesFromLokiFrames,
@@ -32,8 +34,17 @@ function frameWithValue(labels: Record<string, string>, value: number) {
   };
 }
 
-/** Real Alertmanager v2 shape (GET /api/alertmanager/grafana/api/v2/alerts response). */
-function alertmanagerAlert(labels: Record<string, string>, annotations: Record<string, string> = {}) {
+/** Real Alertmanager v2 alert shape (GET /api/alertmanager/grafana/api/v2/alerts response). */
+type AlertmanagerAlertFixture = {
+  status: { state: string };
+  labels: Record<string, string>;
+  annotations: Record<string, string>;
+};
+
+function alertmanagerAlert(
+  labels: Record<string, string>,
+  annotations: Record<string, string> = {}
+): AlertmanagerAlertFixture {
   return { status: { state: 'active' }, labels, annotations };
 }
 
@@ -280,6 +291,80 @@ describe('fetchStackContext', () => {
     const lokiReq = lokiQuery.mock.calls[0][0];
     expect(lokiReq.targets[0].expr).toMatch(/namespace=~/);
   });
+
+  // Dashboards are alert-derived, so the block has three cases and only two are worth
+  // budget. Current (700) and Map (400) are fixed, so every char spent here is a char of
+  // real evidence the packer sheds. Measured with the 30x77-char dump below and no firing
+  // alerts: Current 2523 chars packing to 957 and keeping 8 Loki lines, against 2588
+  // chars packing to 943 and keeping 7 when the "(none linked on firing alerts)"
+  // placeholder is emitted anyway. The placeholder cost the operator log line 07.
+  const lokiDump = Array.from(
+    { length: 30 },
+    (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(60)}`
+  );
+
+  function mockStack(alerts: AlertmanagerAlertFixture[]) {
+    mockGet.mockImplementation(async (ref: string) => {
+      if (ref === 'loki-1' || ref === 'Loki') {
+        return { query: () => of({ data: [frameWithLineField(lokiDump)] }) };
+      }
+      if (ref === 'prom-1' || ref === 'Prometheus') {
+        return {
+          query: () => of({ data: [frameWithValue({ pod: 'checkout-api', namespace: 'prod' }, 12)] }),
+        };
+      }
+      return { query: () => of({ data: [] }) };
+    });
+    // ds.query() on the built-in `alertmanager` datasource is a stub that always resolves
+    // `{ data: [] }` on real Grafana — Alertmanager evidence goes through mockAmFetch,
+    // the real mechanism, same as the fetchStackContext describe block above.
+    mockAmFetch.mockReturnValue(of({ data: alerts }));
+  }
+
+  test('no firing alerts: no Dashboards block', async () => {
+    mockStack([]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.alertLines).toEqual([]);
+    expect(result.current).not.toContain('Dashboards');
+    expect(result.mapHint).not.toContain('dashboards');
+    expect(result.mapHint).not.toMatch(/,\s*$/);
+  });
+
+  test('alerts firing with no dashboard link: the explicit negative is still emitted', async () => {
+    mockStack([alertmanagerAlert({ alertname: 'KubePodCrashLooping' })]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.current).toContain('KubePodCrashLooping');
+    expect(result.current).toContain('Dashboards (from firing alerts):');
+    expect(result.current).toContain('(none linked on firing alerts)');
+    expect(result.mapHint).toContain('dashboards: none linked on firing alerts');
+  });
+
+  test('alerts firing with dashboard links: the links are named in Current and Map', async () => {
+    mockStack([alertmanagerAlert({ alertname: 'KubePodCrashLooping' }, { dashboardUID: 'abc12def' })]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.current).toContain('Dashboards (from firing alerts):');
+    expect(result.current).toContain('/d/abc12def');
+    expect(result.current).not.toContain('none linked');
+    expect(result.mapHint).toContain('dashboards: /d/abc12def');
+  });
+
+  test('never calls GET /api/search to resolve dashboard links from firing alerts', async () => {
+    mockStack([alertmanagerAlert({ alertname: 'KubePodCrashLooping' }, { dashboardUID: 'abc12def' })]);
+
+    const result = await fetchStackContext('top issues in the cluster');
+
+    expect(result.current).toContain('/d/abc12def');
+    // Narrowed invariant: dashboard-link resolution reads the alerts already fetched
+    // for evidence — it never issues a second, separate Search API call.
+    expect(JSON.stringify(mockAmFetch.mock.calls)).not.toMatch(/api\/search/);
+    expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/api\/search/);
+  });
 });
 
 describe('getDataSourceByType selection', () => {
@@ -326,5 +411,49 @@ describe('getDataSourceByType selection', () => {
 
     const picked = await getDataSourceByType('loki');
     expect(picked?.settings?.uid).toBe('loki-a');
+  });
+});
+
+describe('dashboardUidsFromAlertFrames', () => {
+  test('reads dashboardUid field and labels; ignores junk', () => {
+    const uids = dashboardUidsFromAlertFrames([
+      {
+        fields: [
+          { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
+          { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
+        ],
+      } as never,
+      {
+        fields: [
+          {
+            name: 'alertname',
+            type: 'string',
+            values: ['Other'],
+            labels: { __dashboardUid__: 'panel-uid-1' },
+          },
+        ],
+      } as never,
+      {
+        fields: [{ name: 'dashboardUid', type: 'string', values: ['no'] }],
+      } as never,
+    ]);
+    expect(uids).toEqual(['abc12def', 'panel-uid-1']);
+    expect(dashboardHintFromUids([])).toBe('');
+    expect(dashboardHintFromUids(uids)).toContain('/d/abc12def');
+  });
+
+  test('rejects malicious/malformed strings — no javascript:/traversal survives the shape check', () => {
+    const uids = dashboardUidsFromAlertFrames([
+      {
+        fields: [
+          {
+            name: 'dashboardUid',
+            type: 'string',
+            values: ['javascript:alert(1)', '../../etc/passwd', 'ok-uid-1'],
+          },
+        ],
+      } as never,
+    ]);
+    expect(uids).toEqual(['ok-uid-1']);
   });
 });

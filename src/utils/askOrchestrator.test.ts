@@ -7,8 +7,15 @@ import {
   MAX_ASK_HOPS,
   runAskOrchestrator,
 } from './askOrchestrator';
-import { emptyThread, MAX_INTENT_CHARS } from './progressiveContext';
-import { ALERT_CAP, LOG_LINE_CAP, PROM_SERIES_CAP, StackContextResult, TEMPO_TRACE_CAP } from './grafanaStack';
+import { emptyThread, MAX_INTENT_CHARS, MAX_MAP_CHARS, mergeMap } from './progressiveContext';
+import {
+  ALERT_CAP,
+  dashboardHintFromUids,
+  LOG_LINE_CAP,
+  PROM_SERIES_CAP,
+  StackContextResult,
+  TEMPO_TRACE_CAP,
+} from './grafanaStack';
 import { ToolCallResult } from './dotaiApi';
 
 function stackResult(overrides: Partial<StackContextResult> = {}): StackContextResult {
@@ -266,6 +273,93 @@ describe('runAskOrchestrator', () => {
       expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
       expect(text as string).toContain('Loki last 15m');
       expect(text as string).toContain('Question:');
+    }
+  });
+
+  // Payload-growth guard for firing-alert dashboard links. formatCurrent() now appends a
+  // "Dashboards (from firing alerts):" block to Current when any are present, and
+  // fetchStackContext() appends dashboardHintFromUids(...) to mapHint (src/utils/grafanaStack.ts).
+  // Both are charged against fixed budgets — Current 700 (MAX_CURRENT_CHARS), Map 400
+  // (MAX_MAP_CHARS) — so the worst realistic case is measured here: a 30x120-char Loki dump,
+  // 8 firing alerts and 8 alert-linked dashboards. Every hop must still pack to ≤ 1000 chars
+  // (MAX_INTENT_CHARS) with the question and live evidence surviving.
+  test('firing-alert dashboards + Loki dump + Map at cap still pack every hop ≤ 1000', async () => {
+    const dashboardUids = [
+      'k8s-workloads-overview-prod',
+      'loki-error-triage-2026q3',
+      'prom-restarts-by-namespace',
+      'crashloop-forensics-board',
+      'alertmanager-firing-heatmap',
+      'checkout-api-golden-signals',
+      'node-pressure-and-evictions',
+      'ingress-5xx-by-route-prod',
+    ];
+    const lokiLines = Array.from(
+      { length: 30 },
+      (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(120)}`
+    );
+    const alertLines = Array.from(
+      { length: 8 },
+      (_, i) => `KubePodCrashLooping firing pod/checkout-api-${i} ns/prod`
+    );
+    // Section order and literals mirror formatCurrent() including the dashboards block.
+    const current = [
+      'Loki last 15m (pod/checkout-api ns/prod):',
+      ...lokiLines,
+      '',
+      'Prometheus last 15m (pod/checkout-api ns/prod):',
+      'pod/checkout-api ns/prod restarts=12',
+      '',
+      'Tempo last 15m (pod/checkout-api ns/prod):',
+      'trace abc123',
+      '',
+      'Alertmanager (pod/checkout-api ns/prod):',
+      ...alertLines,
+      '',
+      'Dashboards (from firing alerts):',
+      ...dashboardUids.map((u) => '/d/' + u),
+    ].join('\n');
+    // mapHint exactly as fetchStackContext builds it: datasource tokens, scope, then the
+    // dashboards hint — long enough that the merged Map lands on its 400-char cap.
+    const mapHint = [
+      'Loki loki-production-us-east',
+      'Prometheus prometheus-production-us-east',
+      'Tempo tempo-production-us-east',
+      'Alertmanager alertmanager-production-us-east',
+      'ns/prod',
+      'pod/checkout-api',
+      dashboardHintFromUids(dashboardUids),
+    ].join(', ');
+    expect(current).toContain('Dashboards (from firing alerts):');
+    expect(mapHint).toContain('dashboards: /d/k8s-workloads-overview-prod');
+    // The dashboards hint alone pushes the merged Map onto its 400-char cap.
+    expect(mergeMap(mapHint, 'top issues in the cluster').length).toBe(MAX_MAP_CHARS);
+
+    const callTool = jest.fn(async (_t, text): Promise<ToolCallResult> => {
+      expect((text as string).length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      return { ok: true, status: 200, summary: 'checkout-api is crashlooping across clusters', raw: {} };
+    });
+
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues in the cluster',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () =>
+        stackResult({ current, mapHint, logLines: lokiLines, alertLines, currentEmpty: false })
+      ),
+      callTool,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(callTool.mock.calls.length).toBeGreaterThanOrEqual(1);
+    for (const [, text] of callTool.mock.calls) {
+      const packed = text as string;
+      expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+      expect(packed).toContain('Current:');
+      expect(packed).toContain('Loki last 15m');
+      expect(packed).toContain('KubePodCrashLooping firing');
+      expect(packed).toContain('Question:');
+      expect(packed).toContain('top issues in the cluster');
     }
   });
 
