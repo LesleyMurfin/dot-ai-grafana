@@ -82,4 +82,18 @@ describe('buildDrilldownLinks', () => {
     expect(labels).toEqual(['Trace abc123450000', 'Trace abc123459999']);
     expect(new Set(labels).size).toBe(labels.length);
   });
+
+  test('duplicate identical trace ids produce exactly one link with a unique key', () => {
+    const links = buildDrilldownLinks({
+      tempoUid: 'tempo-1',
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: ['abc123450000', 'abc123450000', 'abc123450000'],
+    });
+    const traceLinks = links.filter((l) => l.id.startsWith('trace-'));
+    expect(traceLinks).toHaveLength(1);
+    expect(traceLinks[0].id).toBe('trace-abc123450000');
+    expect(new Set(links.map((l) => l.id)).size).toBe(links.length);
+  });
 });

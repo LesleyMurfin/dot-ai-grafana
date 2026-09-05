@@ -111,7 +111,7 @@ export function buildDrilldownLinks(args: {
     if (tracesApp) {
       links.push({ id: 'drilldown-traces', label: 'Traces Drilldown', href: tracesApp });
     }
-    const traceIds = args.traceIds.slice(0, 5);
+    const traceIds = [...new Set(args.traceIds)].slice(0, 5);
     for (const id of traceIds) {
       // Two trace ids can share the same 8-char prefix; fall back to the full id
       // for the label whenever that prefix is not unique within this batch, so

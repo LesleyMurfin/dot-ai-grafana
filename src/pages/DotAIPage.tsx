@@ -278,7 +278,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
                     className={styles.drilldownLink}
                     href={link.href}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                   >
                     {link.label}
                   </a>

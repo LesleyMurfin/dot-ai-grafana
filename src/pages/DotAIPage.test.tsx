@@ -651,6 +651,7 @@ describe('Pages/DotAIPage', () => {
     const link = screen.getByRole('link', { name: 'Explore logs' });
     expect(link).toHaveAttribute('href', '/explore?panes=x');
     expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(mockCallDotAITool).toHaveBeenCalled();
     fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
