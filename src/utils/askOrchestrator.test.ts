@@ -806,6 +806,40 @@ describe('runAskOrchestrator', () => {
     expect(callTool).not.toHaveBeenCalled();
     expect(result.summary).not.toMatch(/Map links/i);
   });
+
+  // Finding: links exist (a datasource is configured, so drilldowns were rebuilt) but the read
+  // itself came back empty — Current literally says "no lines in the last 15m". The summary
+  // must still surface the links (there is something to open) but must NOT claim evidence is
+  // sitting in Current, because it is not.
+  test('show me the logs offers links without claiming evidence when Current is empty', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: '',
+        mapHint: '',
+        logLines: [],
+        promLines: [],
+        currentEmpty: true,
+        drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+    ]);
+    // The overclaim this guards against: asserting evidence sits in Current when Current is empty.
+    expect(result.summary).not.toMatch(/evidence is in Current/i);
+    expect(result.summary).toMatch(/Map links/i);
+  });
 });
 
 /**

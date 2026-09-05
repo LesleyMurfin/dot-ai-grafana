@@ -475,7 +475,12 @@ export async function runAskOrchestrator(args: {
       if (stackEmpty && drilldowns.length === 0) {
         return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
       }
-      lastSummary = 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
+      // Links exist (a datasource is configured) but the read itself came back empty — Current
+      // says "no lines in the last 15m", so the summary must offer the links WITHOUT claiming
+      // evidence sits in Current. Only say evidence is in Current when it actually is.
+      lastSummary = stackEmpty
+        ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
+        : 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
       history = appendHistory(history, question, lastSummary);
       return {
         ok: true,
