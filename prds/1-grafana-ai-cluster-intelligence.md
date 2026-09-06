@@ -54,7 +54,7 @@ A Grafana App Plugin that embeds two read-only dot-ai tools directly into Grafan
 1. **Query** — Natural language questions about Kubernetes cluster resources
 2. **Remediate (Analysis Only)** — AI-powered issue analysis without execution capability
 
-The plugin provides a simple interface: tool selector, text input for the intent, and a response area that renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML. **Amendment (2026-09-05, Design Decision 12):** this retires the *rendering* half of the original text-only decision only — the plugin still never requests rich visualizations from dot-ai (no `[visualization]` prefix; see the tool→endpoint map below and Design Decision 1).
+The plugin provides a simple interface: tool selector, text input for the intent, and a response area that renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML — code blocks unhighlighted. **Amendment (2026-09-05, Design Decision 12):** this retires the *rendering* half of the original text-only decision only — the plugin still never requests rich visualizations from dot-ai (no `[visualization]` prefix; see the tool→endpoint map below and Design Decision 1). The renderer itself lands with **PR #51**; this amendment merges after it.
 
 ### Expansion: Tool → endpoint map
 
@@ -182,7 +182,7 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 9. **Strategic positioning vs Grafana Assistant (read-only scope).** Grafana Assistant + Sift now cover NL analysis of telemetry natively, so this plugin must lead with dot-ai's wedge — **K8s API state, remediation, sovereignty** (see [Competitive landscape](#competitive-landscape--differentiation)). **Leaning:** v1 honors PRD #1's read-only scope and differentiates on **K8s-state + sovereign self-hosting** (not a telemetry-chat clone); **remediation** (GitOps PR) is the strongest differentiator but is out of PRD #1 scope — flagged as the highest-value expansion and the central go/no-go ([Open Question 6](#open-questions)). If neither wedge is compelling for the target users, the honest call is **not** to ship a standalone plugin and instead expose dot-ai via a Grafana Assistant Skill / the Grafana MCP.
 10. **Deployment target: self-managed Grafana only for this contribution.** **Leaning:** design, CI, and install docs target **self-managed Grafana** (reference **11.4**; matrix includes a current 13.x). **Grafana Cloud is explicitly not planned** for this PRD's delivery track — see [Deployment targets](#deployment-targets-self-managed-vs-grafana-cloud). Cloud may still matter to other adopters (including the maintainer); it is left as an optional follow-on for whoever finds value, not a Phase 1/2/3 commitment here.
 11. **Companion vs core ownership.** **Leaning:** this PRD follows the Headlamp companion pattern — UI/host only; capabilities land in **dot-ai** first. Applies especially to **Kubeshark / evidence** (Phase 3): see [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives).
-12. **Markdown rendering vs. text-only — RESOLVED, amends Decision 1.** The original text-only decision banned both *requesting* and *rendering* rich visualizations. Only the rendering half is retired: the response area now renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML instead of a plain-text area. The request half is unchanged — the plugin still never prefixes `[visualization]` to the intent (Decision 1); dot-ai is never asked to switch into rich-visualization mode. See Work Log 2026-09-05.
+12. **Markdown rendering vs. text-only — RESOLVED, amends Decision 1.** The original text-only decision banned both *requesting* and *rendering* rich visualizations. Only the rendering half is retired: the response area renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML instead of a plain-text area. Code blocks render **unhighlighted** — the sanitizer strips `class` (including marked's `language-*`) and no highlighter is added. The renderer is `src/components/ResponseMarkdown.tsx`, delivered by **PR #51**; this decision is recorded on the assumption that #51 lands first, and it must not merge ahead of it. The request half is unchanged — the plugin still never prefixes `[visualization]` to the intent (Decision 1); dot-ai is never asked to switch into rich-visualization mode. **Caveat:** that surviving half currently holds by *absence*, not by an enforced control — `buildRequestText()` simply never emits the prefix, and no test asserts it, so a future packer change could violate this decision silently. A one-line assertion in `src/utils/progressiveContext.test.ts` would make it self-enforcing; out of scope for this documentation-only change.
 
 ### Expansion: As-built v1 (this contribution)
 
@@ -324,7 +324,7 @@ Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic
 2. Selects Query or Remediate; the active **cluster/context is always displayed** (from `version → system.kubernetes.context`) so the answer's scope is unambiguous.
 3. Types intent (live 1000-char counter); submits.
 4. **In-flight**: spinner + **elapsed-time counter** + staged copy ("Investigating cluster state… up to a few minutes"); a **Cancel** button aborts (AbortController / abandons the async poll) and re-enables the form.
-5. **Success**: plain-text answer; **Copy** on the whole response and per recommended `command`; a "Show raw response" toggle.
+5. **Success**: answer rendered as sanitized markdown (Decision 12; plain text before PR #51); **Copy** on the whole response and per recommended `command`; a "Show raw response" toggle.
 6. **Error**: specific `Alert` (unreachable / 401 / 403 / 404 / timeout / tool error) with a one-click **Retry** that preserves the intent.
 7. Ask a follow-up (single-shot — the prior answer stays visible while composing the next).
 
@@ -371,7 +371,7 @@ Minimal UI surface:
 
 ### What's Explicitly Out of Scope
 
-- Rich visualizations *requested from dot-ai* (Mermaid diagrams, cards, charts) — the plugin never prefixes `[visualization]` to the intent (Decision 1). It does render the model's own GFM markdown, including code blocks with syntax highlighting, as sanitized HTML (Decision 12, amends this line for rendering only).
+- Rich visualizations *requested from dot-ai* (Mermaid diagrams, cards, charts) — the plugin never prefixes `[visualization]` to the intent (Decision 1). It does render the model's own GFM markdown as sanitized HTML (Decision 12, amends this line for rendering only). Syntax highlighting stays out of scope: code blocks render unhighlighted, since the sanitizer strips the `language-*` class and no highlighter ships.
 - Action execution (remediation execution, operate, recommend)
 - Multi-stage workflows or wizards
 - Resource selection from dashboards
@@ -515,7 +515,7 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 - [x] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/test-connection`; SDK `httpclient`; remediate field allowlist; token never logged. **No** `/status/{jobId}` (no 202).
 
 **Stage 1c — Intelligence surfaces**
-- [x] **M4 — Query UI.** Plain-text `summary`. Grafana DS **Current/Map** packed into `{intent}`; History display-only. No cluster-context chip, raw-response toggle, or char counter in v1.
+- [x] **M4 — Query UI.** `summary` shipped as plain text; rendered as sanitized markdown from PR #51 (Decision 12). Grafana DS **Current/Map** packed into `{intent}`; History display-only. No cluster-context chip, raw-response toggle, or char counter in v1.
 - [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
@@ -634,7 +634,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | Original draft | This revision | Notes |
 |---|---|---|
 | **Problem Statement** | [Problem Statement](#problem-statement) + [Competitive landscape](#competitive-landscape--differentiation) | Same gap (context-switch for NL / analysis); framing expanded with Grafana Assistant / Sift so the plugin's wedge is honest |
-| **Solution Overview** | [Solution Overview](#solution-overview) | Same: Query + Remediate analysis-only; plain-text presentation |
+| **Solution Overview** | [Solution Overview](#solution-overview) | Same: Query + Remediate analysis-only; presentation amended from plain text to sanitized markdown (Decision 12) |
 | **User Journey** | [User Journey](#user-journey) | Same path; adds cancel / retry / cluster-context / deep-link detail |
 | **Architecture** | [Architecture](#architecture) + [Companion-project model](#companion-project-model-same-as-headlamp) | Same app+Go proxy; contracts pinned to source; companion vs core ownership explicit |
 | **MCP Server Integration** (query + remediate endpoints) | [Tool → endpoint map](#tool--endpoint-map) and [MCP Server Integration](#mcp-server-integration) | Same two tools; fields/`summary`/auth headers validated against `vfarcic/dot-ai` |
@@ -739,6 +739,10 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 
 ### 2026-09-05 — retire text-only decision for rendering only
 
-- **Issue**: PRD line 57, the "What's Explicitly Out of Scope" list, the tool→endpoint response table, and CLAUDE.md's Key Design Decisions still banned rich visualizations outright (Mermaid, cards, tables, syntax-highlighted code) at the presentation layer, but a companion PR renders the model's own GFM markdown (tables, headings, code, links). Raised as blocking finding B4 on review of PR #13: Decision 12 there recorded "navigation extras returning" but not that the text-only decision itself was being retired.
+- **Issue**: PRD line 57, the "What's Explicitly Out of Scope" list, the tool→endpoint response table, and CLAUDE.md's Key Design Decisions still banned rich visualizations outright (Mermaid, cards, tables, syntax-highlighted code) at the presentation layer, but a companion PR renders the model's own GFM markdown (tables, headings, code, links). Raised as blocking finding B4 on review of PR #13. (The number `12.` was free on `main`, whose decision list ran 1–11; an *earlier* revision of #13 had used it for "navigation extras returning", but its current head adds no numbered decision — so this entry does not inherit from #13.)
 - **Action**: Amended PRD line 57, the out-of-scope bullet, and the response-table header; added Design Decision 12 recording that only the *rendering* half of the original text-only decision (Decision 1) is retired — sanitized markdown rendering is now in scope. The *request* half is unchanged: the plugin still never prefixes `[visualization]` to the intent. Mirrored the correction in CLAUDE.md's Key Design Decisions.
+- **Sweep completed**: the first revision of this change left the retired claim standing where it had not looked. Also corrected: the UX-states success step (plain-text answer), the M4 milestone row, the original-section comparison table, and `README.md`'s "What It Does" Query bullet ("Responses are text"). Re-grepped the whole repo for `text-only` / `plain text` / `plain-text` / `Render as text` / `no rich visualizations` / `text area`; every remaining hit is either this amendment describing the retired decision, or unrelated (`.config/AGENTS/instructions.md` on fetching docs as plain-text markdown).
+- **Over-claim corrected**: an earlier draft said the renderer handles "code blocks with syntax highlighting". It does not — the sanitizer strips `class` (including marked's `language-*`, derived from a model-chosen fence info string) and no highlighter is added, so code blocks render unhighlighted. Syntax highlighting remains out of scope.
+- **Merge order**: this amendment describes `src/components/ResponseMarkdown.tsx`, which is **not on `main`** — `main` still renders `<pre className={styles.pre}>{responseText}</pre>` (`src/pages/DotAIPage.tsx:299`), and `package.json` has no markdown or sanitizer dependency. The renderer arrives with **PR #51**. This PR must merge **after** #51, or CLAUDE.md — loaded into every agent session in this repo — would describe a feature the code does not have.
+- **Follow-up recommended (not in this PR)**: the surviving request-side half of Decision 1 holds by absence — `buildRequestText()` (`src/utils/progressiveContext.ts:135-161`) simply never emits `[visualization]`, and no test asserts it. Add a one-line assertion in `src/utils/progressiveContext.test.ts` so the decision is self-enforcing. Kept out of this change to preserve its documentation-only scope.
 - **Prompt**: land as its own documentation-only PR, based directly on `main`, independent of the navigation PRs.
