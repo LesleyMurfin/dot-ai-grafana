@@ -35,6 +35,9 @@ artifacts/
 work/
 ci/
 
+# scripts/ci-local.sh working directory (staged plugin archive)
+.ci-local/
+
 # e2e test directories
 /test-results/
 /playwright-report/
