@@ -221,6 +221,28 @@ describe('Pages/DotAIPage', () => {
     expect(screen.queryByTestId(testIds.dotai.error)).not.toBeInTheDocument();
   });
 
+  test('successful Ask clears the intent box, which also re-disables submit', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('how is the cluster?');
+    expect(screen.getByTestId(testIds.dotai.intent)).toHaveValue('how is the cluster?');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    await waitFor(() => {
+      expect(screen.getByTestId(testIds.dotai.intent)).toHaveValue('');
+    });
+    // Emptying the box re-disables submit, so completion can never be read from the
+    // button becoming enabled — the intent value is the observable completion signal.
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
+  });
+
   test('ok with empty summary shows fallback text', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
