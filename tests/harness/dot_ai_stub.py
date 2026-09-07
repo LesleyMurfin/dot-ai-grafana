@@ -22,6 +22,12 @@ kept in memory and served from GET /intents, so a consent/privacy spec can asser
 what was actually POSTed (e.g. whether a ``Prior:`` block carrying prior-turn text
 left the browser) instead of trusting the UI's own claim about it. Bodies are
 already test fixtures; nothing here is durable storage.
+
+TRANSPORT-ERROR TRIGGER: ``TRIGGER_UPSTREAM_TRANSPORT_ERROR`` in intent/issue
+text drops the TCP connection with no HTTP response written at all, so the
+plugin's client.Do sees a genuine transport failure (EOF/reset) rather than a
+parsed status code — the other half of #44 R2 alongside the 5xx/401
+HTTP-level triggers below.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -223,6 +230,20 @@ class Handler(BaseHTTPRequestHandler):
                     UPSTREAM_INTERNAL_FIELD: UPSTREAM_SECRET_MARKER,
                 },
             )
+            return
+
+        if "TRIGGER_UPSTREAM_TRANSPORT_ERROR" in text:
+            # Simulate a network-level failure (dropped connection) rather than an
+            # HTTP-level error response: no bytes are written, so the Go client's
+            # client.Do returns a transport error (EOF/connection reset) instead of
+            # a parsed status code. This is the "transport error" half of #44 R2 —
+            # the HTTP-level halves (5xx/401/403) are the sibling cases above.
+            # Every other route's response shape is unchanged.
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.close_connection = True
             return
 
         summary = f"stub-{tool}-ok"
