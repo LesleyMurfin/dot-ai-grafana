@@ -81,7 +81,7 @@ dot-ai wraps every REST response in a standard envelope:
 
 dot-ai's tools are built for an *LLM agent*, so `data.result` carries **structured JSON plus agent-oriented fields** (`agentInstructions`, `sessionId`), not a prose string. The plugin extracts the human-readable content per tool (confirmed against source and against how `dot-ai-headlamp` unwraps `data.result`):
 
-| Tool | Render (as markdown) | Ignore in the UI |
+| Tool | Display | Ignore in the UI |
 |------|----------------|-----------------------------|
 | `query` | **`data.result.summary`** (`QueryOutput.summary`, `src/tools/query.ts` L54) | `agentInstructions`, `sessionId`, `visualizationUrl`, `iterations`, `toolsUsed` |
 | `remediate` | `message`, `analysis.rootCause`, `analysis.confidence`, `analysis.factors[]`, `remediation.summary`, `remediation.actions[]` (`command`/`rationale`/`risk`), `guidance` | `executionChoices`, `nextAction`, `sessionId`, `visualizationUrl`, `agentInstructions` |
@@ -515,7 +515,7 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 - [x] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/test-connection`; SDK `httpclient`; remediate field allowlist; token never logged. **No** `/status/{jobId}` (no 202).
 
 **Stage 1c — Intelligence surfaces**
-- [x] **M4 — Query UI.** `summary` shipped as plain text; rendered as sanitized markdown from PR #51 (Decision 12). Grafana DS **Current/Map** packed into `{intent}`; History display-only. No cluster-context chip, raw-response toggle, or char counter in v1.
+- [x] **M4 — Query UI.** Shipped the `summary` response area as **plain text**, and it is still plain text on `main`; sanitized-markdown rendering of that same `summary` field arrives with PR #51 (Decision 12), not with M4. Grafana DS **Current/Map** packed into `{intent}`; History display-only. No cluster-context chip, raw-response toggle, or char counter in v1.
 - [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
