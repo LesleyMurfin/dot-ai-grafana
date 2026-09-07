@@ -68,5 +68,6 @@ work on these workstreams lives upstream, not in this fork:
 
 ## Other decisions
 
-- Image rendering (grafana/grafana-image-renderer) evaluated and **not adopted** — see
-  [../docs/image-rendering-evaluation.md](../docs/image-rendering-evaluation.md).
+- Image rendering (grafana/grafana-image-renderer) evaluated 2026-09-05 and **not adopted** — the
+  plugin needs no server-side rendering. The full evaluation record is held privately in the
+  `revive_labs` repo at `dot-ai-grafana/design/image-rendering-evaluation.md`.
