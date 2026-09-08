@@ -1,9 +1,5 @@
 # Security Policy
 
-*Proposed for `vfarcic/dot-ai-grafana`. This repository currently has no disclosure channel; that
-gap is itself a finding. The maintainer owns the final wording and must enable the reporting
-mechanism below — a contributor cannot.*
-
 ## Supported versions
 
 | Version | Supported |
@@ -21,10 +17,6 @@ Please report privately, **not** as a public issue or pull-request comment.
 
 Use **GitHub Private Vulnerability Reporting** on this repository:
 `Security` tab → `Report a vulnerability`.
-
-> Maintainer action required: private reporting must be switched on in
-> `Settings → Advanced Security → Private vulnerability reporting`. Until it is enabled, the
-> `Report a vulnerability` button does not appear and there is no private channel at all.
 
 Useful report contents: affected version/commit, Grafana version, the datasources involved,
 the rendered or returned output that demonstrates the problem, and what an attacker gains.
