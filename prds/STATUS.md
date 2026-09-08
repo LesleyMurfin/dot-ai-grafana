@@ -8,7 +8,7 @@ PRD #2  GitOps     issue #13 / PR #18
 PRD #3  M7 0.2.x   issue #23 / PR #22
 PRD #4  Evidence-grounded change safety   issue #31 / PR #33
 PRD #5  Plugin usability                 issue #32 / PR #34
-nits    take-or-leave code             PR #26 (open → feat/upstream-plugin)
+nits    take-or-leave code             PR #26 (merged 2026-09-03 → feat/upstream-plugin)
 ```
 
 Viktor’s only #3 comment:
@@ -25,7 +25,7 @@ https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 | — | CLAUDE.md RBAC honesty | [x] |
 | — | PRD M6: Cancel + Retry shipped | [x] |
 
-## Take-or-leave + checklist — in [PR #26](https://github.com/LesleyMurfin/dot-ai-grafana/pull/26) (not merged yet)
+## Take-or-leave + checklist — in [PR #26](https://github.com/LesleyMurfin/dot-ai-grafana/pull/26) (merged 2026-09-03)
 
 | Ask | In #26 |
 |---|---|
@@ -40,7 +40,7 @@ https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 | Skill YAML frontmatter | [x] |
 | App without extra `Routes` | [x] |
 | `go 1.26.5` kept | [x] CI golangci-lint fails on `go 1.26` / `1.26.0` |
-| GitHub Actions on *his* `main` | [ ] **needs Viktor** |
+| GitHub Actions on *his* `main` | [x] workflows now live on upstream `main` |
 
 ## New work after he reviewed — parked, not in vfarcic#3
 
@@ -65,6 +65,15 @@ work on these workstreams lives upstream, not in this fork:
 | PRD #3 | issue #23 | [vfarcic/dot-ai-grafana#6](https://github.com/vfarcic/dot-ai-grafana/issues/6) |
 | PRD #4 | issue #31 | [vfarcic/dot-ai-grafana#7](https://github.com/vfarcic/dot-ai-grafana/issues/7) |
 | PRD #5 | issue #32 | [vfarcic/dot-ai-grafana#8](https://github.com/vfarcic/dot-ai-grafana/issues/8) |
+
+## Open upstream PRs (2026-09-08)
+
+Fork work sent upstream as PRs against `vfarcic/dot-ai-grafana`; both open:
+
+| Upstream PR | What |
+|---|---|
+| [#72](https://github.com/vfarcic/dot-ai-grafana/pull/72) | Local CI runner with a bidirectional drift guard — revised per Viktor's review (migrated to `yq-go`) |
+| [#74](https://github.com/vfarcic/dot-ai-grafana/pull/74) | `devbox.json` fix — declare missing toolchain packages + local development docs |
 
 ## Other decisions
 
