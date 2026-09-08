@@ -14,7 +14,7 @@ nits    take-or-leave code             PR #26 (merged → feat/upstream-plugin)
 Viktor’s only #3 comment:
 https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 
-## His merge-blockers — done on #3 @ `179a7df`
+## His merge-blockers — done on #3 @ `ac627d4`
 
 | # | Ask | Done |
 |---|---|---|
