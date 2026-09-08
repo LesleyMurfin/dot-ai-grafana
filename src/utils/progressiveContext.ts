@@ -322,11 +322,14 @@ export function condensePriorTurns(
   }
 
   const lines: string[] = [];
-  // Walk newest → oldest so the latest referent always wins the budget.
+  // Walk newest → oldest so the latest referent always wins the budget: each older
+  // pair sees only what is left, and `formatPriorPair` holds it to that share.
   for (let i = pairs.length - 1; i >= 0 && lines.length < maxPairs; i--) {
     const pair = pairs[i];
     const used = lines.reduce((n, line) => n + line.length + (n > 0 ? 1 : 0), 0);
-    const remaining = maxChars - used;
+    // Reserve the "\n" that will join this line to the ones already kept, or the
+    // older line spends a char that belongs to the newer one and the join overflows.
+    const remaining = maxChars - used - (lines.length > 0 ? 1 : 0);
     if (remaining < 24 && lines.length > 0) {
       break;
     }
@@ -343,12 +346,18 @@ export function condensePriorTurns(
 }
 
 /**
- * One wire line: short Q + answer biased toward resource referents.
+ * One wire line: short Q + answer biased toward resource referents, never longer than
+ * `budget`.
  *
- * Best-effort, NOT a hard bound: `aBudget` has a floor of 12 chars, so with a long
- * question the prefix plus that floor can exceed `budget` by up to ~19 chars. The
- * 240-char guarantee is enforced by the caller's `cap()` in `condensePriorTurns`, not
- * here — a refactor that removes that cap removes the only bound on Prior egress.
+ * The final `cap` is load-bearing: `aBudget` has a floor of 12 chars, so with a long
+ * question the prefix plus that floor would otherwise exceed `budget` by up to ~19
+ * chars. `condensePriorTurns` hands each older pair only the budget its newer siblings
+ * left, then joins chronologically — so a line that overspends here is paid for by the
+ * tail of the joined string, which is the NEWEST turn, inverting the priority the walk
+ * order exists to establish. Keep the per-line cap.
+ *
+ * `condensePriorTurns` still caps the joined result, which is what bounds Prior egress
+ * when `maxChars` is smaller than one line's 24-char floor.
  */
 function formatPriorPair(you: string, answer: string, budget: number): string {
   if (budget < 12) {
@@ -362,7 +371,7 @@ function formatPriorPair(you: string, answer: string, budget: number): string {
   // Prefer chips + a short prose tail so "first one" still maps to a name when present.
   const aSource = hints ? `${hints} — ${answer.replace(/\s+/g, ' ').trim()}` : answer;
   const a = oneLine(aSource, aBudget);
-  return `${prefix}${a}`;
+  return cap(`${prefix}${a}`, budget);
 }
 
 /** Remove the Tempo last-15m block from a stack Current string. */

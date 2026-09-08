@@ -1,8 +1,7 @@
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
 import {
-  PLUGIN_ID,
   type StubIntent,
   asEnvelope,
   isStableEnvelope,
@@ -14,10 +13,11 @@ import {
  * Consent by design — no execute/operate surface from this plugin; remediate is
  * analysis-only; the on-page notice discloses what an Ask actually POSTs.
  *
- * The disclosure cases assert the notice against the stub's recorded request
+ * The disclosure case asserts the notice against the stub's recorded request
  * bodies (GET /intents), so the copy cannot drift away from the egress it
- * describes — including with "Send Grafana evidence" off, which suppresses the
- * datasource read but not the condensed Prior block.
+ * describes. The "Send Grafana evidence" off variant is covered in jsdom rather
+ * than here — see the second describe's note on why this file stays read-only on
+ * plugin settings.
  *
  * Deferred (see issue #44):
  * - debugLog opt-in default-off (main always writes ask log; gate branch adds the flag)
@@ -83,49 +83,40 @@ test.describe('Consent by design — no execute/operate surface', () => {
   });
 });
 
+
 /**
  * The notice at `testIds.dotai.consent` is the operator's only egress notice in the
- * product — README and prds/ are not shipped to the browser. Both cases below read
- * the rendered notice, then compare it with what the stub actually received.
+ * product — README and prds/ are not shipped to the browser. The case below reads the
+ * rendered notice, then compares it with what the stub actually received.
+ *
+ * Deliberately read-only on plugin settings. An earlier revision flipped
+ * `jsonData.sendGrafanaEvidence` here to cover the evidence-off notice too, but plugin
+ * settings are org-wide: under `playwright.config.ts` `fullyParallel: true` that write
+ * raced `reliability-by-design.spec.ts`, whose R5 asserts the "<Kind> datasource missing"
+ * notes that exist only while evidence is on. It is the same hazard
+ * `provisioning/plugins/apps.yaml` already documents for `apiUrl` / `apiKey`. The
+ * evidence-off half of the disclosure is asserted in jsdom instead, where the toggle is
+ * a prop — `DotAIPage.test.tsx` "evidence off: the notice still discloses Prior, and
+ * Prior is still POSTed" checks both the copy and that Prior still reaches the body.
  */
 test.describe('Consent by design — the notice matches what is POSTed', () => {
   test.use({ storageState: adminState });
-  // Both cases mutate the app's own jsonData, so they must not interleave.
-  test.describe.configure({ mode: 'serial' });
-
-  /** Only the field these cases flip; the rest of jsonData is preserved verbatim. */
-  type PluginMeta = { jsonData?: { sendGrafanaEvidence?: boolean } & Record<string, unknown> };
 
   const token = (label: string) => `consentprobe-${label}-${Math.random().toString(36).slice(2, 8)}`;
 
-  async function setEvidence(request: APIRequestContext, sendGrafanaEvidence: boolean): Promise<void> {
-    const settingsUrl = `/api/plugins/${PLUGIN_ID}/settings`;
-    const current = await request.get(settingsUrl);
-    const currentText = await current.text();
-    expect(current.ok(), currentText).toBeTruthy();
-    const meta: PluginMeta = JSON.parse(currentText);
-    const resp = await request.post(settingsUrl, {
-      data: {
-        enabled: true,
-        pinned: false,
-        jsonData: { ...(meta.jsonData ?? {}), sendGrafanaEvidence },
-      },
-    });
-    const respText = await resp.text();
-    expect(resp.ok(), respText).toBeTruthy();
-  }
-
   /**
-   * Ask twice so the second POST is the one that can carry Prior. Completion is read
-   * from the intent box emptying — the page clears it on success, which also re-disables
-   * the submit button, so `toBeEnabled` never resolves after a successful Ask.
+   * Ask twice so the second POST is the one that can carry Prior. The intent box
+   * emptying is the completion signal — the page clears it on success, which also
+   * re-disables the submit button, so `toBeEnabled` never resolves after a successful
+   * Ask. The response check that follows is a post-condition, not a wait: the previous
+   * Ask's response is still mounted on the second pass.
    */
   async function askTwice(page: Page, first: string, second: string): Promise<void> {
     for (const text of [first, second]) {
       await page.getByTestId(testIds.dotai.intent).fill(text);
       await page.getByTestId(testIds.dotai.submit).click();
-      await expect(page.getByTestId(testIds.dotai.response)).toBeVisible({ timeout: 20_000 });
       await expect(page.getByTestId(testIds.dotai.intent)).toHaveValue('', { timeout: 20_000 });
+      await expect(page.getByTestId(testIds.dotai.response)).toBeVisible();
     }
   }
 
@@ -139,11 +130,12 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
   }
 
   test('evidence on: the notice names the blocks the follow-up Ask actually sends', async ({
-    request,
     gotoPage,
     page,
   }) => {
-    await setEvidence(request, true);
+    // No settings write: apps.yaml provisions no sendGrafanaEvidence, and both
+    // AppConfig.tsx (`!== false`) and DotAIPage.tsx (prop default) read undefined as
+    // on, so the provisioned default is already the state this case needs.
     await gotoPage('/');
 
     const notice = page.getByTestId(testIds.dotai.consent);
@@ -164,43 +156,5 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
     expect(packed.text, packed.text).toContain('Current:');
     // …and History itself is never a block on the wire.
     expect(packed.text).not.toMatch(/^History:/m);
-  });
-
-  test('evidence off: the notice still discloses Prior, and Prior still leaves', async ({
-    request,
-    gotoPage,
-    page,
-  }) => {
-    await setEvidence(request, false);
-    await gotoPage('/');
-
-    // The operator who opted out is the one most likely to be surprised, so the
-    // notice must still be present and must say the toggle does not cover Prior.
-    const notice = page.getByTestId(testIds.dotai.consent);
-    await expect(notice).toBeVisible();
-    await expect(notice).toContainText('Send Grafana evidence is off, so Asks read no datasource');
-    await expect(notice).toContainText('condensed Prior block of up to 240 characters');
-    await expect(notice).toContainText('The toggle does not cover Prior, Current or Map');
-
-    const first = token('off-first');
-    await askTwice(page, `status of pod ${first} in namespace prod`, 'why is it restarting in namespace prod?');
-
-    const packed = followUp(await stubIntents(), first);
-    // Disclosure and egress agree: no fresh datasource block …
-    expect(packed.text, packed.text).not.toContain('Loki last 15m');
-    // … but prior-turn question text is on the wire regardless of the toggle.
-    expect(packed.text, packed.text).toContain('Prior:');
-    expect(packed.len).toBeLessThanOrEqual(1000);
-  });
-
-  // Its own step, not a `finally`: a timed-out test has already disposed its request
-  // context, and a restore that cannot run leaves the app off for every later spec.
-  test('the evidence toggle is left back at its default', async ({ request }) => {
-    await setEvidence(request, true);
-    const resp = await request.get(`/api/plugins/${PLUGIN_ID}/settings`);
-    const text = await resp.text();
-    expect(resp.ok(), text).toBeTruthy();
-    const meta: PluginMeta = JSON.parse(text);
-    expect(meta.jsonData?.sendGrafanaEvidence).toBe(true);
   });
 });
