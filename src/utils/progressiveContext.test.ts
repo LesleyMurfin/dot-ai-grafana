@@ -1,6 +1,7 @@
 import {
   appendHistory,
   buildRequestText,
+  condensePriorTurns,
   extractResourceHints,
   MAX_CURRENT_CHARS,
   MAX_HISTORY_TURNS,
@@ -234,6 +235,54 @@ describe('progressiveContext', () => {
     const priorBlock = match![1];
     expect(priorBlock.length).toBeGreaterThan(0);
     expect(priorBlock.length).toBeLessThanOrEqual(MAX_PRIOR_CHARS);
+  });
+
+  test('condensePriorTurns never charges the newest turn for an older one\u2019s overshoot', () => {
+    // Regression: formatPriorPair's 12-char aBudget floor let an older pair return up
+    // to ~19 chars more than its remaining share. The joined string then overflowed and
+    // cap() trimmed the TAIL \u2014 which is the NEWEST line, because lines are unshifted
+    // into chronological order. The latest referent is exactly what must not be clipped.
+    let clipped = 0;
+    for (let qn = 20; qn < 120; qn += 1) {
+      for (let an = 100; an < 260; an += 1) {
+        const history = appendHistory(
+          appendHistory([], 'o'.repeat(qn), 'p'.repeat(qn)),
+          'q'.repeat(qn),
+          'r'.repeat(an)
+        );
+        const out = condensePriorTurns(history, MAX_PRIOR_CHARS);
+        expect(out.length).toBeLessThanOrEqual(MAX_PRIOR_CHARS);
+        const priorLines = out.split('\n');
+        // One line means the older pair did not fit its 24-char floor and was skipped —
+        // that is the intended shed, not a clip of the newest turn.
+        if (priorLines.length < 2) {
+          continue;
+        }
+        // The newest line is last (chronological order). It may be truncated by its own
+        // budget, but never because an older line overspent: if the two lines together
+        // still fit MAX_PRIOR_CHARS, nothing forced the newest one to lose characters.
+        const [older, newest] = priorLines;
+        if (newest.endsWith('\u2026') && older.length + 1 + newest.length <= MAX_PRIOR_CHARS) {
+          clipped += 1;
+        }
+      }
+    }
+    expect(clipped).toBe(0);
+  });
+
+  test('condensePriorTurns holds each line to the share left by newer turns', () => {
+    const history = appendHistory(
+      appendHistory([], 'o'.repeat(20), 'p'.repeat(20)),
+      'q'.repeat(20),
+      'r'.repeat(158)
+    );
+    const out = condensePriorTurns(history, MAX_PRIOR_CHARS);
+
+    expect(out.length).toBeLessThanOrEqual(MAX_PRIOR_CHARS);
+    // Newest turn intact: its answer is short enough to fit its own budget outright.
+    expect(out.split('\n')[1]).toContain('r'.repeat(158));
+    // The older turn absorbs the shortfall instead.
+    expect(out.split('\n')[0]).toMatch(/\u2026$/);
   });
 
   test('buildRequestText first turn is Stable + Question only', () => {
