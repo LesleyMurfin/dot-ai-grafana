@@ -22,13 +22,15 @@
 # The gate registry is read from `ci-local.sh --dump-registry`, so there is one
 # source of truth for gates and one for CI steps, and this file owns neither.
 #
-# ci.yml is parsed by python3 + PyYAML — a real YAML reader, so `run: |` block
+# ci.yml is parsed by yq-go (mikefarah/yq) — a real YAML reader, so `run: |` block
 # scalars, quoting and indentation are handled by the parser rather than by
-# regex. Inside a run block, backslash continuations are joined, comments and
-# blank lines dropped, whitespace squeezed; each remaining line is one step
-# command. `uses:` steps are emitted as `uses:<action-without-ref> args=<with.args>`
-# because ci.yml runs several real gates (golangci-lint, mage) through actions
-# rather than through `run:`.
+# regex. It is one static binary, pinned in devbox.json like every other tool
+# here, so the guard needs no interpreter and no language-level package. Inside a
+# run block, backslash continuations are joined, comments and blank lines
+# dropped, whitespace squeezed; each remaining line is one step command. `uses:`
+# steps are emitted as `uses:<action-without-ref> args=<with.args>` because
+# ci.yml runs several real gates (golangci-lint, mage) through actions rather
+# than through `run:`.
 #
 # Usage: ci-drift-check.sh [--workflow <path>]
 #   --workflow points the guard at an alternative ci.yml; this is how the
@@ -43,13 +45,34 @@ while (($#)); do
   case "$1" in
     --workflow) WORKFLOW="${2:-}"; shift ;;
     --workflow=*) WORKFLOW="${1#*=}" ;;
-    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,37p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) printf 'ci-drift-check: unknown argument %s\n' "$1" >&2; exit 64 ;;
   esac
   shift
 done
 
 [[ -f $WORKFLOW ]] || { printf 'ci-drift-check: workflow not found: %s\n' "$WORKFLOW" >&2; exit 1; }
+
+# The parser is a hard prerequisite, never a skip: if the YAML reader is missing
+# the registry was not checked, and "not checked" must never exit 0. Two names
+# share the `yq` binary — yq-go (mikefarah/yq, a YAML processor) and python-yq
+# (a jq wrapper) — with incompatible expression languages, so identify the one
+# on PATH rather than trusting the name.
+if ! command -v yq >/dev/null 2>&1; then
+  printf 'ci-drift-check: needs yq-go (mikefarah/yq) to read %s, and yq is not on PATH.\n' "${WORKFLOW#"$ROOT"/}" >&2
+  printf 'ci-drift-check: install it - devbox.json declares yq-go - or see https://github.com/mikefarah/yq\n' >&2
+  printf 'ci-drift-check: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
+  exit 1
+fi
+YQ_VERSION="$(yq --version 2>&1 | tr '\n' ' ')"
+case "$YQ_VERSION" in
+  *mikefarah/yq*) ;;
+  *)
+    printf 'ci-drift-check: the yq on PATH is not yq-go: %s\n' "$YQ_VERSION" >&2
+    printf 'ci-drift-check: python-yq shares the binary name but not the expression language; install yq-go (mikefarah/yq).\n' >&2
+    printf 'ci-drift-check: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
+    exit 1 ;;
+esac
 
 # ALLOWLIST — CI steps that legitimately have no local equivalent.
 # `pattern~reason`. Every entry carries its reason; if a step needs a reason you
@@ -94,36 +117,39 @@ STEPS_FILE="$(mktemp)"
 REG_FILE="$(mktemp)"
 trap 'rm -f "$STEPS_FILE" "$REG_FILE"' EXIT
 
-python3 - "$WORKFLOW" >"$STEPS_FILE" <<'PY'
-import sys
+# One tab-separated row per CI step command: job id, step name, kind, command.
+# Each step contributes to exactly one of the two arrays below (a step with both
+# `run` and `uses` counts as a `run` step, as GitHub Actions itself would), and
+# the arrays are concatenated so rows stay in ci.yml document order.
+STEP_QUERY=$(cat <<'YQ'
+(.jobs // {}) | to_entries[] | .key as $job
+| (.value.steps // [])[]
+| (.name // .uses // "(unnamed)") as $name
+| (.run // "") as $run
+| (.uses // "") as $uses
+| (.with.args // "") as $args
+| (
+    [$run]
+    | map(select(. != ""))
+    | map(split("\\\n") | join(" ") | split("\n"))
+    | flatten
+    | map(sub("\s+"; " ") | sub("^ "; "") | sub(" $"; ""))
+    | map(select(. != "" and (test("^#") | not)))
+    | map([$job, $name, "run", .] | join("\t"))
+  )
+  +
+  (
+    [$uses]
+    | map(select(. != "" and $run == ""))
+    | map(split("@") | .[0])
+    | map("uses:" + . + ([$args] | map(select(. != "") | " args=" + (sub("\s+"; " ") | sub("^ "; "") | sub(" $"; ""))) | join("")))
+    | map([$job, $name, "uses", .] | join("\t"))
+  )
+| .[]
+YQ
+)
 
-import yaml
-
-with open(sys.argv[1], encoding="utf-8") as fh:
-    doc = yaml.safe_load(fh)
-
-rows = []
-for job_id, job in (doc.get("jobs") or {}).items():
-    for step in (job or {}).get("steps") or []:
-        name = step.get("name") or step.get("uses") or "(unnamed)"
-        if "run" in step:
-            body = str(step["run"]).replace("\\\n", " ")
-            for line in body.splitlines():
-                line = " ".join(line.split())
-                if not line or line.startswith("#"):
-                    continue
-                rows.append((job_id, name, "run", line))
-        elif "uses" in step:
-            action = str(step["uses"]).split("@")[0]
-            args = ((step.get("with") or {}).get("args"))
-            cmd = "uses:" + action
-            if args:
-                cmd += " args=" + " ".join(str(args).split())
-            rows.append((job_id, name, "uses", cmd))
-
-for row in rows:
-    print("\t".join(row))
-PY
+yq -r "$STEP_QUERY" "$WORKFLOW" >"$STEPS_FILE"
 
 bash "$SELF/ci-local.sh" --dump-registry >"$REG_FILE"
 
