@@ -19,9 +19,12 @@ import { testIds } from './testIds';
  *
  * WHAT THIS PIPELINE GUARANTEES
  *
- * 1. No raw HTML from the answer is ever emitted as markup. HTML tokens are re-escaped and
- *    rendered as visible text, so a log line that legitimately contains `<div>` shows up
- *    verbatim instead of becoming a node.
+ * 1. No raw HTML from the answer is ever emitted as markup. HTML tokens are re-escaped, so a
+ *    log line that legitimately contains `<div>` shows its tags as visible text instead of
+ *    becoming a node. Note the exact scope: the *tags* are neutralised, not the whole line.
+ *    Text between them is still markdown, so `*em*` inside a quoted fragment becomes `<em>`
+ *    and a bare URL inside it becomes a link (see NOT GUARANTEED below). Nothing there can
+ *    fetch or execute; it is a fidelity limit, not a hole.
  * 2. No element that can fetch a remote resource is ever emitted — not `img`, `iframe`,
  *    `video`, `audio`, `object`, `embed`, `svg`, `source`, `track`, `link`. They are not
  *    URL-checked; they are never produced. Markdown image syntax renders its alt text.
@@ -29,6 +32,23 @@ import { testIds } from './testIds';
  *    absolute `https:` or a same-origin Grafana path, with `rel="noopener noreferrer"`.
  * 4. Nothing in the render path fetches a URL the model chose. Only a user click navigates.
  * 5. If any stage throws, the answer renders as escaped plain text — never as raw HTML.
+ *
+ * WHAT THIS PIPELINE DOES *NOT* GUARANTEE
+ *
+ * The answer can still contain a link the operator may click, and its text is
+ * attacker-influenceable. GFM url autolinking is on, so a bare `https://` URL anywhere in the
+ * answer — including inside a fragment whose surrounding tags were escaped by (1) — becomes an
+ * anchor. That is deliberate: a model-surfaced runbook link is the feature, and suppressing
+ * autolinking would not close the surface anyway, since `[click here](https://…)` is equally
+ * available to anyone who can write the text.
+ *
+ * So this is a **phishing and confused-deputy** surface, not an exfiltration one, and it is the
+ * residual risk this component accepts rather than eliminates. What bounds it: nothing is
+ * fetched without a click, `http:` is refused so a click cannot be downgraded, every anchor
+ * carries `rel="noopener noreferrer"`, and external ones are visibly marked (`↗`) and titled
+ * with their destination so the operator sees where a click leads. What is NOT bounded: a
+ * same-origin path is permitted, so a click can still reach an internal Grafana URL of the
+ * model's choosing (PRD impact class I9). Treat the answer's links as untrusted suggestions.
  *
  * WHY GRAFANA'S OWN `renderMarkdown` IS NOT USED HERE
  *
@@ -163,6 +183,23 @@ const answerMarked = new Marked({
       const safe = safeHref(href);
       return safe ? anchor(safe, text) : text;
     },
+    // GFM task lists. marked's default emits `<input type=checkbox disabled>`, which the
+    // allowlist below drops as a fetch-capable element family — and dropping it silently
+    // erases the state, so `- [x] verified` and `- [ ] verified` rendered identically. That
+    // loses model output the operator cannot recover, so render the state as a glyph instead
+    // of admitting `input`: the allowlist stays tight and there is no element to check.
+    //
+    // A glyph is also the only option that behaves the same in tight and loose lists. For a
+    // loose list marked splices this return value into the item's *token text*
+    // (`Parser.parse`, the `item.task` branch), where markup would be re-escaped to visible
+    // text; a text glyph renders identically down both paths.
+    //
+    // Trade-off, recorded because it is a real one: a native disabled checkbox announces
+    // better to a screen reader than U+2611/U+2610, which read as their character names.
+    // Preserving the distinction visibly beats losing it, so this is the lesser cost.
+    checkbox(checked: boolean) {
+      return checked ? '\u2611' : '\u2610';
+    },
   },
 });
 
@@ -200,9 +237,21 @@ const ALLOWED_ATTRS: Readonly<Record<string, readonly string[] | undefined>> = {
 };
 
 /**
- * Cosmetic, NOT the security boundary: a disallowed tag is always removed either way.
- * This table only decides whether its text children are kept. Text inside these tags is
- * markup/binary/control content that would be noise if surfaced, so the subtree goes.
+ * Mostly cosmetic: a disallowed tag is always removed either way, and this table only decides
+ * whether its text children are kept. Text inside these tags is markup/binary/control content
+ * that would be noise if surfaced, so the subtree goes.
+ *
+ * Two entries are NOT cosmetic and must stay, because for them `unwrap` would not be
+ * equivalent to `remove`:
+ *
+ * - `template` — its children live in `.content`, a DocumentFragment invisible to
+ *   `el.children` and to `unwrap`'s `firstChild` walk, but still emitted by `innerHTML`
+ *   serialization. Unwrapping it would drop the element and keep its payload.
+ * - `svg` / `math` — foreign-namespace subtrees, where HTML serialize/re-parse is not
+ *   round-trip safe. Removing them is what keeps `sanitizeAnswerHtml` mXSS-safe: after this
+ *   pass no surviving element parses its content as raw text, so re-parsing the serialized
+ *   output cannot resurrect markup. Adding a raw-text element (`style`, `textarea`, `title`,
+ *   `xmp`, `noembed`) to ALLOWED_ATTRS would break that invariant.
  */
 const DROP_SUBTREE: Readonly<Record<string, true>> = {
   script: true,

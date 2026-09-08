@@ -74,13 +74,17 @@ function assertInert(root: HTMLElement) {
     }
   }
 
-  // 4. every surviving anchor is scheme-allowlisted and safe to open
+  // 4. every surviving anchor is scheme-allowlisted and safe to open. `rel` is asserted
+  //    unconditionally: it is set on internal links too, so there is no target="_blank"
+  //    special case to make.
   for (const link of Array.from(root.querySelectorAll('a'))) {
     const href = link.getAttribute('href') ?? '';
     expect(href).toMatch(/^(?:https:\/\/|\/(?![/\\]))/);
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    // An external link must be marked as such, so a click is never a surprise.
     if (link.getAttribute('target') === '_blank') {
-      expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+      expect(link.getAttribute('title')).toMatch(/^External link/);
+      expect(link.textContent).toContain(EXTERNAL_LINK_MARKER.trim());
     }
   }
 
@@ -192,14 +196,174 @@ describe('ResponseMarkdown — legitimate GFM still renders', () => {
     expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
     assertInert(root);
   });
+
+  /**
+   * A task list is the one GFM construct where dropping the disallowed element silently
+   * changes MEANING rather than presentation: `<input type=checkbox>` is in DROP_SUBTREE, so
+   * before the `checkbox()` renderer override both rows below rendered as a bare `<li>` and
+   * "done" was indistinguishable from "not done". For an answer listing checks performed vs
+   * checks pending, that is model output the operator cannot recover.
+   */
+  test('task-list state survives — checked and unchecked render differently', () => {
+    const root = renderAnswer('- [x] restart verified\n- [ ] rollback verified');
+
+    const items = Array.from(root.querySelectorAll('li')).map((li) => li.textContent ?? '');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toContain('restart verified');
+    expect(items[1]).toContain('rollback verified');
+    // The whole point: the two states are not the same string.
+    expect(items[0].replace('restart', '')).not.toBe(items[1].replace('rollback', ''));
+    expect(items[0]).toContain('\u2611');
+    expect(items[1]).toContain('\u2610');
+    // Still no element admitted to carry it.
+    expect(root.querySelectorAll('input')).toHaveLength(0);
+    assertInert(root);
+  });
+
+  test('task-list state survives in a loose list too', () => {
+    // marked splices the checkbox into the item's token TEXT for loose lists rather than
+    // concatenating rendered HTML, so this path is genuinely different from the tight one.
+    const root = renderAnswer('- [x] restart verified\n\n- [ ] rollback verified');
+    const text = root.textContent ?? '';
+    expect(text).toContain('\u2611');
+    expect(text).toContain('\u2610');
+    expect(root.querySelectorAll('input')).toHaveLength(0);
+    assertInert(root);
+  });
 });
 
+/**
+ * GFM url autolinking is ON, so a bare `https://` URL in the answer becomes a clickable
+ * anchor — including inside a fragment whose surrounding tags were escaped as text. That is
+ * accepted by design and documented under "WHAT THIS PIPELINE DOES *NOT* GUARANTEE" in
+ * ResponseMarkdown.tsx; `main` before this component rendered `<pre>`, where nothing was
+ * clickable at all, so it is new surface and deserves to be a pinned decision rather than an
+ * emergent one.
+ *
+ * These tests exist so that changing it in EITHER direction is a deliberate act: switching
+ * autolinking off, or letting a second link form through, both fail here.
+ */
+describe('ResponseMarkdown — autolinked telemetry URLs are a decision, not an accident', () => {
+  test('a bare https URL in a log line becomes a marked, rel-hardened external link', () => {
+    const root = renderAnswer('level=warn msg="upstream" url="https://evil.example/pay?token=abc"');
+
+    const links = Array.from(root.querySelectorAll('a'));
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute('href')).toBe('https://evil.example/pay?token=abc');
+    expect(links[0].getAttribute('rel')).toBe('noopener noreferrer');
+    expect(links[0].getAttribute('target')).toBe('_blank');
+    // The operator can see it leaves Grafana, and where to, without hovering.
+    expect(links[0].textContent).toContain(EXTERNAL_LINK_MARKER.trim());
+    expect(links[0].getAttribute('title')).toContain('https://evil.example/pay?token=abc');
+    assertInert(root);
+  });
+
+  test('an http:// URL is NOT autolinked, so a click cannot be downgraded', () => {
+    const root = renderAnswer('level=warn msg="upstream" url="http://evil.example/pay"');
+    expect(root.querySelectorAll('a')).toHaveLength(0);
+    expect(root.textContent).toContain('http://evil.example/pay');
+    assertInert(root);
+  });
+
+  test('a www. URL is NOT autolinked either — it would resolve as http:', () => {
+    const root = renderAnswer('log: see www.evil.example/reset now');
+    expect(root.querySelectorAll('a')).toHaveLength(0);
+    expect(root.textContent).toContain('www.evil.example/reset');
+    assertInert(root);
+  });
+
+  test('a URL inside escaped raw HTML still autolinks — the tags are inert, the text is not', () => {
+    // The fidelity limit called out in guarantee (1): tags are neutralised, the text between
+    // them is still markdown. Asserted rather than left as a surprise.
+    const root = renderAnswer('log: <div>https://evil.example/x *em*</div> tail');
+
+    expect(root.querySelectorAll('div div')).toHaveLength(0);
+    expect(root.textContent).toContain('<div>');
+    expect(root.textContent).toContain('</div>');
+    expect(root.querySelectorAll('a')).toHaveLength(1);
+    expect(root.querySelector('em')?.textContent).toBe('em');
+    assertInert(root);
+  });
+
+  test('a URL inside inline code or a fence is left alone', () => {
+    const inline = renderAnswer('log: `https://evil.example/x`');
+    expect(inline.querySelectorAll('a')).toHaveLength(0);
+    expect(inline.querySelector('code')?.textContent).toBe('https://evil.example/x');
+    assertInert(inline);
+
+    const fenced = renderAnswer('```\nhttps://evil.example/x\n```');
+    expect(fenced.querySelectorAll('a')).toHaveLength(0);
+    expect(fenced.querySelector('pre code')?.textContent).toContain('https://evil.example/x');
+    assertInert(fenced);
+  });
+});
+
+/**
+ * The positive half of each case's contract, measured against the real component.
+ *
+ * `assertInert` alone is negative-only: it would pass just as happily if the answer rendered
+ * as an empty div, so on its own it cannot tell "the payload was neutralised" apart from
+ * "the answer was swallowed". Every case below therefore also declares the text that MUST
+ * still be visible, and the exact number of anchors it may produce.
+ *
+ * `anchors` is the interesting column. 17 of 20 cases must yield **zero** — that is what
+ * "demoted to plain text" means, and it is the claim the fixtures' own `mustNotRender` prose
+ * makes. The three non-zero entries are GFM url autolinking of a bare `https://` URL in the
+ * answer text, which this component accepts by design (see "WHAT THIS PIPELINE DOES *NOT*
+ * GUARANTEE" in ResponseMarkdown.tsx). They are pinned so that behaviour stays a decision:
+ * a change in either direction — a new anchor appearing, or one of these disappearing — is a
+ * test failure to think about, not a silent drift.
+ */
+const CORPUS_CONTRACT: Readonly<Record<string, { text: readonly string[]; anchors: number }>> = {
+  // Raw HTML re-escaped: the tags must be READABLE as text, which is how an operator sees
+  // that the log line contained them.
+  'remote-image-embed': { text: ['<img src=', 'example.invalid/b.png'], anchors: 0 },
+  'protocol-relative-src': { text: ['pixel', 'runbook', "<img src='//example.invalid"], anchors: 0 },
+  'iframe-embed': { text: ['Pod restarting', '<iframe src='], anchors: 0 },
+  'media-embed': { text: ['<video src=', '<audio src='], anchors: 0 },
+  'target-blank-no-rel': { text: ['see runbook', '<a href='], anchors: 0 },
+  'instruction-override': { text: ['Ignore previous instructions', 'default-deny NetworkPolicy'], anchors: 0 },
+  'context-stuffing': { text: ['ERROR connection reset by peer retrying'], anchors: 0 },
+  'accidental-html-in-stacktrace': { text: ['TemplateRenderError', '<div onclick='], anchors: 1 },
+  'style-url-fetch': { text: ['ok', 'background-image:url('], anchors: 0 },
+  // Markdown image syntax keeps its alt text and discards the URL; the trailing autolink is
+  // the one anchor.
+  'markdown-image-autolink': { text: ['status'], anchors: 1 },
+  // Obfuscated schemes: the link text survives, the anchor does not.
+  'obfuscated-scheme-mixed-case': { text: ['click here'], anchors: 0 },
+  'obfuscated-scheme-embedded-tab': { text: ['[click here](java'], anchors: 0 },
+  'obfuscated-scheme-html-entity': { text: ['Escalate now details'], anchors: 0 },
+  'obfuscated-scheme-percent-encoded': { text: ['details'], anchors: 0 },
+  // The NUL is stripped, so the scheme becomes literally readable — and still inert.
+  'obfuscated-scheme-nul-embedded': { text: ['[details](javascript:alert(1))'], anchors: 0 },
+  'vbscript-link': { text: ['open'], anchors: 0 },
+  'data-svg-payload': { text: ['preview', 'download'], anchors: 0 },
+  'reference-style-link-javascript': { text: ['see details for context'], anchors: 0 },
+  'raw-html-object-embed-base-meta-form': { text: ['<object data=', '<embed src=', '<base href=', '<meta http-equiv=', '<form action=', '<input type='], anchors: 0 },
+  'style-element-payload': { text: ['<style>body{background:url('], anchors: 1 },
+};
+
 describe('ResponseMarkdown — adversarial telemetry corpus', () => {
+  test('every fixture declares its positive contract', () => {
+    // Guards the gap an optional field would leave open: a case added to the corpus without
+    // an entry here fails, rather than silently getting no text assertion.
+    expect(Object.keys(CORPUS_CONTRACT).sort()).toEqual(
+      ADVERSARIAL_TELEMETRY_CASES.map((c) => c.id).sort()
+    );
+  });
+
   test.each(ADVERSARIAL_TELEMETRY_CASES.map((c) => [c.id, c] as const))(
-    'renders %s inert',
-    (_id, testCase) => {
+    'renders %s inert, without swallowing the evidence',
+    (id, testCase) => {
       const root = renderAnswer(testCase.content);
       assertInert(root);
+
+      const contract = CORPUS_CONTRACT[id];
+      const text = root.textContent ?? '';
+      for (const fragment of contract.text) {
+        expect(text).toContain(fragment);
+      }
+      expect(root.querySelectorAll('a')).toHaveLength(contract.anchors);
     }
   );
 
@@ -324,12 +488,13 @@ describe('ResponseMarkdown — fail closed', () => {
 });
 
 describe('ResponseMarkdown — sanitizer idempotency (SEC-002 f)', () => {
-  test('sanitizeAnswerHtml is stable under re-application for the whole adversarial corpus', () => {
+  test('renderAnswerHtml output is already a fixed point of the sanitizer', () => {
+    // Stronger than comparing pass 2 to pass 3: `renderAnswerHtml` ends in
+    // `sanitizeAnswerHtml`, so its output must survive re-application UNCHANGED. If a
+    // serializer round-trip ever mutated the tree, this is where it shows up.
     for (const testCase of ADVERSARIAL_TELEMETRY_CASES) {
       const html = renderAnswerHtml(testCase.content) ?? '';
-      const once = sanitizeAnswerHtml(html);
-      const twice = sanitizeAnswerHtml(once);
-      expect(twice).toBe(once);
+      expect(sanitizeAnswerHtml(html)).toBe(html);
     }
   });
 
