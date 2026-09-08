@@ -14,14 +14,12 @@
     "golangci-lint@2.13.1",
     "python@3.12.14",
     "python312Packages.towncrier@24.8.0",
-    "python312Packages.pyyaml@6.0.3",
     "yq-go@4.53.3"
   ],
   "shell": {
     "init_hook": [
       "export PATH=\"$HOME/.local/bin:$PATH\"",
       "export PATH=\"$PWD/node_modules/.bin:$PATH\"",
-      "export PYTHONPATH=\"${DEVBOX_PACKAGES_DIR:-$PWD/.devbox/nix/profile/default}/lib/python3.12/site-packages${PYTHONPATH:+:$PYTHONPATH}\"",
       "[ -f .env ] && source .env || true"
     ],
     "scripts": {

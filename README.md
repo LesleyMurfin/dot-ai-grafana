@@ -104,8 +104,8 @@ test suite — see the comment in that file before changing it.
 
 The toolchain is declared in [`devbox.json`](devbox.json): [devbox](https://www.jetify.com/devbox)
 pins the same tools CI uses — Node, Go, mage, `golangci-lint`, towncrier, `zip`,
-`shellcheck`, and Python with PyYAML — so none of them have to be installed on
-the host.
+`shellcheck`, `yq`, and Python — so none of them have to be installed on the
+host.
 
 ```bash
 devbox shell     # pinned toolchain
