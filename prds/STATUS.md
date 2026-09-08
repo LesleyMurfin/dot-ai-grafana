@@ -3,7 +3,7 @@
 Checkbox tracker (closed 2026-09-03): https://github.com/LesleyMurfin/dot-ai-grafana/issues/24
 
 ```
-PRD #1  v1 0.1.0   vfarcic#3 @ 179a7df   analysis-only pack
+PRD #1  v1 0.1.0   vfarcic#3 @ ac627d4   analysis-only pack
 PRD #2  GitOps     issue #13 / PR #18
 PRD #3  M7 0.2.x   issue #23 / PR #22
 PRD #4  Evidence-grounded change safety   issue #31 / PR #33
@@ -71,3 +71,7 @@ work on these workstreams lives upstream, not in this fork:
 - Image rendering (grafana/grafana-image-renderer) evaluated 2026-09-05 and **not adopted** — the
   plugin needs no server-side rendering. The full evaluation record is held privately in the
   `revive_labs` repo at `dot-ai-grafana/design/image-rendering-evaluation.md`.
+
+## Notes on prds/2 and prds/3 files
+
+Both `prds/2-gitops-pr-remediate.md` and `prds/3-m7-grafana-map.md` were created on fork feature branches (`origin/feat/prd2-gitops-execute`, `origin/feat/prd3-m7-grafana-map`; PRs #18, #22) that remain closed and unmerged. They do not live on this branch (main or the current rebase branch). Decision: defer rehoming these specs upstream under vfarcic#5 / vfarcic#6 until the fork feature branches are formally closed or merged upstream.
