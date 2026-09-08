@@ -464,7 +464,7 @@ Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic
 
 ### Architecture
 
-- **Grafana App Plugin** with a custom page (React + TypeScript) — plugin id `lesleymurfin-dotai-app`
+- **Grafana App Plugin** with a custom page (React + TypeScript) — plugin id `devopstoolkit-dotai-app`
 - **This cluster + this stack + dot-ai:** one Ask fuses K3s intelligence (via dot-ai) with live reads from Grafana’s already-wired Loki, Prometheus, Tempo, and Alertmanager datasources
 - **Grafana stack → Current → dot-ai:** plugin gathers stack signals through `getDataSourceSrv` / `ds.query` / `getBackendSrv`, packs them into the client-side **Current** block, then POSTs query/remediate to dot-ai with that block in plain `intent` / `issue`
 - **Backend plugin component** (Go) proxies those POSTs to the dot-ai MCP server with authentication
@@ -950,6 +950,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | 2026-09-01 | **Public-surface strip:** CI forbids internal host/marker/secret leakage on public docs and shipped surfaces | `scripts/public-surface-check.sh` + `.github/workflows/ci.yml` job `public-surface` (`6e08d39`) |
 | 2026-09-01 | **SDK httpclient** for backend outbound HTTP (`grafana-plugin-sdk-go/backend/httpclient`); probe 15s / tools 120s; DefaultMiddlewares + DefaultTimeoutOptions | `pkg/plugin/app.go` `newPluginHTTPClient`; replaces ad-hoc `http.Client` construction |
 | 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | `scripts/golden-ask-results.json`; evidence for v1 Ask path; execute stays PRD #2 |
+| 2026-09-08 | **Supersedes the 2026-09-01 plugin id / code home row:** plugin id is `devopstoolkit-dotai-app`; code home is upstream `vfarcic/dot-ai-grafana`, not the LesleyMurfin fork | `src/plugin.json` id is `devopstoolkit-dotai-app`; the unsigned allow-list value in README.md and `docs/index.md` uses that same id; this branch was rebased off fork main onto upstream, retiring the fork-home decision |
 
 
 
@@ -1038,3 +1039,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 - **Issue**: M7 extras and GitOps execute had fork PRs but PRD #1 did not point at them, so the split was invisible on vfarcic#3.
 - **Action**: Deferred / M7 / as-built rows now name [PRD #2](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) and [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Related-PRDs table. No Map/Explore/show-me content added here.
 
+### 2026-09-08 — plugin id reconciled to upstream
+
+- **Issue**: The Architecture bullet still stated the fork-era plugin id, while `src/plugin.json`, README.md, and `docs/index.md` all say `devopstoolkit-dotai-app` — the fork id did not survive the rebase off fork main onto upstream `vfarcic/dot-ai-grafana`.
+- **Action**: Corrected that Architecture bullet to `devopstoolkit-dotai-app` and appended a 2026-09-08 Decisions row superseding the 2026-09-01 plugin id / fork-home decision. The dated 2026-09-01 row is left verbatim as history; no code, README, or docs changes.
