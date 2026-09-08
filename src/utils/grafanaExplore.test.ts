@@ -22,8 +22,18 @@ describe('isShowMeOnly', () => {
     expect(isShowMeOnly('SHOW ME LOGS.')).toBe(true);
   });
 
-  test('clause: complete phrase only — show me dashboards', () => {
-    expect(isShowMeOnly('show me dashboards')).toBe(true);
+  test('clause: complete phrase only — show me metrics', () => {
+    expect(isShowMeOnly('show me metrics')).toBe(true);
+  });
+
+  // #66: the 0-hop path can only answer with buildDrilldownLinks output, which
+  // has no alerts link and no engine-independent dashboard uids, so these two
+  // nouns must take the POST path instead of skipping to an unrelated answer.
+  test('unservable nouns do not skip the engine — alerts / dashboards', () => {
+    expect(isShowMeOnly('show me the alerts')).toBe(false);
+    expect(isShowMeOnly('display alerts')).toBe(false);
+    expect(isShowMeOnly('open the dashboards')).toBe(false);
+    expect(isShowMeOnly('show me dashboards')).toBe(false);
   });
 
   test('clause: complete phrase verbs — open the traces / display the metrics', () => {
@@ -54,7 +64,7 @@ describe('isShowMeOnly', () => {
   test('pure navigation phrases still match', () => {
     expect(isShowMeOnly('show me the logs')).toBe(true);
     expect(isShowMeOnly('open traces')).toBe(true);
-    expect(isShowMeOnly('display alerts')).toBe(true);
+    expect(isShowMeOnly('display metrics')).toBe(true);
   });
 
   // Former widened-form cases (`for …`) previously expected true; contract rejects them.
@@ -114,12 +124,12 @@ describe('isShowMeOnly', () => {
       const accepted: string[] = [];
       for (const verb of ['show me', 'open', 'display']) {
         for (const article of ['', ' the']) {
-          for (const noun of ['logs', 'alerts', 'traces', 'metrics', 'dashboards']) {
+          for (const noun of ['logs', 'traces', 'metrics']) {
             accepted.push(`${verb}${article} ${noun}`);
           }
         }
       }
-      expect(accepted).toHaveLength(30);
+      expect(accepted).toHaveLength(18);
       for (const phrase of accepted) {
         expect(isShowMeOnly(phrase)).toBe(true);
         expect(DIAGNOSIS_TOKENS.test(phrase)).toBe(false);
@@ -135,8 +145,8 @@ describe('isShowMeOnly', () => {
 
   test('clause: strip surrounding ? and ! — "show me the logs?" / "open alerts!"', () => {
     expect(isShowMeOnly('show me the logs?')).toBe(true);
-    expect(isShowMeOnly('open alerts!')).toBe(true);
-    expect(isShowMeOnly('Display The Dashboards?!')).toBe(true);
+    expect(isShowMeOnly('open traces!')).toBe(true);
+    expect(isShowMeOnly('Display The Metrics?!')).toBe(true);
     // Interior punctuation is not stripped, so this is not the complete phrase.
     expect(isShowMeOnly('show me the logs? and metrics')).toBe(false);
   });
@@ -268,6 +278,36 @@ describe('buildDrilldownLinks', () => {
     expect(labels).toContain('Trace abcdef12');
     expect(labels).toContain('Dashboard dashuid1');
     expect(links.find((l) => l.id === 'dash-dashuid1')?.href).toBe('/d/dashuid1');
+  });
+
+  test('trace labels stay distinct when ids share an 8-char prefix', () => {
+    const links = buildDrilldownLinks({
+      tempoUid: 'tempo-1',
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: ['abc123450000', 'abc123459999'],
+      dashboardUids: [],
+    });
+    const labels = links.filter((l) => l.id.startsWith('trace-')).map((l) => l.label);
+    expect(labels).toEqual(['Trace abc123450000', 'Trace abc123459999']);
+  });
+
+  test('duplicate identical trace ids produce exactly one link', () => {
+    // Link `id` becomes a React key in the Map panel, so a repeated trace id in
+    // the Tempo evidence must not yield two links sharing one key.
+    const links = buildDrilldownLinks({
+      tempoUid: 'tempo-1',
+      logql: '',
+      promql: '',
+      tempoSearch: '',
+      traceIds: ['abc123450000', 'abc123450000', 'abc123450000'],
+      dashboardUids: [],
+    });
+    const traceLinks = links.filter((l) => l.id.startsWith('trace-'));
+    expect(traceLinks).toHaveLength(1);
+    expect(traceLinks[0].id).toBe('trace-abc123450000');
+    expect(new Set(links.map((l) => l.id)).size).toBe(links.length);
   });
 
   test('Tempo search term survives as traceqlSearch filters, not as `query`', () => {
