@@ -66,9 +66,13 @@ registry cannot drift from `ci.yml`.** It does *not* prove that a gate's impleme
 same command as the step it claims. `ci-match` ties a gate to the *existence* of a CI step, not to
 the gate's behaviour — keeping `gate_lint` actually running the lint is code review's job.
 
-`drift` cannot be skipped. It declares no requirement and never reports a skip, so a missing
-`python3`/PyYAML is a hard **failure**: `--allow-skip` can never turn "the registry was never
-checked" into a green run.
+`ci.yml` is read with [yq-go](https://github.com/mikefarah/yq) — a real YAML parser, not a regex
+pass over the file, so `run: |` block scalars, quoting and indentation are the parser's problem.
+It is one static binary, pinned in `devbox.json` like every other tool here.
+
+`drift` cannot be skipped. It declares no requirement and never reports a skip, so a missing (or
+wrong-flavour, i.e. python-yq) `yq` is a hard **failure**: `--allow-skip` can never turn "the
+registry was never checked" into a green run.
 
 ## Exit codes
 

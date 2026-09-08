@@ -178,17 +178,22 @@ gate_sign() { require_tool npm && npm run sign; }
 # into exit 0 — exactly the silent drift this script exists to prevent. So it
 # declares requirement `none` and treats a missing YAML reader as a FAILURE.
 gate_drift() {
-  if ! command -v python3 >/dev/null 2>&1; then
-    printf 'ci-local: drift guard needs python3 and it is not on PATH.\n' >&2
+  if ! command -v yq >/dev/null 2>&1; then
+    printf 'ci-local: drift guard needs yq-go (mikefarah/yq) and it is not on PATH.\n' >&2
+    printf 'ci-local: install it - devbox.json declares yq-go - or see https://github.com/mikefarah/yq\n' >&2
     printf 'ci-local: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
     return 1
   fi
-  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
-    printf 'ci-local: drift guard needs PyYAML (python3 -c "import yaml" failed).\n' >&2
-    printf 'ci-local: install it - devbox.json declares it, or: pip install pyyaml\n' >&2
-    printf 'ci-local: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
-    return 1
-  fi
+  local yq_version
+  yq_version="$(yq --version 2>&1 | tr '\n' ' ')"
+  case "$yq_version" in
+    *mikefarah/yq*) ;;
+    *)
+      printf 'ci-local: the yq on PATH is not yq-go: %s\n' "$yq_version" >&2
+      printf 'ci-local: python-yq shares the binary name but not the expression language; install yq-go.\n' >&2
+      printf 'ci-local: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
+      return 1 ;;
+  esac
   bash scripts/ci-drift-check.sh
 }
 
