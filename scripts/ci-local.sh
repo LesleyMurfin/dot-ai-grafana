@@ -1,18 +1,29 @@
 #!/usr/bin/env bash
-# ci-local.sh — run the CI gate suite from .github/workflows/ci.yml on this machine.
+# ci-local.sh — run the cheap .github/workflows/ci.yml gates on this machine.
 #
-# .github/workflows/ci.yml stays the source of truth. This script is a mirror of
-# it, and the `drift` gate (scripts/ci-drift-check.sh) fails the moment the two
-# diverge in either direction, so "green locally" keeps meaning "green upstream".
+# .github/workflows/ci.yml stays the source of truth. This script mirrors the
+# cheap gates from it, and the `drift` gate (scripts/ci-drift-check.sh) fails the
+# moment the gate REGISTRY below and ci.yml's step list disagree in either
+# direction. See docs/ci-local.md for what that guarantee does and does not cover
+# (in particular: it ties a gate to a CI step's existence, not to the gate
+# running the same command).
+#
+# Scope: the cheap gates only. Packaging, the plugin-validator container and the
+# Playwright e2e stack are deliberately NOT mirrored here — they need Docker and
+# runner-provisioned artifacts, and their ci.yml steps are allowlisted with a
+# reason in scripts/ci-drift-check.sh.
 #
 # Exit codes (the contract — do not soften it):
 #   0   every selected gate PASSED
 #   1   at least one gate FAILED
 #   2   nothing failed, but at least one gate was SKIPPED (unmet requirement)
 #   64  bad usage
-# A SKIP is never a pass: gates that cannot run here (no Docker daemon, no
-# signing token) exit 2 so a partial run can never be mistaken for a full one.
-# --allow-skip collapses 2 -> 0 when you knowingly accept the skips.
+# A SKIP is never a pass: a gate that cannot run here (no signing token, no
+# towncrier config) exits 2 so a partial run can never be mistaken for a full one.
+# --allow-skip collapses 2 -> 0 when you knowingly accept the skips. The `drift`
+# gate is deliberately exempt from that mechanism: it declares no requirement and
+# never calls skip_gate, so a missing YAML reader is a FAILURE, never a skip that
+# --allow-skip could launder into an exit 0.
 #
 # GATE REGISTRY --------------------------------------------------------------
 # One declarative record per gate, `~`-separated (never use `~` inside a field).
@@ -21,47 +32,50 @@
 #
 #   id ~ human name ~ requirement ~ ci-match ~ implementation function
 #
-#   requirement  none | docker | token | towncrier | pyyaml
+#   requirement  none | token | towncrier
 #                An unmet requirement is a loud SKIP with a concrete reason.
 #   ci-match     ERE matched against the step commands extracted from ci.yml,
 #                or LOCAL_ONLY:<reason> for a gate that deliberately has no CI
-#                counterpart. Consumed by scripts/ci-drift-check.sh.
+#                counterpart. Consumed by scripts/ci-drift-check.sh. Every
+#                pattern is fully anchored (^...$) so the whole command is the
+#                contract: editing a step's arguments in ci.yml is drift, not a
+#                silent substring match.
 #
-# shellcheck disable=SC2317  # gates are invoked indirectly ("$fn"); shellcheck reads them as unreachable
-# shellcheck disable=SC2016  # the literal '$1' inside a ${2:-...} message and python3 -c 'import yaml' are deliberate
+# shellcheck disable=SC2317,SC2329  # gates run via indirect dispatch ("$fn"); shellcheck <=0.10 calls that unreachable (SC2317), >=0.11 calls it never-invoked (SC2329)
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SELF/.." && pwd)"   # repo root from the script's own location, never $PWD
-ARTIFACT_DIR="$ROOT/.ci-local"
 
+# `drift` is FIRST on purpose. It used to be last, where the default fail-fast
+# behaviour meant any earlier failure stopped the run before the drift guard ever
+# executed — the one gate you most want to have run. Everything after it is in
+# ci.yml order.
 GATES=(
+  "drift~CI drift guard~none~LOCAL_ONLY:the guard checks ci.yml itself, so it has no step inside ci.yml to mirror~gate_drift"
   "deps~Install dependencies (npm ci)~none~^npm ci$~gate_deps"
-  "typecheck~Check types~none~npm run typecheck~gate_typecheck"
-  "lint~Lint frontend~none~npm run lint~gate_lint"
-  "unit~Unit tests~none~npm run test:ci~gate_unit"
-  "build~Build frontend~none~npm run build~gate_build"
-  "go-lint~Lint backend (golangci-lint)~none~uses:golangci/golangci-lint-action~gate_go_lint"
-  "go-build~Build backend (mage buildAll)~none~uses:magefile/mage-action args=buildAll~gate_go_build"
-  "go-test~Test backend (mage test)~none~uses:magefile/mage-action args=test~gate_go_test"
-  "changelog~Validate changelog fragments~towncrier~towncrier~gate_changelog"
-  "sign~Sign plugin~token~npm run sign~gate_sign"
-  "package~Package plugin archive~none~^(mv dist|zip )~gate_package"
-  "validator~Validate plugin.json (plugin-validator-cli)~docker~plugin-validator-cli~gate_validator"
-  "e2e~Playwright end-to-end tests~docker~(docker compose|npm run e2e)~gate_e2e"
-  "drift~CI drift guard~pyyaml~LOCAL_ONLY:the guard checks ci.yml itself, so it has no step inside ci.yml to mirror~gate_drift"
+  "typecheck~Check types~none~^npm run typecheck$~gate_typecheck"
+  "lint~Lint frontend~none~^npm run lint$~gate_lint"
+  "unit~Unit tests~none~^npm run test:ci$~gate_unit"
+  "build~Build frontend~none~^npm run build$~gate_build"
+  "go-lint~Lint backend (golangci-lint)~none~^uses:golangci/golangci-lint-action args=\\./\\.\\.\\.$~gate_go_lint"
+  "go-build~Build backend (mage buildAll)~none~^uses:magefile/mage-action args=buildAll$~gate_go_build"
+  "go-test~Test backend (mage test)~none~^uses:magefile/mage-action args=test$~gate_go_test"
+  "changelog~Validate changelog fragments~towncrier~^towncrier build --draft --version 0\\.0\\.0$~gate_changelog"
+  "sign~Sign plugin~token~^npm run sign$~gate_sign"
 )
 
 # --- PATH bootstrap ---------------------------------------------------------
-# Probe for toolchains that a developer shell may not export. Candidates are
-# APPENDED, so a GHA runner (where everything is already on PATH and none of
-# these directories exist) is unaffected. Nothing is hardcoded-only.
+# Probe for toolchains that a developer shell may not export: the conventional
+# per-user and system Go locations, plus GOPATH/bin once `go` is runnable.
+# Candidates are APPENDED, so a GHA runner (where everything is already on PATH
+# and none of these directories exist) is unaffected. Anything unconventional
+# belongs in CI_LOCAL_EXTRA_PATH=/dir1:/dir2 rather than hardcoded here.
 bootstrap_path() {
   local d candidates=()
   candidates+=("${HOME:-/nonexistent}/.local/bin")
   candidates+=("${HOME:-/nonexistent}/go/bin")
   candidates+=("/usr/local/go/bin")
-  candidates+=("/data/tmp/go/bin")
   if [[ -n ${CI_LOCAL_EXTRA_PATH:-} ]]; then
     local IFS=:
     for d in $CI_LOCAL_EXTRA_PATH; do candidates+=("$d"); done
@@ -115,20 +129,12 @@ require_tool() {
 }
 
 require_file() {
-  [[ -e $1 ]] || skip_gate "${2:-required path '$1' is missing}"
+  [[ -e $1 ]] || skip_gate "${2:-required path $1 is missing}"
 }
 
 towncrier_config_present() {
   grep -q '^\[tool\.towncrier\]' "$ROOT/pyproject.toml" 2>/dev/null && return 0
   [[ -f $ROOT/towncrier.toml ]]
-}
-
-# Same identifiers CI derives via jq in its "Get plugin metadata" step.
-plugin_archive_path() {
-  local id version
-  id="$(jq -r .id "$ROOT/dist/plugin.json")"
-  version="$(jq -r .info.version "$ROOT/dist/plugin.json")"
-  printf '%s/%s-%s.zip\n' "$ARTIFACT_DIR" "$id" "$version"
 }
 
 # --- gates (CI order) -------------------------------------------------------
@@ -167,72 +173,29 @@ gate_changelog() {
 
 gate_sign() { require_tool npm && npm run sign; }
 
-gate_package() {
-  require_tool jq
-  require_tool zip
-  require_file dist/plugin.json "dist/plugin.json is missing (run the 'build' gate first)"
-  local archive stage id
-  archive="$(plugin_archive_path)"
-  id="$(jq -r .id "$ROOT/dist/plugin.json")"
-  stage="$ARTIFACT_DIR/stage"
-  rm -rf "$stage"
-  mkdir -p "$stage"
-  # CI does `mv dist ${PLUGIN_ID}`; locally we copy, so dist/ survives for the
-  # validator and e2e gates and the working tree is left as the build left it.
-  cp -r dist "$stage/$id"
-  rm -f "$archive"
-  (cd "$stage" && zip -q -r "$archive" "$id")
-  rm -rf "$stage"
-  printf 'packaged %s\n' "$archive"
-}
-
-gate_validator() {
-  local archive
-  require_tool jq
-  require_file dist/plugin.json "dist/plugin.json is missing (run the 'build' gate first)"
-  archive="$(plugin_archive_path)"
-  require_file "$archive" "archive $archive is missing (run the 'package' gate first)"
-  docker run --pull=always \
-    -v "$archive:/archive.zip" \
-    grafana/plugin-validator-cli -analyzer=metadatavalid /archive.zip
-}
-
-gate_e2e() {
-  require_tool npm
-  require_tool curl
-  require_file docker-compose.yaml "no docker-compose.yaml: the e2e stack cannot be started"
-  local rc=0 waited=0
-  docker compose pull
-  ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false docker compose up -d
-  until curl -fsS -o /dev/null http://localhost:3000/login; do
-    if (( waited >= 120 )); then
-      echo "grafana did not answer on :3000 within 120s" >&2
-      rc=1
-      break
-    fi
-    sleep 3
-    waited=$(( waited + 3 ))
-  done
-  if (( rc == 0 )); then
-    npm run e2e || rc=$?
+# The drift guard is the one gate that must never degrade into a SKIP. If it
+# could skip, `--allow-skip` would collapse "the registry was never checked"
+# into exit 0 — exactly the silent drift this script exists to prevent. So it
+# declares requirement `none` and treats a missing YAML reader as a FAILURE.
+gate_drift() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf 'ci-local: drift guard needs python3 and it is not on PATH.\n' >&2
+    printf 'ci-local: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
+    return 1
   fi
-  docker compose down || true
-  return "$rc"
+  if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    printf 'ci-local: drift guard needs PyYAML (python3 -c "import yaml" failed).\n' >&2
+    printf 'ci-local: install it - devbox.json declares it, or: pip install pyyaml\n' >&2
+    printf 'ci-local: this is a FAILURE, not a skip - an unverified registry must never pass.\n' >&2
+    return 1
+  fi
+  bash scripts/ci-drift-check.sh
 }
-
-gate_drift() { bash scripts/ci-drift-check.sh; }
 
 # --- requirements -----------------------------------------------------------
 requirement_met() { # writes the reason to $SKIP_FILE when unmet
   case "$1" in
     none) return 0 ;;
-    docker)
-      command -v docker >/dev/null 2>&1 ||
-        { printf 'docker CLI not installed\n' >"$SKIP_FILE"; return 1; }
-      # The CLI being installed proves nothing; the daemon socket is what matters.
-      docker info >/dev/null 2>&1 ||
-        { printf 'Docker daemon unreachable (`docker info` failed) - no daemon access for this user\n' >"$SKIP_FILE"; return 1; }
-      ;;
     token)
       [[ -n ${GRAFANA_ACCESS_POLICY_TOKEN:-} ]] ||
         { printf 'GRAFANA_ACCESS_POLICY_TOKEN is not set (CI runs this step only when the secret exists)\n' >"$SKIP_FILE"; return 1; }
@@ -240,10 +203,6 @@ requirement_met() { # writes the reason to $SKIP_FILE when unmet
     towncrier)
       towncrier_config_present ||
         { printf 'no towncrier config ([tool.towncrier] in pyproject.toml or towncrier.toml) at the repo root\n' >"$SKIP_FILE"; return 1; }
-      ;;
-    pyyaml)
-      python3 -c 'import yaml' >/dev/null 2>&1 ||
-        { printf 'python3 with PyYAML is unavailable; the drift guard needs a real YAML reader\n' >"$SKIP_FILE"; return 1; }
       ;;
     *)
       printf 'unknown requirement %s\n' "$1" >"$SKIP_FILE"; return 1 ;;
@@ -348,21 +307,20 @@ if ((${#selected[@]} == 0)); then
 fi
 
 if ((OPT_LIST)); then
-  printf '%sgate suite mirrored from .github/workflows/ci.yml%s\n\n' "$C_BOLD" "$C_RESET"
+  printf '%scheap gate suite mirrored from .github/workflows/ci.yml%s\n\n' "$C_BOLD" "$C_RESET"
   printf '%-15s %-12s %s\n' 'ID' 'REQUIRES' 'GATE'
   for g in "${selected[@]}"; do
     printf '%-15s %-12s %s\n' "$(gate_field "$g" 1)" "$(gate_field "$g" 3)" "$(gate_field "$g" 2)"
   done
-  printf '\n%d gate(s). Requirements: none=always runnable, docker=needs a reachable\n' "${#selected[@]}"
-  printf 'Docker daemon, token=needs GRAFANA_ACCESS_POLICY_TOKEN, towncrier=needs a\n'
-  printf 'towncrier config, pyyaml=needs python3 + PyYAML.\n'
+  printf '\n%d gate(s). Requirements: none=always runnable,\n' "${#selected[@]}"
+  printf 'token=needs GRAFANA_ACCESS_POLICY_TOKEN, towncrier=needs a towncrier config.\n'
+  printf 'Packaging, plugin-validator and Playwright e2e are out of scope; see docs/ci-local.md.\n'
   exit 0
 fi
 
 # --- run --------------------------------------------------------------------
 SKIP_FILE="$(mktemp)"
 trap 'rm -f "$SKIP_FILE"' EXIT
-mkdir -p "$ARTIFACT_DIR"
 
 results=()   # "id status seconds reason"
 failed=0 skipped=0 passed=0
@@ -390,7 +348,10 @@ for g in "${selected[@]}"; do
   set -e
   elapsed=$((SECONDS - start))
 
-  if ((rc == 77)); then
+  # 77 is the skip sentinel, but a gate can also exit 77 for its own reasons
+  # (a tool's own exit code). A skip only counts as a skip if the gate actually
+  # wrote a reason; a bare 77 is an ordinary failure.
+  if ((rc == 77)) && [[ -s $SKIP_FILE ]]; then
     reason="$(cat "$SKIP_FILE")"
     announce SKIP "$id" "${elapsed}s ${C_DIM}- ${reason}${C_RESET}"
     results+=("$id SKIP $elapsed $reason")
