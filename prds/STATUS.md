@@ -42,6 +42,17 @@ https://github.com/vfarcic/dot-ai-grafana/pull/3#pullrequestreview-5092068595
 | `go 1.26.5` kept | [x] CI golangci-lint fails on `go 1.26` / `1.26.0` |
 | GitHub Actions on *his* `main` | [ ] **needs Viktor** |
 
+**On the last row — "needs Viktor":** *Viktor* is [@vfarcic](https://github.com/vfarcic), owner and
+sole maintainer of the upstream repo, and *his* `main` is `vfarcic/dot-ai-grafana@main`. His #3
+review recorded GitHub Actions as **"never ran"** — `.github/workflows/ci.yml` arrived *with* PR #3
+while upstream `main` had no workflows, so no checks could gate the merge. The action needed was
+his alone: land the workflows on upstream `main` (or give the branch a home in his repo) so CI
+becomes a real gate. Nothing in this fork can tick that box. **Resolved by his merge of #3** as
+[`ac627d4`](https://github.com/vfarcic/dot-ai-grafana/commit/ac627d4) (2026-09-03), the first commit
+carrying `ci.yml` on upstream `main`; upstream Actions have run since (release workflow
+[#27](https://github.com/vfarcic/dot-ai-grafana/pull/27), dependency bumps #16/#17/#33–#37). The
+row is left unticked because it was never ours to tick.
+
 ## New work after he reviewed — parked, not in vfarcic#3
 
 | Feature | PRD | Issue | PR |
