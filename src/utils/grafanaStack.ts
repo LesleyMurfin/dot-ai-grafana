@@ -459,19 +459,34 @@ function alertFilterQuery(target: PodNamespaceTarget): string {
 }
 
 /**
+ * Mimir and Cortex serve the Alertmanager v2 API under an `/alertmanager` prefix;
+ * a plain Prometheus Alertmanager serves it at the root. Grafana records which one
+ * the operator selected in `jsonData.implementation` and its own
+ * AlertManagerDatasource.testDatasource() branches on exactly that. An unset
+ * implementation is treated as Prometheus, matching the datasource config UI default.
+ */
+function alertmanagerApiPrefix(settings: DataSourceInstanceSettings): string {
+  const implementation = (settings.jsonData as { implementation?: string } | undefined)?.implementation;
+  return implementation === 'mimir' || implementation === 'cortex' ? '/alertmanager' : '';
+}
+
+/**
  * Real alerts, not ds.query() (a permanent stub — see header comment). Mirrors
  * grafana/grafana AlertManagerDatasource._request(): GET against the datasource's
  * own configured URL, which Grafana resolves to its proxy route for proxy-access
  * datasources. Throws on a missing URL or a failed request so the caller can report
  * the failure distinctly from a genuine empty result.
  */
-async function fetchAlertmanagerAlerts(settings: DataSourceInstanceSettings, target: PodNamespaceTarget): Promise<unknown> {
+async function fetchAlertmanagerAlerts(
+  settings: DataSourceInstanceSettings,
+  target: PodNamespaceTarget
+): Promise<unknown> {
   if (!settings.url) {
     throw new Error('Alertmanager datasource has no URL configured');
   }
   const query = alertFilterQuery(target);
-  const url = `${settings.url.replace(/\/+$/, '')}/api/v2/alerts${query ? `?${query}` : ''}`;
-  return getBackendSrv().get(url);
+  const base = `${settings.url.replace(/\/+$/, '')}${alertmanagerApiPrefix(settings)}`;
+  return getBackendSrv().get(`${base}/api/v2/alerts${query ? `?${query}` : ''}`);
 }
 
 function scopeSuffix(target: PodNamespaceTarget): string {
@@ -595,7 +610,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       if (lines.length === 0) {
         return {
           lines,
-          note: scoped ? 'no alerts for this pod/namespace in the last 15m' : 'no alerts in the last 15m',
+          // /api/v2/alerts is a current-state snapshot, not a time window like the
+          // Loki/Prometheus/Tempo notes, so this must not claim "in the last 15m".
+          note: scoped ? 'no alerts firing for this pod/namespace' : 'no alerts firing',
         };
       }
       return { lines };

@@ -346,6 +346,39 @@ describe('fetchStackContext', () => {
 
     expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/api/v2/alerts`);
   });
+
+  test('reads Mimir/Cortex Alertmanager under its /alertmanager prefix', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string }) =>
+      opts?.type === 'alertmanager'
+        ? [
+            {
+              uid: 'am-1',
+              name: 'Alertmanager',
+              type: 'alertmanager',
+              url: AM_URL,
+              jsonData: { implementation: 'mimir' },
+            },
+          ]
+        : []
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/alertmanager/api/v2/alerts`);
+  });
+
+  test('an empty alert list reads as "no alerts firing", never as a 15m window claim', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    const result = await fetchStackContext('how healthy is the cluster?');
+
+    const amSection = result.current.split('Alertmanager:')[1] ?? '';
+    expect(amSection).toMatch(/no alerts firing/);
+    expect(amSection).not.toMatch(/15m/);
+  });
 });
 
 describe('getDataSourceByType selection', () => {

@@ -295,7 +295,7 @@ Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic
 
 - Never `GET /api/search` — Folder/Dashboard Search **will not be migrated**.
 - Never Grafana Data source HTTP (`/api/datasources`) — deprecated; we already use `getDataSourceSrv`.
-- Never Alerting Provisioning HTTP for “related alerts” — we already query Alertmanager via `ds.query`.
+- Never Alerting Provisioning HTTP for “related alerts” — we read the configured Alertmanager datasource's own `/api/v2/alerts` proxy route, the same mechanism Grafana's built-in Alertmanager datasource uses (its `query()` is a stub, so `ds.query` cannot serve this one source).
 - If we add “which dashboard to open”: Grafana 12+ **Dashboard `/apis`** only (`dashboard.grafana.app`), not `/api/dashboards` or `/api/search`.
 - Plugin `/api/plugins/<id>/resources/*` and `/settings` stay until Grafana publishes a plugin-SDK replacement; they are not the dashboard `/api` deprecation.
 
