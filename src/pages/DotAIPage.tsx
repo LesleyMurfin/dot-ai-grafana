@@ -292,7 +292,12 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         {showContext && activeThread.current && (
           <div className={styles.context} data-testid={testIds.dotai.current}>
             <Collapse
-              label="Current (Grafana evidence)"
+              label={
+                // ReactNode label, not a plain string, so e2e has one stable click
+                // target for the toggle across the Grafana versions in the matrix —
+                // Collapse's own header markup is not a contract.
+                <span data-testid={testIds.dotai.currentToggle}>Current (Grafana evidence)</span>
+              }
               collapsible={true}
               isOpen={currentOpen}
               onToggle={() => setCurrentOpen(!currentOpen)}
