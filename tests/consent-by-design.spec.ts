@@ -148,7 +148,7 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
 
     const notice = page.getByTestId(testIds.dotai.consent);
     await expect(notice).toBeVisible();
-    await expect(notice).toContainText('Grafana datasource facts read now');
+    await expect(notice).toContainText('Grafana datasource facts read at that moment');
     await expect(notice).toContainText('condensed Prior block of up to 240 characters');
     await expect(notice).toContainText('Full History stays in this browser');
 
