@@ -57,7 +57,7 @@ stack trace). This is not a theoretical concern for observability products: the 
 demonstrated against Grafana's own AI assistant in 2026 (GrafanaGhost, patched) — injection
 carried in log content, exfiltration via markdown image rendering.
 
-Background, impact classes `I1`–`I11`, and the control set live in
+Background, impact classes `I1`–`I12`, and the control set live in
 [`prds/1-grafana-ai-cluster-intelligence.md` → *Expansion: Untrusted telemetry trust boundary*](prds/1-grafana-ai-cluster-intelligence.md#untrusted-telemetry-trust-boundary).
 
 ## Out of scope for this repository
