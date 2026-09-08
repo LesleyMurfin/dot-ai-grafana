@@ -100,6 +100,25 @@ cp provisioning/plugins/apps.yaml /tmp/apps.local.yaml   # edit apiUrl/apiKey th
 Note that `provisioning/plugins/apps.yaml`'s hostname is load-bearing for the
 test suite — see the comment in that file before changing it.
 
+## Local development
+
+The toolchain is declared in [`devbox.json`](devbox.json): [devbox](https://www.jetify.com/devbox)
+pins the same tools CI uses — Node, Go, mage, `golangci-lint`, towncrier, `zip`,
+`shellcheck`, and Python with PyYAML — so none of them have to be installed on
+the host.
+
+```bash
+devbox shell     # pinned toolchain
+npm ci
+npm run server   # Grafana on :3000, dot-ai stub on :18080
+npm run e2e
+```
+
+`npm run e2e` drives the stack `npm run server` brings up, so start that first.
+Its Playwright `globalSetup` ([`tests/harness/stubPreflight.ts`](tests/harness/stubPreflight.ts))
+fails fast with a concrete message when the stub is unreachable, instead of
+letting every spec time out against it.
+
 ## Releasing
 
 Tag the version and the [release workflow](.github/workflows/release.yml) does
