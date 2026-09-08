@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# ci-drift-check.sh — assert scripts/ci-local.sh still mirrors .github/workflows/ci.yml.
+# ci-drift-check.sh — assert the scripts/ci-local.sh gate REGISTRY still matches
+# the step list in .github/workflows/ci.yml.
 #
 # The known failure mode of a hand-written local CI runner is silent drift:
-# ci.yml gains a step, the runner does not, and "green locally" quietly stops
+# ci.yml gains a step, the registry does not, and "green locally" quietly stops
 # meaning "green upstream". This guard runs in BOTH directions:
 #
 #   forward   every step in ci.yml is either owned by a gate in the ci-local.sh
 #             registry, or explicitly allowlisted below with a reason.
 #   reverse   every gate in the registry matches at least one step in ci.yml,
 #             unless the gate declares LOCAL_ONLY:<reason>.
+#
+# WHAT THIS PROVES, AND WHAT IT DOES NOT. The contract is between the registry
+# and ci.yml's step definitions: a step cannot be added to, removed from, or have
+# its command edited in ci.yml without either a gate claiming it or an allowlist
+# entry excusing it. It does NOT prove that a gate's implementation runs the same
+# command as the CI step it claims. `ci-match` ties a gate to the existence of a
+# CI step, not to the gate's behaviour; keeping gate_lint actually running the
+# lint is code review's job, not this guard's.
 #
 # The gate registry is read from `ci-local.sh --dump-registry`, so there is one
 # source of truth for gates and one for CI steps, and this file owns neither.
@@ -34,7 +43,7 @@ while (($#)); do
   case "$1" in
     --workflow) WORKFLOW="${2:-}"; shift ;;
     --workflow=*) WORKFLOW="${1#*=}" ;;
-    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) printf 'ci-drift-check: unknown argument %s\n' "$1" >&2; exit 64 ;;
   esac
   shift
@@ -45,17 +54,40 @@ done
 # ALLOWLIST — CI steps that legitimately have no local equivalent.
 # `pattern~reason`. Every entry carries its reason; if a step needs a reason you
 # cannot write down, it is drift, not an exception.
+#
+# Patterns are single-quoted (no shell expansion wanted) and anchored; a literal
+# dollar is written `[$]` so neither the shell nor shellcheck sees a variable.
+# Actions are allowlisted by their exact path, never by org prefix: `^uses:actions/`
+# would have swallowed a genuinely new gate-worthy action (actions/cache, a new
+# grafana/plugin-actions helper) as "runner provisioning". A new action under an
+# already-excused org is now drift until someone writes down why it is not.
 ALLOWLIST=(
-  "^uses:actions/~GitHub-runner provisioning (checkout, setup-node, setup-go, artifacts); a local checkout already has the sources and toolchains"
-  "^uses:grafana/plugin-actions/~runner-only helpers (e2e image matrix, wait-for-grafana); the local e2e gate polls Grafana itself"
-  "GITHUB_OUTPUT~GHA step-output plumbing; the local runner passes values between gates in-process"
-  "^export GRAFANA_PLUGIN_~shell variables that only exist to feed GITHUB_OUTPUT; the package gate reads dist/plugin.json directly"
-  "^if \\[ -f ~feature detection that toggles GHA job conditionals; local gates test for the same files themselves"
-  "^(then|else|elif|fi|do|done|esac|;;|\\{|\\})$~shell control keywords produced by splitting a 'run: |' block into lines"
-  "^sudo apt-get install jq~runner package provisioning; jq is a documented local prerequisite and there is no sudo in a dev shell"
-  "^chmod \\+x \\./dist/gpx_~restores the exec bit that upload/download-artifact drops; a local build never loses it"
-  "^npm exec playwright install~browser provisioning; local runs use the cached browser download"
-  "^docker logs ~post-failure log capture on the runner; locally the compose logs are already on the machine"
+  # runner provisioning: the local checkout already has the sources and toolchains
+  '^uses:actions/checkout$~GHA-only source checkout; a local run is already in the working tree'
+  '^uses:actions/setup-node$~GHA-only Node provisioning; a dev shell brings its own node/npm'
+  '^uses:actions/setup-go$~GHA-only Go provisioning; the local go gates use the go on PATH'
+  '^uses:actions/setup-python$~GHA-only Python provisioning; the changelog gate uses the local python/towncrier'
+  '^uses:actions/upload-artifact$~GHA artifact storage, to hand the build to the e2e job; nothing to upload locally'
+  '^uses:actions/download-artifact$~GHA artifact retrieval in the e2e job; the local build output never left the tree'
+  '^uses:grafana/plugin-actions/e2e-version$~resolves the Grafana image matrix for the e2e job, which is out of scope (see docs/ci-local.md)'
+  '^uses:grafana/plugin-actions/wait-for-grafana$~readiness poll for the e2e job, which is out of scope (see docs/ci-local.md)'
+  # GHA plumbing
+  '>> [$]GITHUB_OUTPUT$~GHA step-output plumbing; the local runner passes values between gates in-process'
+  '^export GRAFANA_PLUGIN_~shell variables that only exist to feed GITHUB_OUTPUT; local gates read dist/plugin.json directly'
+  '^if \[ -f ~feature detection that toggles GHA job conditionals; local gates test for the same files themselves'
+  '^(then|else|elif|fi|do|done|esac|;;|\{|\})$~shell control keywords produced by splitting a "run: |" block into lines'
+  '^sudo apt-get install jq$~runner package provisioning; jq is a documented local prerequisite and there is no sudo in a dev shell'
+  '^pip install towncrier==24\.8\.0$~runner provisioning of towncrier itself; locally it is a declared prerequisite (devbox.json)'
+  '^chmod \+x \./dist/gpx_\*$~restores the exec bit that upload/download-artifact drops; a local build never loses it'
+  # out of scope for the cheap local suite — see docs/ci-local.md#scope
+  '^mv dist [$]\{PLUGIN_ID\}$~packaging is out of scope; it only exists to shape the GHA upload artifact'
+  '^zip [$]\{ARCHIVE\} [$]\{PLUGIN_ID\} -r$~packaging is out of scope; it only exists to shape the GHA upload artifact'
+  '^docker run --pull=always -v [$]PWD/[$]\{ARCHIVE\}:/archive\.zip grafana/plugin-validator-cli ~plugin-validator runs in a container against the packaged archive; both are out of scope'
+  '^docker compose (pull|down)$~the Playwright e2e stack is out of scope; it needs a Docker daemon'
+  '^ANONYMOUS_AUTH_ENABLED=false DEVELOPMENT=false .* docker compose up -d$~the Playwright e2e stack is out of scope; it needs a Docker daemon'
+  '^npm exec playwright install chromium --with-deps$~browser provisioning for the e2e job, which is out of scope'
+  '^npm run e2e$~the Playwright e2e suite is out of scope; run it directly with npm run e2e'
+  '^docker logs devopstoolkit-dotai-app >& grafana-server\.log$~post-failure log capture in the e2e job, which is out of scope'
 )
 
 STEPS_FILE="$(mktemp)"

@@ -1,7 +1,7 @@
 # Running CI locally
 
-`scripts/ci-local.sh` runs the [CI](../.github/workflows/ci.yml) gate suite on your own machine, so
-a full pass can be confirmed before pushing instead of after waiting on GitHub Actions.
+`scripts/ci-local.sh` runs the cheap [CI](../.github/workflows/ci.yml) gates on your own machine, so
+a pass can be confirmed before pushing instead of after waiting on GitHub Actions.
 
 ```bash
 ./scripts/ci-local.sh --list           # what would run
@@ -9,9 +9,66 @@ a full pass can be confirmed before pushing instead of after waiting on GitHub A
 ./scripts/ci-local.sh --keep-going     # run everything, report at the end
 ```
 
-`ci.yml` remains the source of truth: the `drift` gate (`scripts/ci-drift-check.sh`) compares the
-two in both directions and fails if a CI step has no local gate or a local gate matches no CI step,
-so the mirror cannot rot silently.
+## Gates
+
+| Gate | Mirrors the CI step | Requires |
+|---|---|---|
+| `drift` | — (guards `ci.yml` itself; runs first) | — |
+| `deps` | `npm ci` | — |
+| `typecheck` | `npm run typecheck` | — |
+| `lint` | `npm run lint` | — |
+| `unit` | `npm run test:ci` | — |
+| `build` | `npm run build` | — |
+| `go-lint` | `golangci/golangci-lint-action` with `./...` | — |
+| `go-build` | `magefile/mage-action` with `buildAll` | — |
+| `go-test` | `magefile/mage-action` with `test` | — |
+| `changelog` | `towncrier build --draft --version 0.0.0` | a towncrier config |
+| `sign` | `npm run sign` | `GRAFANA_ACCESS_POLICY_TOKEN` |
+
+`drift` runs **first**, not last. The default is fail-fast, so a drift guard at the end of the list
+would be the gate least likely to actually run — precisely backwards.
+
+## Scope
+
+The runner covers the cheap gates only. Three `ci.yml` steps are deliberately **not** mirrored:
+
+- **packaging** (`mv dist ${PLUGIN_ID}` / `zip`) — exists only to shape the artifact that the GHA
+  e2e job downloads; it proves nothing a local build does not already prove.
+- **`grafana/plugin-validator-cli`** — runs in a container against that packaged archive.
+- **Playwright e2e** (`docker compose` + `npm run e2e`) — needs a Docker daemon, a Grafana image
+  matrix and a downloaded build artifact. Run it directly with `npm run e2e` when you need it.
+
+Each of those steps carries an explicit allowlist entry, with its reason, in
+`scripts/ci-drift-check.sh` — they are excused, not ignored, and the guard still notices if their
+commands change.
+
+Two further CI checks are outside **both** the runner and the guard, because they live in their own
+workflow files rather than in `ci.yml`: **compare** (`.github/workflows/bundle-stats.yml`) and
+**compatibilitycheck** (`.github/workflows/is-compatible.yml`). Nothing here mirrors them and the
+drift guard will not notice if they change; they can drift freely.
+
+## What the drift guard proves
+
+The `drift` gate (`scripts/ci-drift-check.sh`) compares the gate **registry** in `ci-local.sh`
+against the **step list** in `ci.yml`, in both directions:
+
+- **forward** — every step in `ci.yml` is either claimed by a gate or allowlisted with a reason, so
+  a new CI step cannot appear without someone deciding what to do about it;
+- **reverse** — every gate matches at least one step in `ci.yml`, unless it declares
+  `LOCAL_ONLY:<reason>`, so a gate cannot outlive the step it mirrors.
+
+Every `ci-match` pattern is fully anchored (`^...$`), so editing a step's arguments upstream —
+`npm run typecheck` becoming `npm run typecheck -- --strict`, or the golangci-lint `args` changing
+from `./...` — is drift, not a substring that quietly still matches.
+
+The guard's contract is therefore between the registry and `ci.yml`'s step definitions: **the
+registry cannot drift from `ci.yml`.** It does *not* prove that a gate's implementation runs the
+same command as the step it claims. `ci-match` ties a gate to the *existence* of a CI step, not to
+the gate's behaviour — keeping `gate_lint` actually running the lint is code review's job.
+
+`drift` cannot be skipped. It declares no requirement and never reports a skip, so a missing
+`python3`/PyYAML is a hard **failure**: `--allow-skip` can never turn "the registry was never
+checked" into a green run.
 
 ## Exit codes
 
@@ -44,15 +101,13 @@ Each gate declares a requirement, printed in the `REQUIRES` column of `--list`:
 
 | Requirement | Gates | Skips unless |
 |---|---|---|
-| `docker` | `validator`, `e2e` | a reachable Docker daemon |
+| `none` | everything else | always runnable |
 | `token` | `sign` | `GRAFANA_ACCESS_POLICY_TOKEN` is set |
 | `towncrier` | `changelog` | a towncrier config is present |
-| `pyyaml` | `drift` | `python3` with PyYAML |
 
-`validator` (`grafana/plugin-validator-cli`) and `e2e` (the Playwright stack behind
-`docker compose`) both need a reachable Docker daemon, detected with `docker info` rather than by
-the CLI merely being installed. On a shared development host where your account is not in the
-`docker` group there is no daemon socket to talk to, so both gates report `SKIP` with that reason
-and the run exits `2`. Everything else — including the Go backend gates and the plugin archive
-build — runs without Docker. `sign` skips unless `GRAFANA_ACCESS_POLICY_TOKEN` is set, matching the
-conditional on the CI step.
+`sign` skips unless `GRAFANA_ACCESS_POLICY_TOKEN` is set, matching the conditional on the CI step.
+A gate also skips, with a reason, when a tool it needs is missing from `PATH` after the PATH
+bootstrap — `go`, `mage` and `golangci-lint` are the usual candidates. Point
+`CI_LOCAL_EXTRA_PATH=/dir1:/dir2` at them if they live somewhere unusual.
+
+None of the remaining gates need Docker.
