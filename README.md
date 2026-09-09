@@ -12,7 +12,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 
 ## Requirements
 
-- Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.0)
+- Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.8)
 - Grafana org **Editor** or **Admin** to use Query / Remediate; **Admin** for Configuration and Test connection (see [Configuration](#configuration))
 - [DevOps AI Toolkit](https://devopstoolkit.ai) MCP server reachable from the Grafana plugin backend
 - Unsigned load until the plugin is signed:
