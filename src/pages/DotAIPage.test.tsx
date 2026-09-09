@@ -770,6 +770,32 @@ describe('Pages/DotAIPage', () => {
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
   });
 
+  /**
+   * Consent runs both ways: with "Send Grafana evidence" off the plugin must not read a
+   * datasource — and must not then claim it did. A show-me Ask has nothing to point at in
+   * that configuration, so it reports the disabled setting rather than an empty success
+   * with Map links that were never built, and it must not burn a dot-ai hop instead.
+   *
+   * Asserted here rather than in `consent-by-design.spec.ts` because plugin settings are
+   * org-wide: under `playwright.config.ts` `fullyParallel: true` a `sendGrafanaEvidence`
+   * write races the other specs (see the note there on "the notice matches what is POSTed").
+   * In jsdom the toggle is a prop, so the case costs nothing and cannot race.
+   */
+  test('evidence off: a show-me Ask reports the disabled setting and POSTs nothing', async () => {
+    render(<DotAIPage sendGrafanaEvidence={false} />);
+    typeIntent('show me the logs');
+    clickSubmit();
+
+    const error = await screen.findByTestId(testIds.dotai.error);
+    expect(error).toHaveTextContent(/Send Grafana evidence/i);
+
+    // No success surface, and neither the datasource nor dot-ai was consulted.
+    expect(mockFetchStackContext).not.toHaveBeenCalled();
+    expect(mockCallDotAITool).not.toHaveBeenCalled();
+    expect(screen.queryByTestId(testIds.dotai.drilldown)).not.toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.response)).not.toBeInTheDocument();
+  });
+
   test('Current evidence collapse starts closed and opens on click', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
