@@ -198,10 +198,12 @@ Grafana plugin debug (`GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug`) is 
 `scripts/ci-local.sh` runs the cheap [CI](.github/workflows/ci.yml) gates — types, lint, unit tests,
 frontend and backend builds, changelog — on your own machine. Its `drift` gate
 (`scripts/ci-drift-check.sh`) fails if the gate registry and `ci.yml`'s step list disagree in either
-direction, so an added, removed or edited CI step cannot pass unnoticed. Packaging, the plugin
-validator and the Playwright e2e suite are out of scope, as are the `compare` and
-`compatibilitycheck` workflows. See [docs/ci-local.md](docs/ci-local.md) for scope, flags, exit
-codes, and what the drift guard does and does not prove.
+direction, so a `ci.yml` step that is added, removed or edited surfaces as drift the next time
+someone runs the suite. These are developer tools: no workflow invokes them, so the guard bites on a
+local run rather than on the pull request. Packaging, the plugin validator and the Playwright e2e
+suite are out of scope, as are the `compare` and `compatibilitycheck` workflows. See
+[docs/ci-local.md](docs/ci-local.md) for scope, flags, exit codes, and what the drift guard does and
+does not prove.
 
 ## Related Projects
 

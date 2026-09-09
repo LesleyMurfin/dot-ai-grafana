@@ -66,6 +66,11 @@ registry cannot drift from `ci.yml`.** It does *not* prove that a gate's impleme
 same command as the step it claims. `ci-match` ties a gate to the *existence* of a CI step, not to
 the gate's behaviour — keeping `gate_lint` actually running the lint is code review's job.
 
+The guard also only runs when someone runs it. Nothing in `ci.yml` — or any other workflow —
+invokes `ci-local.sh` or `ci-drift-check.sh`, so drift is caught on the next local suite run, not on
+the pull request that introduced it. The guard does not make the runner and `ci.yml` *unable* to
+diverge; it makes a divergence visible, and loud, to whoever runs the suite next.
+
 `ci.yml` is read with [yq-go](https://github.com/mikefarah/yq) — a real YAML parser, not a regex
 pass over the file, so `run: |` block scalars, quoting and indentation are the parser's problem.
 It is one static binary, pinned in `devbox.json` like every other tool here.
