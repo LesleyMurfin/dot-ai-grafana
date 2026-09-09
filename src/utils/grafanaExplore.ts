@@ -123,7 +123,7 @@ export function drilldownAppUrl(pluginId: string): string | undefined {
  * Diagnosis tokens that force POST (show-me must not skip the engine).
  *
  * INTENTIONALLY UNREACHABLE TODAY — do not delete. `SHOW_ME_PRODUCTION` below
- * is fully anchored with no tail, so it accepts exactly 30 pure navigation
+ * is fully anchored with no tail, so it accepts exactly 18 pure navigation
  * phrases, none of which contains a token here; removing this changes no
  * current result. It is defence for a later slice that widens the production
  * (e.g. re-adding a `for <resource>` tail), at which point it becomes
@@ -141,12 +141,23 @@ export function drilldownAppUrl(pluginId: string): string | undefined {
 export const DIAGNOSIS_TOKENS =
   /\b(why|error\w*|crash\w*|fail\w*|analy[sz]\w*|remediate|how|improve|root cause|because|issue|issues|unhealthy)\b/;
 
-/** The written contract production. Fully anchored — no `for <resource>` tail. */
-const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|alerts|traces|metrics|dashboards)$/;
+/**
+ * The written contract production, narrowed to the nouns the link builder can
+ * actually serve. Fully anchored — no `for <resource>` tail.
+ *
+ * `alerts` and `dashboards` are deliberately NOT accepted (#66): on the 0-hop
+ * path the engine is skipped, so `buildDrilldownLinks` is the only thing that
+ * can answer, and it emits no alerts link at all, while `dash-<uid>` links come
+ * from `dashboardUids`, which has no engine-independent source today (#47).
+ * Accepting those two nouns would answer "show me the alerts" with logs and
+ * metrics links, or with nothing at all. Narrowing sends them down the normal
+ * POST path, where they get a real answer.
+ */
+const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|traces|metrics)$/;
 
 /**
  * True when the Ask is only a pure navigation phrase:
- * `(show me|open|display) the? (logs|alerts|traces|metrics|dashboards)`.
+ * `(show me|open|display) the? (logs|traces|metrics)`.
  * Diagnosis tokens force POST (show-me does not skip). False positives on the
  * 0-hop skip are dangerous — when ambiguous, return false so the engine runs.
  */
@@ -228,10 +239,16 @@ export function buildDrilldownLinks(args: {
     if (tracesApp) {
       links.push({ id: 'drilldown-traces', label: 'Traces Drilldown', href: tracesApp });
     }
-    for (const id of args.traceIds.slice(0, 5)) {
+    const traceIds = [...new Set(args.traceIds)].slice(0, 5);
+    for (const id of traceIds) {
+      // Two trace ids can share the same 8-char prefix; fall back to the full id
+      // for the label whenever that prefix is not unique within this batch, so
+      // the rendered links stay visually distinguishable.
+      const prefix = id.slice(0, 8);
+      const collides = traceIds.some((other) => other !== id && other.slice(0, 8) === prefix);
       links.push({
         id: `trace-${id}`,
-        label: `Trace ${id.slice(0, 8)}`,
+        label: `Trace ${collides ? id : prefix}`,
         href: exploreUrl({
           uid: args.tempoUid,
           type: 'tempo',

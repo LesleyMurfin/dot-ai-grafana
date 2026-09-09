@@ -13,6 +13,7 @@ import {
   PodNamespaceTarget,
   StackContextResult,
 } from './grafanaStack';
+import { DrilldownLink, isShowMeOnly } from './grafanaExplore';
 
 /** Max dot-ai POSTs per user Ask (ask-log lines). Grafana DS reads do not count. */
 export const MAX_ASK_HOPS = 3;
@@ -299,6 +300,7 @@ export async function runAskOrchestrator(args: {
       current: args.thread.current,
       map: args.thread.map,
       box: question,
+      history: args.thread.history,
     });
     const meta: AskMeta = {
       hop: 1,
@@ -328,6 +330,7 @@ export async function runAskOrchestrator(args: {
         current: rewriteCurrent(args.thread.current, question, summaryText),
         map: mergeMap(args.thread.map, question, summaryText),
         history: appendHistory(args.thread.history, question, summaryText),
+        drilldowns: args.thread.drilldowns,
       },
       firstHop: 'dot-ai',
       hops: 1,
@@ -346,6 +349,13 @@ export async function runAskOrchestrator(args: {
   let stackSnapshot = '';
   let stackEmpty = true;
   let currentEmpty = !args.thread.current.trim();
+  // Carried from the prior thread, replaced only on a successful loadStack below.
+  // Deliberate: a failed stack read leaves this ask's Map panel showing the previous
+  // ask's links beside the failure note, mirroring how `map` itself carries forward
+  // on failure (line below). The links stay valid Grafana URLs, so surfacing stale
+  // evidence beats surfacing none.
+  let drilldowns: DrilldownLink[] = args.thread.drilldowns;
+  let stackLoadError = '';
 
   const loadStack = async (q: string) => {
     if (args.skipStack) {
@@ -354,14 +364,18 @@ export async function runAskOrchestrator(args: {
     try {
       const stack = await fetchStack(q);
       stackSnapshot = stack.current;
+      stackLoadError = '';
       stackEmpty = stack.currentEmpty;
       currentEmpty = stack.currentEmpty;
       map = mergeMap(stack.mapHint, map, q);
+      drilldowns = stack.drilldowns;
     } catch (e) {
       const why = e instanceof Error ? e.message : 'Grafana stack query failed';
       stackSnapshot = `Grafana stack read failed:\n${why}`;
+      stackLoadError = why;
       stackEmpty = true;
       currentEmpty = true;
+      // drilldowns intentionally NOT cleared here — see comment at its declaration.
       map = mergeMap(map, q);
     }
   };
@@ -396,6 +410,7 @@ export async function runAskOrchestrator(args: {
       map,
       box,
       instructions,
+      history,
     });
     lastPacked = packed;
     const meta: AskMeta = {
@@ -428,6 +443,7 @@ export async function runAskOrchestrator(args: {
         current: ok ? rewriteCurrent(displaySeed, question, summary) : displaySeed || args.thread.current,
         map,
         history: ok ? history : args.thread.history,
+        drilldowns,
       },
       firstHop,
       hops,
@@ -439,6 +455,59 @@ export async function runAskOrchestrator(args: {
   if (firstHop === 'grafana') {
     // Always Grafana stack for observability Asks (cluster-wide if no pod/ns).
     await loadStack(question);
+    if (isShowMeOnly(question)) {
+      // The 0-hop navigation answer only points at evidence — it fetches nothing itself and
+      // calls no engine — so it may only be given when there is something to point AT.
+      // Gate on having evidence, not on the absence of an exception.
+      //
+      // Evidence disabled in plugin config: the engine cannot substitute here (Map/Explore
+      // links come from the Grafana datasource reads we were told not to make), so burning a
+      // hop would still return no links and would override the operator's explicit choice.
+      if (args.skipStack) {
+        return finish(
+          false,
+          'Grafana evidence is disabled in plugin configuration: turn on "Send Grafana evidence" to use show-me navigation.'
+        );
+      }
+      if (stackLoadError) {
+        return finish(false, `Grafana stack read failed: ${stackLoadError}`);
+      }
+      // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and no
+      // drilldown link was rebuilt: there is no Current to read and no Map link to open.
+      if (stackEmpty && drilldowns.length === 0) {
+        return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
+      }
+      // Say only what is actually on screen. Two independent things can be present or
+      // absent here: evidence in Current, and links in Map. The guard above rules out
+      // "neither", which leaves three cases — and `stackEmpty` implies links exist, since
+      // otherwise the guard would have returned.
+      //
+      // Evidence with no link is reachable: alert lines make the stack non-empty but
+      // `buildDrilldownLinks` emits no alerts link (#66), so a target whose only evidence
+      // is a firing alert, on a Grafana with no Loki/Prometheus/Tempo datasource, has
+      // Current to read and nothing to open. Do not send that user to Map.
+      const hasLinks = drilldowns.length > 0;
+      lastSummary = stackEmpty
+        ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
+        : hasLinks
+          ? 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.'
+          : 'Grafana evidence is in Current. No Explore or Drilldown link for this target — read Current.';
+      history = appendHistory(history, question, lastSummary);
+      return {
+        ok: true,
+        summary: lastSummary,
+        thread: {
+          current: stackSnapshot || args.thread.current,
+          map,
+          history,
+          drilldowns,
+        },
+        firstHop,
+        hops: 0,
+        currentEmpty,
+        lastPacked: '',
+      };
+    }
     const r1 = await callDotAI(question, 'initial');
     if (!r1.ok) {
       return finish(false, r1.errorMessage || 'Request failed');

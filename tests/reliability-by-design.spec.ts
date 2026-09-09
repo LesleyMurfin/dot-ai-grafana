@@ -226,6 +226,9 @@ test.describe('Reliability by design — degrades without a configured Grafana d
     // survive on this surface by design — assert non-fatal content instead.
     const current = page.getByTestId(testIds.dotai.current);
     await expect(current).toBeVisible();
+    // Current is collapsed by default so evidence does not push the answer off
+    // screen — expand it before asserting on the summary text inside.
+    await page.getByTestId(testIds.dotai.currentToggle).click();
     await expect(current).toContainText(/Asked:/);
     await expect(current).toContainText(/What's true now:/);
 

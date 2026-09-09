@@ -1,10 +1,11 @@
 import { of } from 'rxjs';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import {
   buildLogQL,
   CLUSTER_LOGQL,
   fetchStackContext,
   getDataSourceByType,
+  linesFromAlertmanagerAlerts,
   linesFromLokiFrames,
   LOG_LINE_CAP,
   parsePodNamespace,
@@ -12,10 +13,13 @@ import {
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
+  getBackendSrv: jest.fn(),
 }));
 
 const mockGet = jest.fn();
 const mockGetList = jest.fn();
+const mockBackendGet = jest.fn();
+const AM_URL = '/api/datasources/proxy/uid/am-1';
 
 function frameWithLineField(lines: string[]) {
   return {
@@ -30,19 +34,68 @@ function frameWithValue(labels: Record<string, string>, value: number) {
   };
 }
 
+function alertmanagerAlert(overrides?: {
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  startsAt?: string;
+  state?: string;
+}) {
+  return {
+    labels: { alertname: 'KubePodCrashLooping', severity: 'critical', ...overrides?.labels },
+    annotations: { summary: 'pod is crash looping', ...overrides?.annotations },
+    startsAt: overrides?.startsAt ?? '2026-09-05T00:00:00.000Z',
+    status: { state: overrides?.state ?? 'active' },
+  };
+}
+
+type ListedDataSource = {
+  uid: string;
+  name: string;
+  type: string;
+  isDefault?: boolean;
+  meta: { metrics?: boolean; annotations?: boolean; tracing?: boolean; logs?: boolean; alerting?: boolean };
+};
+
+// Mirrors grafana/grafana public/app/features/plugins/datasource_srv.ts getList(): a datasource is
+// dropped unless `all: true` is passed OR its plugin meta declares at least one of
+// metrics/annotations/tracing/logs/alerting.
+function filterLikeGrafanaGetList(list: ListedDataSource[], opts?: { type?: string; all?: boolean }) {
+  return list.filter((s) => {
+    if (opts?.type && s.type !== opts.type) {
+      return false;
+    }
+    if (
+      !opts?.all &&
+      s.meta.metrics !== true &&
+      s.meta.annotations !== true &&
+      s.meta.tracing !== true &&
+      s.meta.logs !== true &&
+      s.meta.alerting !== true
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 beforeEach(() => {
   mockGet.mockReset();
   mockGetList.mockReset();
+  mockBackendGet.mockReset();
+  mockBackendGet.mockResolvedValue([]);
   (getDataSourceSrv as jest.Mock).mockReturnValue({
     get: mockGet,
     getList: mockGetList,
+  });
+  (getBackendSrv as jest.Mock).mockReturnValue({
+    get: mockBackendGet,
   });
   mockGetList.mockImplementation((opts?: { type?: string }) => {
     const all = [
       { uid: 'loki-1', name: 'Loki', type: 'loki' },
       { uid: 'prom-1', name: 'Prometheus', type: 'prometheus' },
       { uid: 'tempo-1', name: 'Tempo', type: 'tempo' },
-      { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager' },
+      { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', url: AM_URL },
     ];
     if (opts?.type) {
       return all.filter((s) => s.type === opts.type);
@@ -131,6 +184,23 @@ describe('linesFromLokiFrames', () => {
   });
 });
 
+describe('linesFromAlertmanagerAlerts', () => {
+  test('formats alertname/severity/state/since/summary and caps at the given limit', () => {
+    const many = Array.from({ length: 20 }, (_, i) => alertmanagerAlert({ labels: { alertname: `alert-${i}` } }));
+    const capped = linesFromAlertmanagerAlerts(many, 8);
+    expect(capped).toHaveLength(8);
+    expect(capped[0]).toBe(
+      'alert-0 severity=critical state=active since=2026-09-05T00:00:00.000Z summary=pod is crash looping'
+    );
+  });
+
+  test('ignores non-array input', () => {
+    expect(linesFromAlertmanagerAlerts(null, 8)).toEqual([]);
+    expect(linesFromAlertmanagerAlerts(undefined, 8)).toEqual([]);
+    expect(linesFromAlertmanagerAlerts({ not: 'an array' }, 8)).toEqual([]);
+  });
+});
+
 describe('fetchStackContext', () => {
   test('Current includes mocked Loki log lines via ds.query', async () => {
     const lokiLines = ['OOMKilled container', 'Back-off restarting failed container'];
@@ -157,14 +227,18 @@ describe('fetchStackContext', () => {
         };
       }
       if (ref === 'am-1' || ref === 'Alertmanager') {
-        return {
-          query: () =>
-            of({
-              data: [{ fields: [{ name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] }] }],
-            }),
-        };
+        // Real AlertManagerDatasource.query() is a stub that always returns
+        // { data: [] } — alerts come from mockBackendGet (getBackendSrv().get()) below,
+        // not from ds.query(). See fetchAlertmanagerAlerts() in grafanaStack.ts.
+        return { query: () => of({ data: [] }) };
       }
       return { query: () => of({ data: [] }) };
+    });
+    mockBackendGet.mockImplementation(async (url: string) => {
+      if (url.startsWith(`${AM_URL}/api/v2/alerts`)) {
+        return [alertmanagerAlert()];
+      }
+      return [];
     });
 
     const result = await fetchStackContext('why is pod checkout-api crashing in namespace prod?');
@@ -179,6 +253,8 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('trace abc123');
     expect(result.current).toContain('Alertmanager');
     expect(result.current).toContain('KubePodCrashLooping');
+    expect(result.current).toContain('severity=critical');
+    expect(mockBackendGet).toHaveBeenCalledWith(expect.stringContaining(`${AM_URL}/api/v2/alerts`));
     expect(result.mapHint).toMatch(/Loki/);
     expect(result.mapHint).toMatch(/Prometheus/);
     expect(result.mapHint).toMatch(/Tempo/);
@@ -236,6 +312,119 @@ describe('fetchStackContext', () => {
     const lokiReq = lokiQuery.mock.calls[0][0];
     expect(lokiReq.targets[0].expr).toMatch(/namespace=~/);
   });
+
+  // Issue #47: "all: true" alone is necessary but not sufficient — Grafana's built-in
+  // AlertManagerDatasource.query() is a permanent stub returning { data: [] }, so alert
+  // evidence must come from getBackendSrv().get() against the datasource's own proxy
+  // route (GET .../api/v2/alerts), never from ds.query().
+  test('fetches real alerts from the Alertmanager proxy route, not the ds.query() stub', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockImplementation(async (url: string) => {
+      if (url === `${AM_URL}/api/v2/alerts`) {
+        return [
+          alertmanagerAlert({ labels: { alertname: 'KubeDeploymentReplicasMismatch', severity: 'warning' } }),
+        ];
+      }
+      return [];
+    });
+
+    const result = await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/api/v2/alerts`);
+    expect(result.alertLines).toHaveLength(1);
+    expect(result.current).toContain('KubeDeploymentReplicasMismatch');
+    expect(result.current).toContain('severity=warning');
+    expect(result.current).toContain('state=active');
+    expect(result.current).toContain('summary=pod is crash looping');
+    expect(result.currentEmpty).toBe(false);
+  });
+
+  test('reports a failed Alertmanager proxy call distinctly from "no alerts", never silently empty', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockImplementation(async (url: string) => {
+      if (url === `${AM_URL}/api/v2/alerts`) {
+        throw new Error('403 Forbidden');
+      }
+      return [];
+    });
+
+    const result = await fetchStackContext('how healthy is the cluster?');
+
+    const amSection = result.current.split('Alertmanager:')[1] ?? '';
+    expect(amSection).toMatch(/Alertmanager alerts unavailable/);
+    expect(amSection).toMatch(/403 Forbidden/);
+    expect(amSection).not.toMatch(/no alerts/);
+    expect(result.alertLines).toEqual([]);
+  });
+
+  test('scopes the Alertmanager proxy query to the parsed pod/namespace like Loki/Prometheus', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('why is pod checkout-api crashing in namespace prod?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(
+      `${AM_URL}/api/v2/alerts?filter=namespace%3D%22prod%22&filter=pod%3D~%22checkout-api.*%22`
+    );
+  });
+
+  test('does not scope the Alertmanager proxy query when the question has no pod/namespace', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/api/v2/alerts`);
+  });
+
+  test('reads Mimir/Cortex Alertmanager under its /alertmanager prefix', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string }) =>
+      opts?.type === 'alertmanager'
+        ? [
+            {
+              uid: 'am-1',
+              name: 'Alertmanager',
+              type: 'alertmanager',
+              url: AM_URL,
+              jsonData: { implementation: 'mimir' },
+            },
+          ]
+        : []
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/alertmanager/api/v2/alerts`);
+  });
+
+  // Grafana's own testDatasource() treats an unset jsonData.implementation as Mimir (its config
+  // UI defaults the dropdown to Mimir). We deliberately diverge and use the root path, because a
+  // provisioned datasource — the main way implementation stays unset here — is almost always a
+  // plain Prometheus-operator Alertmanager. Pinned so the divergence stays a decision, not drift.
+  test('treats an unset jsonData.implementation as a root-path Prometheus Alertmanager', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string }) =>
+      opts?.type === 'alertmanager' ? [{ uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', url: AM_URL }] : []
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/api/v2/alerts`);
+  });
+
+  test('an empty alert list reads as "no alerts firing", never as a 15m window claim', async () => {
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    const result = await fetchStackContext('how healthy is the cluster?');
+
+    const amSection = result.current.split('Alertmanager:')[1] ?? '';
+    expect(amSection).toMatch(/no alerts firing/);
+    expect(amSection).not.toMatch(/15m/);
+  });
 });
 
 describe('getDataSourceByType selection', () => {
@@ -282,5 +471,90 @@ describe('getDataSourceByType selection', () => {
 
     const picked = await getDataSourceByType('loki');
     expect(picked?.settings?.uid).toBe('loki-a');
+  });
+
+  test('finds Alertmanager even though its plugin.json declares no capability flag', async () => {
+    // Grafana's built-in Alertmanager plugin.json declares none of
+    // metrics/annotations/tracing/logs/alerting, so getList() hides it unless `all: true` is passed.
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-1', name: 'Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
+          { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', meta: { metrics: false } },
+        ],
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('alertmanager');
+    expect(picked?.settings?.uid).toBe('am-1');
+  });
+
+  test('all:true does not change which datasource is picked for loki/prometheus/tempo', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-a', name: 'Extra Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'loki-b', name: 'Team Loki', type: 'loki', meta: { logs: true }, isDefault: true },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
+        ],
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const loki = await getDataSourceByType('loki');
+    expect(loki?.settings?.uid).toBe('loki-b');
+    const prom = await getDataSourceByType('prometheus');
+    expect(prom?.settings?.uid).toBe('prom-1');
+    const tempo = await getDataSourceByType('tempo');
+    expect(tempo?.settings?.uid).toBe('tempo-1');
+  });
+});
+
+describe('getDataSourceByType real getList filtering (issue #47)', () => {
+  // Mirrors grafana/grafana public/app/features/plugins/datasource_srv.ts DatasourceSrv.getList:
+  // without `all: true`, a datasource is excluded unless its plugin meta declares at least one of
+  // metrics/annotations/tracing/logs/alerting. Grafana's built-in Alertmanager datasource plugin
+  // (public/app/plugins/datasource/alertmanager/plugin.json) declares none of those — only
+  // `"metrics": false` — so it is invisible to getList({ type: 'alertmanager' }) unless `all: true`
+  // is passed.
+  type FakeMeta = {
+    metrics: boolean;
+    logs: boolean;
+    tracing: boolean;
+    annotations: boolean;
+    alerting: boolean;
+  };
+  type FakeEntry = { uid: string; name: string; type: string; meta: FakeMeta };
+
+  function realisticGetList(opts?: { type?: string; all?: boolean }) {
+    const noMeta: FakeMeta = { metrics: false, logs: false, tracing: false, annotations: false, alerting: false };
+    const all: FakeEntry[] = [
+      { uid: 'loki-1', name: 'Loki', type: 'loki', meta: { ...noMeta, logs: true, metrics: true } },
+      { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { ...noMeta, metrics: true, alerting: true } },
+      { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { ...noMeta, tracing: true } },
+      { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', meta: { ...noMeta, metrics: false } },
+    ];
+    return all.filter((s) => {
+      if (opts?.type && s.type !== opts.type) {
+        return false;
+      }
+      const queryable = s.meta.metrics || s.meta.logs || s.meta.tracing || s.meta.annotations || s.meta.alerting;
+      return opts?.all || queryable;
+    });
+  }
+
+  test('finds the built-in Alertmanager datasource under real getList capability filtering', async () => {
+    mockGetList.mockImplementation(realisticGetList);
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('alertmanager');
+
+    expect(picked?.settings?.uid).toBe('am-1');
   });
 });

@@ -5,6 +5,7 @@ import { PluginPage } from '@grafana/runtime';
 import {
   Alert,
   Button,
+  Collapse,
   Field,
   Select,
   Spinner,
@@ -37,6 +38,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
   const [responseText, setResponseText] = useState('');
+  const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [threads, setThreads] = useState<Threads>({
     query: emptyThread(),
@@ -162,15 +164,15 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   return (
     <PluginPage>
       <div className={styles.wrap} data-testid={testIds.dotai.container}>
-        {sendGrafanaEvidence && (
-          <Alert
-            title="Grafana evidence"
-            severity="info"
-            data-testid={testIds.dotai.consent}
-          >
-            Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.
-          </Alert>
-        )}
+        <Alert
+          title={sendGrafanaEvidence ? 'What each Ask sends' : 'What each Ask sends (Grafana evidence off)'}
+          severity="info"
+          data-testid={testIds.dotai.consent}
+        >
+          {sendGrafanaEvidence
+            ? 'Asks POST to your configured dot-ai server: your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically). Query Asks that need live data replace Current with Grafana datasource facts read at that moment (Loki, Prometheus, Tempo, Alertmanager) instead of sending both; Remediate Asks read no datasource. Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too. Full History stays in this browser.'
+            : 'Send Grafana evidence is off, so Asks read no datasource. Asks still POST your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically) \u2014 both quote log, metric and alert lines verbatim. The toggle does not cover Prior, Current or Map. Full History stays in this browser.'}
+        </Alert>
         {tool === 'remediate' && (
           <Alert title="Analysis only" severity="info">
             Remediate never executes changes. For operate/execute, use the Headlamp plugin.
@@ -266,17 +268,43 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </Alert>
         )}
 
-        {showContext && activeThread.current && (
-          <div className={styles.context} data-testid={testIds.dotai.current}>
-            <h3 className={styles.responseTitle}>Current</h3>
-            <pre className={styles.pre}>{activeThread.current}</pre>
+        {showContext && (activeThread.map || activeThread.drilldowns.length > 0) && (
+          <div className={styles.context} data-testid={testIds.dotai.map}>
+            <h3 className={styles.responseTitle}>Map</h3>
+            {activeThread.drilldowns.length > 0 && (
+              <div className={styles.drilldowns} data-testid={testIds.dotai.drilldown}>
+                {activeThread.drilldowns.map((link) => (
+                  <a
+                    key={link.id}
+                    className={styles.drilldownLink}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            )}
+            {activeThread.map && <pre className={styles.pre}>{activeThread.map}</pre>}
           </div>
         )}
 
-        {showContext && activeThread.map && (
-          <div className={styles.context} data-testid={testIds.dotai.map}>
-            <h3 className={styles.responseTitle}>Map</h3>
-            <pre className={styles.pre}>{activeThread.map}</pre>
+        {showContext && activeThread.current && (
+          <div className={styles.context} data-testid={testIds.dotai.current}>
+            <Collapse
+              label={
+                // ReactNode label, not a plain string, so e2e has one stable click
+                // target for the toggle across the Grafana versions in the matrix —
+                // Collapse's own header markup is not a contract.
+                <span data-testid={testIds.dotai.currentToggle}>Current (Grafana evidence)</span>
+              }
+              collapsible={true}
+              isOpen={currentOpen}
+              onToggle={() => setCurrentOpen(!currentOpen)}
+            >
+              <pre className={styles.pre}>{activeThread.current}</pre>
+            </Collapse>
           </div>
         )}
 
@@ -363,6 +391,15 @@ const getStyles = (theme: GrafanaTheme2) => ({
   responseTitle: css`
     margin: 0 0 ${theme.spacing(1)} 0;
     font-size: ${theme.typography.h5.fontSize};
+  `,
+  drilldowns: css`
+    display: flex;
+    flex-wrap: wrap;
+    gap: ${theme.spacing(1)};
+    margin-bottom: ${theme.spacing(1)};
+  `,
+  drilldownLink: css`
+    color: ${theme.colors.text.link};
   `,
   pre: css`
     margin: 0;
