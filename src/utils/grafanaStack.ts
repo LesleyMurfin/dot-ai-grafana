@@ -244,7 +244,9 @@ export function pickDataSource(
 
 /**
  * Configured datasource of a Grafana type, default-first.
- * getDataSourceSrv().getList({ type }) then get(ref) — no hardcoded uids, no picker UI.
+ * getDataSourceSrv().getList({ type, all: true }) then get(ref) — no hardcoded uids, no picker UI.
+ * `all: true` is required: getList() otherwise hides any datasource whose plugin.json declares none
+ * of metrics/annotations/tracing/logs/alerting, which is exactly Grafana's built-in Alertmanager.
  */
 export async function getDataSourceByType(
   type: 'loki' | 'prometheus' | 'tempo' | 'alertmanager'
@@ -258,7 +260,8 @@ export async function getDataSourceByType(
     // only sets "metrics": false). Pass all: true so a real, configured Alertmanager datasource is
     // still returned; pickDataSource()'s default/name/first ordering below is unaffected because it
     // already narrows to `type` first.
-    list = srv.getList({ type, all: true });
+    const raw = srv.getList({ type, all: true });
+    list = Array.isArray(raw) ? raw : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
