@@ -4,14 +4,11 @@ import {
   buildLogQL,
   CLUSTER_LOGQL,
   fetchStackContext,
-  dashboardUidsFromAlertFrames,
-  dashboardHintFromUids,
   getDataSourceByType,
   linesFromLokiFrames,
   LOG_LINE_CAP,
   parsePodNamespace,
 } from './grafanaStack';
-import { buildRequestText, MAX_INTENT_CHARS, mergeMap } from './progressiveContext';
 
 jest.mock('@grafana/runtime', () => ({
   getDataSourceSrv: jest.fn(),
@@ -31,6 +28,36 @@ function frameWithValue(labels: Record<string, string>, value: number) {
     name: labels.pod || 'series',
     fields: [{ name: 'Value', type: 'number', values: [value], labels }],
   };
+}
+
+type ListedDataSource = {
+  uid: string;
+  name: string;
+  type: string;
+  isDefault?: boolean;
+  meta: { metrics?: boolean; annotations?: boolean; tracing?: boolean; logs?: boolean; alerting?: boolean };
+};
+
+// Mirrors grafana/grafana public/app/features/plugins/datasource_srv.ts getList(): a datasource is
+// dropped unless `all: true` is passed OR its plugin meta declares at least one of
+// metrics/annotations/tracing/logs/alerting.
+function filterLikeGrafanaGetList(list: ListedDataSource[], opts?: { type?: string; all?: boolean }) {
+  return list.filter((s) => {
+    if (opts?.type && s.type !== opts.type) {
+      return false;
+    }
+    if (
+      !opts?.all &&
+      s.meta.metrics !== true &&
+      s.meta.annotations !== true &&
+      s.meta.tracing !== true &&
+      s.meta.logs !== true &&
+      s.meta.alerting !== true
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 beforeEach(() => {
@@ -239,92 +266,6 @@ describe('fetchStackContext', () => {
     const lokiReq = lokiQuery.mock.calls[0][0];
     expect(lokiReq.targets[0].expr).toMatch(/namespace=~/);
   });
-
-  // Dashboards are alert-derived, so the block has three cases and only two are worth
-  // budget. Current (700) and Map (400) are fixed, so every char spent here is a char of
-  // real evidence the packer sheds. Measured with the 30x77-char dump below and no firing
-  // alerts: Current 2523 chars packing to 957 and keeping 8 Loki lines, against 2588
-  // chars packing to 943 and keeping 7 when the "(none linked on firing alerts)"
-  // placeholder is emitted anyway. The placeholder cost the operator log line 07.
-  const lokiDump = Array.from(
-    { length: 30 },
-    (_, i) => `k8s error line ${String(i).padStart(2, '0')} ${'x'.repeat(60)}`
-  );
-
-  function mockStack(alertFields: Array<Record<string, unknown>>) {
-    mockGet.mockImplementation(async (ref: string) => {
-      if (ref === 'loki-1' || ref === 'Loki') {
-        return { query: () => of({ data: [frameWithLineField(lokiDump)] }) };
-      }
-      if (ref === 'prom-1' || ref === 'Prometheus') {
-        return {
-          query: () => of({ data: [frameWithValue({ pod: 'checkout-api', namespace: 'prod' }, 12)] }),
-        };
-      }
-      if (ref === 'am-1' || ref === 'Alertmanager') {
-        return { query: () => of({ data: alertFields.length > 0 ? [{ fields: alertFields }] : [] }) };
-      }
-      return { query: () => of({ data: [] }) };
-    });
-  }
-
-  test('no firing alerts: no Dashboards block, and one more Loki line survives packing', async () => {
-    mockStack([]);
-
-    const question = 'top issues in the cluster';
-    const result = await fetchStackContext(question);
-
-    expect(result.alertLines).toEqual([]);
-    expect(result.current).not.toContain('Dashboards');
-    expect(result.mapHint).not.toContain('dashboards');
-    expect(result.mapHint).not.toMatch(/,\s*$/);
-
-    const packed = buildRequestText({
-      tool: 'query',
-      current: result.current,
-      map: mergeMap(result.mapHint, question),
-      box: question,
-    });
-    expect(packed.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
-    // The contract is how much evidence reaches the model at a full Current, not whether
-    // a particular header is absent: Loki lines are peeled from the end, so line 07 is
-    // the marginal one and the 65 chars the placeholder used to spend are what it cost.
-    expect((packed.match(/k8s error line/g) ?? []).length).toBeGreaterThanOrEqual(8);
-    expect(packed).toContain(lokiDump[7]);
-    expect(packed).toContain('Question:');
-    expect(packed).toContain(question);
-  });
-
-  test('alerts firing with no dashboard link: the explicit negative is still emitted', async () => {
-    mockStack([{ name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] }]);
-
-    const result = await fetchStackContext('top issues in the cluster');
-
-    expect(result.current).toContain('KubePodCrashLooping');
-    // The model can see the alert, so it must be told there is no dashboard to cite
-    // rather than left to infer one.
-    expect(result.current).toContain('Dashboards (from firing alerts):');
-    expect(result.current).toContain('(none linked on firing alerts)');
-    expect(result.mapHint).toContain('dashboards: none linked on firing alerts');
-  });
-
-  test('alerts firing with dashboard links: the links are named in Current and Map', async () => {
-    mockStack([
-      {
-        name: 'alertname',
-        type: 'string',
-        values: ['KubePodCrashLooping'],
-        labels: { __dashboardUid__: 'abc12def' },
-      },
-    ]);
-
-    const result = await fetchStackContext('top issues in the cluster');
-
-    expect(result.current).toContain('Dashboards (from firing alerts):');
-    expect(result.current).toContain('/d/abc12def');
-    expect(result.current).not.toContain('none linked');
-    expect(result.mapHint).toContain('dashboards: /d/abc12def');
-  });
 });
 
 describe('getDataSourceByType selection', () => {
@@ -372,34 +313,46 @@ describe('getDataSourceByType selection', () => {
     const picked = await getDataSourceByType('loki');
     expect(picked?.settings?.uid).toBe('loki-a');
   });
-});
 
-describe('dashboardUidsFromAlertFrames', () => {
-  test('reads dashboardUid field and labels; ignores junk', () => {
-    const uids = dashboardUidsFromAlertFrames([
-      {
-        fields: [
-          { name: 'alertname', type: 'string', values: ['KubePodCrashLooping'] },
-          { name: 'dashboardUid', type: 'string', values: ['abc12def'] },
+  test('finds Alertmanager even though its plugin.json declares no capability flag', async () => {
+    // Grafana's built-in Alertmanager plugin.json declares none of
+    // metrics/annotations/tracing/logs/alerting, so getList() hides it unless `all: true` is passed.
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-1', name: 'Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
+          { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', meta: { metrics: false } },
         ],
-      } as never,
-      {
-        fields: [
-          {
-            name: 'alertname',
-            type: 'string',
-            values: ['Other'],
-            labels: { __dashboardUid__: 'panel-uid-1' },
-          },
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('alertmanager');
+    expect(picked?.settings?.uid).toBe('am-1');
+  });
+
+  test('all:true does not change which datasource is picked for loki/prometheus/tempo', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-a', name: 'Extra Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'loki-b', name: 'Team Loki', type: 'loki', meta: { logs: true }, isDefault: true },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
         ],
-      } as never,
-      {
-        fields: [{ name: 'dashboardUid', type: 'string', values: ['no'] }],
-      } as never,
-    ]);
-    expect(uids).toEqual(['abc12def', 'panel-uid-1']);
-    expect(dashboardHintFromUids([])).toBe('');
-    expect(dashboardHintFromUids(uids)).toContain('/d/abc12def');
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const loki = await getDataSourceByType('loki');
+    expect(loki?.settings?.uid).toBe('loki-b');
+    const prom = await getDataSourceByType('prometheus');
+    expect(prom?.settings?.uid).toBe('prom-1');
+    const tempo = await getDataSourceByType('tempo');
+    expect(tempo?.settings?.uid).toBe('tempo-1');
   });
 });
-

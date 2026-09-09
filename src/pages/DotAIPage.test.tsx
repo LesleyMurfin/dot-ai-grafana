@@ -31,9 +31,7 @@ const emptyStack = {
   tempoLines: [] as string[],
   alertLines: [] as string[],
   currentEmpty: false,
-  drilldowns: [] as Array<{ id: string; label: string; href: string }>,
 };
-
 
 
 async function selectTool(label: string) {
@@ -78,7 +76,7 @@ describe('Pages/DotAIPage', () => {
     expect(screen.getByRole('button', { name: /analyze$/i })).toBeInTheDocument();
   });
 
-  test('submit calls query with Stable+stack Current and History is not in POST body', async () => {
+  test('submit calls query with Stable+stack Current and no Prior on first turn', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
@@ -113,6 +111,7 @@ describe('Pages/DotAIPage', () => {
     expect(packed).toContain('show failing pods');
     expect(packed).toContain('Loki last 15m');
     expect(packed).not.toMatch(/\bHistory\b/i);
+    expect(packed).not.toMatch(/^Prior:/m);
     expect(JSON.stringify(mockCallDotAITool.mock.calls[0])).not.toMatch(/\bHistory\b/i);
     const hop2 = mockCallDotAITool.mock.calls[1][1];
     expect(hop2).toContain('Loki last 15m');
@@ -133,7 +132,6 @@ describe('Pages/DotAIPage', () => {
       tempoLines: [],
       alertLines: [],
       currentEmpty: false,
-      drilldowns: [],
     });
     mockCallDotAITool.mockResolvedValue({
       ok: true,
@@ -162,7 +160,7 @@ describe('Pages/DotAIPage', () => {
   });
 
 
-  test('follow-up packs Current into intent and still omits History from body', async () => {
+  test('follow-up packs Current and condensed Prior into intent', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
@@ -192,11 +190,13 @@ describe('Pages/DotAIPage', () => {
 
     const secondPacked = mockCallDotAITool.mock.calls[1][1];
     expect(secondPacked).toContain('Current:');
-    // Each Query turn packs fresh Grafana stack Current (not History).
+    // Each Query turn packs fresh Grafana stack Current plus condensed Prior from recent turns.
     expect(secondPacked).toContain('Loki last 15m');
     expect(secondPacked).toContain('why is pod checkout-api restarting in namespace prod?');
+    expect(secondPacked).toMatch(/^Prior:/m);
+    expect(secondPacked).toContain('status of pod checkout-api');
     expect(secondPacked).not.toMatch(/\bHistory\b/i);
-    // On-screen history still present but not in body
+    // Full History remains on screen; only condensed Prior leaves the browser.
     expect(screen.getByTestId(testIds.dotai.history)).toBeInTheDocument();
     expect(currentText.length).toBeGreaterThan(0);
     expect(mockFetchStackContext).toHaveBeenCalledTimes(2);
@@ -213,13 +213,34 @@ describe('Pages/DotAIPage', () => {
     render(<DotAIPage />);
     typeIntent('how is the cluster?');
     clickSubmit();
+
     expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/What's true now/i);
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('You');
     expect(screen.getByTestId(testIds.dotai.history)).toHaveTextContent('cluster looks healthy');
-
     expect(screen.queryByTestId(testIds.dotai.error)).not.toBeInTheDocument();
+  });
+
+  test('successful Ask clears the intent box, which also re-disables submit', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'cluster looks healthy',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('how is the cluster?');
+    expect(screen.getByTestId(testIds.dotai.intent)).toHaveValue('how is the cluster?');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('cluster looks healthy');
+    await waitFor(() => {
+      expect(screen.getByTestId(testIds.dotai.intent)).toHaveValue('');
+    });
+    // Emptying the box re-disables submit, so completion can never be read from the
+    // button becoming enabled — the intent value is the observable completion signal.
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
   });
 
   test('ok with empty summary shows fallback text', async () => {
@@ -255,9 +276,7 @@ describe('Pages/DotAIPage', () => {
 
     expect(await screen.findByTestId(testIds.dotai.error)).toHaveTextContent('llm unavailable');
     expect(screen.getByTestId(testIds.dotai.retry)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent(/Loki last 15m/i);
-
     expect(screen.queryByTestId(testIds.dotai.history)).not.toBeInTheDocument();
   });
 
@@ -275,7 +294,7 @@ describe('Pages/DotAIPage', () => {
     clickSubmit();
 
     const alert = await screen.findByTestId(testIds.dotai.error);
-    expect(alert).toHaveTextContent('Ask stopped at the 120s limit per hop');
+    expect(alert).toHaveTextContent('Ask stopped at the 120s limit per hop (up to 3 hops); retry or narrow the question.');
     expect(alert).toHaveTextContent('Ask timed out');
   });
 
@@ -600,54 +619,99 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
   });
 
-  test('sendGrafanaEvidence false hides consent and skips stack fetch', async () => {
+  test('evidence off: the notice still discloses Prior, and Prior is still POSTed', async () => {
     mockCallDotAITool.mockResolvedValue({
       ok: true,
       status: 200,
-      summary: '3 pods failing',
+      summary:
+        'pod checkout-api in namespace prod logs FATAL password authentication failed for user "billing"',
       raw: {},
     });
 
     render(<DotAIPage sendGrafanaEvidence={false} />);
-    expect(screen.queryByTestId(testIds.dotai.consent)).not.toBeInTheDocument();
 
-    typeIntent('show failing pods');
-    clickSubmit();
-
-    await waitFor(() => {
-      expect(mockCallDotAITool).toHaveBeenCalled();
-    });
-    expect(mockFetchStackContext).not.toHaveBeenCalled();
-    expect(mockCallDotAITool.mock.calls[0][1]).toContain('show failing pods');
-  });
-
-  test('sendGrafanaEvidence default shows consent banner', () => {
-    render(<DotAIPage />);
-    expect(screen.getByTestId(testIds.dotai.consent)).toBeInTheDocument();
-    expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(
-      'Asks send Grafana datasource facts (Loki, Prometheus, Tempo, Alertmanager) to your configured dot-ai server.'
+    // The operator who opted out of evidence still gets a notice, because prior-turn
+    // question and answer text still leaves the browser. The toggle does not cover it.
+    const notice = screen.getByTestId(testIds.dotai.consent);
+    expect(notice).toHaveTextContent(/Send Grafana evidence is off, so Asks read no datasource/);
+    expect(notice).toHaveTextContent(
+      /condensed Prior block of up to 240 characters built from your earlier questions and dot-ai’s earlier answers/
     );
+    expect(notice).toHaveTextContent(
+      /the question side can also carry follow-up instructions this page adds automatically/
+    );
+    expect(notice).toHaveTextContent(/quote log, metric and alert lines verbatim/);
+    expect(notice).toHaveTextContent(/The toggle does not cover Prior, Current or Map/);
+    expect(notice).toHaveTextContent(/Full History stays in this browser/);
+
+    typeIntent('status of pod checkout-api in namespace prod');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
+    });
+
+    typeIntent('why is pod checkout-api restarting in namespace prod?');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(2);
+    });
+
+    // Measured egress, not inferred: with the toggle off no datasource is read …
+    expect(mockFetchStackContext).not.toHaveBeenCalled();
+    const packed = mockCallDotAITool.mock.calls[1][1];
+    expect(packed).not.toContain('Loki last 15m');
+    // … but the prior question, and quoted log text from the prior answer, do leave.
+    expect(packed).toMatch(/^Prior:/m);
+    expect(packed).toContain('status of pod checkout-api');
+    expect(packed).toContain('password authentication failed');
   });
 
-  test('show me the logs skips POST and renders Explore link', async () => {
-    mockFetchStackContext.mockResolvedValue({
-      ...emptyStack,
-      current: 'Loki last 15m:\nboom',
-      mapHint: 'Loki Loki',
-      logLines: ['boom'],
-      drilldowns: [{ id: 'explore-logs', label: 'Explore logs', href: '/explore?panes=x' }],
+  test('evidence on: the notice names every block the follow-up Ask actually POSTs', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary:
+        'pod checkout-api in namespace prod logs FATAL password authentication failed for user "billing"',
+      raw: {},
     });
 
     render(<DotAIPage />);
-    typeIntent('show me the logs');
+    const notice = screen.getByTestId(testIds.dotai.consent);
+    expect(notice).toHaveTextContent(
+      /Query Asks that need live data replace Current with Grafana datasource facts read at that moment \(Loki, Prometheus, Tempo, Alertmanager\)/
+    );
+    expect(notice).toHaveTextContent(/Remediate Asks read no datasource/);
+    expect(notice).toHaveTextContent(/the session Current summary and Map of resource names/);
+    expect(notice).toHaveTextContent(
+      /condensed Prior block of up to 240 characters built from your earlier questions and dot-ai’s earlier answers/
+    );
+    expect(notice).toHaveTextContent(
+      /the question side can also carry follow-up instructions this page adds automatically/
+    );
+    expect(notice).toHaveTextContent(
+      /Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too/
+    );
+    expect(notice).toHaveTextContent(/Full History stays in this browser/);
+
+    typeIntent('status of pod checkout-api in namespace prod');
     clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(1);
+    });
 
-    expect(await screen.findByTestId(testIds.dotai.drilldown)).toBeInTheDocument();
-    const link = screen.getByRole('link', { name: 'Explore logs' });
-    expect(link).toHaveAttribute('href', '/explore?panes=x');
-    expect(mockCallDotAITool).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByText(/Current \(Grafana evidence\)/));
-    expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
+    typeIntent('why is pod checkout-api restarting in namespace prod?');
+    clickSubmit();
+    await waitFor(() => {
+      expect(mockCallDotAITool).toHaveBeenCalledTimes(2);
+    });
 
+    const packed = mockCallDotAITool.mock.calls[1][1];
+    // Every block the notice names is in the POST body, and nothing it omits is.
+    expect(packed).toContain('Loki last 15m');
+    expect(packed).toMatch(/^Current:/m);
+    expect(packed).toMatch(/^Prior:/m);
+    expect(packed).toContain('status of pod checkout-api');
+    expect(packed).toContain('password authentication failed');
+    expect(packed).not.toMatch(/^History:/m);
   });
 });

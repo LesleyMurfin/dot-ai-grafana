@@ -7,8 +7,7 @@ import {
   TimeRange,
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
-import { lastValueFrom, Observable } from 'rxjs';
-import { buildDrilldownLinks, DrilldownLink } from './grafanaExplore';
+import { isObservable, lastValueFrom, Observable } from 'rxjs';
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
@@ -36,8 +35,6 @@ export type StackContextResult = {
   alertLines: string[];
   /** True when every stack block is an empty/missing note (no evidence lines). */
   currentEmpty: boolean;
-  /** UI-only Explore/Drilldown/dashboard links. Never POSTed. */
-  drilldowns: DrilldownLink[];
 };
 
 /** Cluster-wide LogQL when the question has no pod/ns — recent error-ish lines. */
@@ -239,7 +236,9 @@ export function pickDataSource(
 
 /**
  * Configured datasource of a Grafana type, default-first.
- * getDataSourceSrv().getList({ type }) then get(ref) — no hardcoded uids, no picker UI.
+ * getDataSourceSrv().getList({ type, all: true }) then get(ref) — no hardcoded uids, no picker UI.
+ * `all: true` is required: getList() otherwise hides any datasource whose plugin.json declares none
+ * of metrics/annotations/tracing/logs/alerting, which is exactly Grafana's built-in Alertmanager.
  */
 export async function getDataSourceByType(
   type: 'loki' | 'prometheus' | 'tempo' | 'alertmanager'
@@ -247,7 +246,7 @@ export async function getDataSourceByType(
   const srv = getDataSourceSrv();
   let list: DataSourceInstanceSettings[] = [];
   try {
-    const raw = srv.getList({ type } as never);
+    const raw = srv.getList({ type, all: true } as never);
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
@@ -278,7 +277,7 @@ async function runDsQuery(ds: DsQueryable, request: DataQueryRequest): Promise<D
   if (result && typeof (result as Promise<DataQueryResponse>).then === 'function') {
     return result as Promise<DataQueryResponse>;
   }
-  if (result && typeof (result as Observable<DataQueryResponse>).subscribe === 'function') {
+  if (isObservable(result)) {
     return lastValueFrom(result as Observable<DataQueryResponse>);
   }
   return undefined;
@@ -335,59 +334,6 @@ export function textLinesFromFrames(frames: DataFrame[], cap: number): string[] 
     }
   }
   return lines.slice(0, cap);
-}
-
-
-const DASHBOARD_UID_KEYS = ['dashboardUID', 'dashboardUid', '__dashboardUid__', 'dashboard_uid'];
-
-function addDashboardUid(raw: unknown, seen: Record<string, true>, uids: string[]) {
-  const s = String(raw ?? '').trim();
-  if (!s || seen[s] || !/^[A-Za-z0-9_-]{5,40}$/.test(s)) {
-    return;
-  }
-  seen[s] = true;
-  uids.push(s);
-}
-
-/** v1: dashboard UIDs Grafana already attached to firing alerts. Never GET /api/search. */
-export function dashboardUidsFromAlertFrames(frames: DataFrame[]): string[] {
-  const uids: string[] = [];
-  const seen: Record<string, true> = {};
-  for (const frame of frames) {
-    for (const field of frame.fields ?? []) {
-      if (DASHBOARD_UID_KEYS.includes(field.name)) {
-        const len = fieldLength(field.values);
-        for (let i = 0; i < len; i++) {
-          addDashboardUid(fieldGet(field.values, i), seen, uids);
-        }
-      }
-      const labels = (field as { labels?: Record<string, string> }).labels ?? {};
-      for (const key of DASHBOARD_UID_KEYS) {
-        if (labels[key]) {
-          addDashboardUid(labels[key], seen, uids);
-        }
-      }
-    }
-  }
-  return uids;
-}
-
-/**
- * Map hint for the dashboards Grafana attached to firing alerts. Three cases, because
- * both the Current (700) and Map (400) budgets are fixed and every char spent here is
- * a char of real evidence the packer sheds:
- *
- * - links exist                 → name them; the model can cite them.
- * - alerts firing, no links     → say so; the explicit negative is the cheap defence
- *                                 against inventing a dashboard link for an alert.
- * - no alerts at all            → '' — there is nothing a dashboard could be linked to,
- *                                 so the sentence would cost budget to say nothing.
- */
-export function dashboardHintFromUids(uids: string[], alertsFiring = false): string {
-  if (uids.length > 0) {
-    return 'dashboards: ' + uids.map((u) => '/d/' + u).join(' ');
-  }
-  return alertsFiring ? 'dashboards: none linked on firing alerts' : '';
 }
 
 export function linesFromLokiFrames(frames: DataFrame[]): string[] {
@@ -480,7 +426,6 @@ function formatCurrent(args: {
   promLines: string[];
   tempoLines: string[];
   alertLines: string[];
-  dashboardUids: string[];
   lokiNote?: string;
   promNote?: string;
   tempoNote?: string;
@@ -501,26 +446,6 @@ function formatCurrent(args: {
   parts.push(`Alertmanager${scope}:`);
   parts.push(args.alertLines.length > 0 ? args.alertLines.join('\n') : args.alertNote ?? 'no alerts');
 
-  // Dashboards are alert-derived, not a queried datasource, so unlike the four blocks
-  // above they have no "checked, found nothing" state of their own. Emitted in two of
-  // three cases: the links when Grafana attached any, and an explicit negative when
-  // alerts are firing but carry none — that negative is the cheap defence against the
-  // model inventing a link for an alert it can see. On a cluster with no firing alerts
-  // the block is omitted: there it cost 65 chars of the fixed 700-char MAX_CURRENT_CHARS
-  // budget to announce nothing, and the packer paid for it by shedding the last Loki
-  // line that still fitted.
-  const dashboardHint =
-    args.dashboardUids.length > 0
-      ? args.dashboardUids.map((u) => '/d/' + u).join('\n')
-      : args.alertLines.length > 0
-        ? '(none linked on firing alerts)'
-        : '';
-  if (dashboardHint) {
-    parts.push('');
-    parts.push('Dashboards (from firing alerts):');
-    parts.push(dashboardHint);
-  }
-
   return parts.join('\n');
 }
 
@@ -540,7 +465,6 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   let promLines: string[] = [];
   let tempoLines: string[] = [];
   let alertLines: string[] = [];
-  let dashboardUids: string[] = [];
   let lokiNote: string | undefined;
   let promNote: string | undefined;
   let tempoNote: string | undefined;
@@ -565,28 +489,25 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   if (target.pod) {
     mapParts.push(`pod/${target.pod}`);
   }
+  const mapHint = mapParts.join(', ');
 
   const queryOne = async (
-    ds: { ds?: { query: (req: DataQueryRequest) => unknown }; settings?: DataSourceInstanceSettings } | undefined,
+    ds: { ds?: { query: (req: DataQueryRequest) => unknown } } | undefined,
     missing: string,
     failPrefix: string,
-    run: () => Promise<{ lines: string[]; emptyNote: string; frames?: DataFrame[] }>
-  ): Promise<{ lines: string[]; note?: string; frames: DataFrame[] }> => {
+    run: () => Promise<{ lines: string[]; emptyNote: string }>
+  ): Promise<{ lines: string[]; note?: string }> => {
     if (!ds?.ds) {
-      return { lines: [], note: missing, frames: [] };
+      return { lines: [], note: missing };
     }
     try {
-      const { lines, emptyNote, frames } = await run();
+      const { lines, emptyNote } = await run();
       if (lines.length === 0) {
-        return { lines, note: emptyNote, frames: frames ?? [] };
+        return { lines, note: emptyNote };
       }
-      return { lines, frames: frames ?? [] };
+      return { lines };
     } catch (e) {
-      return {
-        lines: [],
-        note: `${failPrefix} (${e instanceof Error ? e.message : 'query failed'})`,
-        frames: [],
-      };
+      return { lines: [], note: `${failPrefix} (${e instanceof Error ? e.message : 'query failed'})` };
     }
   };
 
@@ -599,11 +520,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
           'dotai-loki'
         ) as DataQueryRequest
       );
-      const frames = framesOf(resp);
-      const lines = linesFromLokiFrames(frames);
+      const lines = linesFromLokiFrames(framesOf(resp));
       return {
         lines,
-        frames,
         emptyNote: scoped
           ? 'no log lines for this pod/namespace in the last 15m'
           : 'no log lines cluster-wide for error-like events in the last 15m',
@@ -617,11 +536,9 @@ export async function fetchStackContext(question: string): Promise<StackContextR
           'dotai-prometheus'
         ) as DataQueryRequest
       );
-      const frames = framesOf(resp);
-      const lines = factsFromPromFrames(frames);
+      const lines = factsFromPromFrames(framesOf(resp));
       return {
         lines,
-        frames,
         emptyNote: scoped
           ? 'no metric samples for this pod/namespace in the last 15m'
           : 'no metric samples cluster-wide for restarts in the last 15m',
@@ -636,9 +553,8 @@ export async function fetchStackContext(question: string): Promise<StackContextR
           'dotai-tempo'
         ) as DataQueryRequest
       );
-      const frames = framesOf(resp);
-      const lines = tracesFromTempoFrames(frames);
-      return { lines, frames, emptyNote: 'no traces for this target in the last 15m' };
+      const lines = tracesFromTempoFrames(framesOf(resp));
+      return { lines, emptyNote: 'no traces for this target in the last 15m' };
     }),
     queryOne(am, 'Alertmanager datasource missing', 'no alerts', async () => {
       const exprParts: string[] = [];
@@ -653,9 +569,8 @@ export async function fetchStackContext(question: string): Promise<StackContextR
         am!.ds!,
         baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
       );
-      const frames = framesOf(resp);
-      const lines = textLinesFromFrames(frames, ALERT_CAP);
-      return { lines, frames, emptyNote: 'no alerts' };
+      const lines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
+      return { lines, emptyNote: 'no alerts' };
     }),
   ]);
 
@@ -667,22 +582,6 @@ export async function fetchStackContext(question: string): Promise<StackContextR
   tempoNote = tempoRes.note;
   alertLines = amRes.lines;
   alertNote = amRes.note;
-  dashboardUids = dashboardUidsFromAlertFrames(amRes.frames);
-
-  const mapHint = [...mapParts, dashboardHintFromUids(dashboardUids, alertLines.length > 0)]
-    .filter(Boolean)
-    .join(', ');
-  const tempoSearch = target.pod || target.namespace || question.slice(0, 80);
-  const drilldowns = buildDrilldownLinks({
-    lokiUid: loki?.settings?.uid,
-    promUid: prom?.settings?.uid,
-    tempoUid: tempo?.settings?.uid,
-    logql,
-    promql,
-    tempoSearch,
-    traceIds: tempoLines.map((line) => line.replace(/^trace\s+/i, '').trim()).filter(Boolean),
-    dashboardUids,
-  });
 
   const currentEmpty = isStackCurrentEmpty({ logLines, promLines, tempoLines, alertLines });
 
@@ -692,14 +591,12 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     tempoLines,
     alertLines,
     currentEmpty,
-    drilldowns,
     current: formatCurrent({
       target,
       logLines,
       promLines,
       tempoLines,
       alertLines,
-      dashboardUids,
       lokiNote,
       promNote,
       tempoNote,
