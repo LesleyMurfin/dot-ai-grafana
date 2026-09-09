@@ -259,7 +259,7 @@ What shipped in the plugin PR. Original outline + earlier expansions stay above;
 
 Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
 
-**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type })`. Per-type checkboxes are future. Related alerts are already in **Current** from Alertmanager when send is on. Map/Explore/show-me is **folded into PRD #1** rather than deferred to PRD #3, and is landing in code as its own PRs: the Explore/Drilldown link builders are on `main` ([#52](https://github.com/vfarcic/dot-ai-grafana/pull/52)), and the Map-panel wiring plus the show-me 0-hop path come with [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79). This change records the fold; it carries none of that code. Markdown Answer is **not** this PR — [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Grafana `/apis` dashboard inventory is later than PRD #3.
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type, all: true })`. Per-type checkboxes are future. Related alerts are already in **Current** from Alertmanager when send is on. Map/Explore/show-me is **folded into PRD #1** rather than deferred to PRD #3, and is landing in code as its own PRs: the Explore/Drilldown link builders are on `main` ([#52](https://github.com/vfarcic/dot-ai-grafana/pull/52)), and the Map-panel wiring plus the show-me 0-hop path come with [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79). This change records the fold; it carries none of that code. Markdown Answer is **not** this PR — [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Grafana `/apis` dashboard inventory is later than PRD #3.
 
 **Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
 
@@ -295,7 +295,7 @@ Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic
 
 - Never `GET /api/search` — Folder/Dashboard Search **will not be migrated**.
 - Never Grafana Data source HTTP (`/api/datasources`) — deprecated; we already use `getDataSourceSrv`.
-- Never Alerting Provisioning HTTP for “related alerts” — we already query Alertmanager via `ds.query`.
+- Never Alerting Provisioning HTTP for “related alerts” — we read the configured Alertmanager datasource's own `/api/v2/alerts` proxy route, the same mechanism Grafana's built-in Alertmanager datasource uses (its `query()` is a stub, so `ds.query` cannot serve this one source).
 - If we add “which dashboard to open”: Grafana 12+ **Dashboard `/apis`** only (`dashboard.grafana.app`), not `/api/dashboards` or `/api/search`.
 - Plugin `/api/plugins/<id>/resources/*` and `/settings` stay until Grafana publishes a plugin-SDK replacement; they are not the dashboard `/api` deprecation.
 
