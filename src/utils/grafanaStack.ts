@@ -465,8 +465,15 @@ function alertFilterQuery(target: PodNamespaceTarget): string {
  * Mimir and Cortex serve the Alertmanager v2 API under an `/alertmanager` prefix;
  * a plain Prometheus Alertmanager serves it at the root. Grafana records which one
  * the operator selected in `jsonData.implementation` and its own
- * AlertManagerDatasource.testDatasource() branches on exactly that. An unset
- * implementation is treated as Prometheus, matching the datasource config UI default.
+ * AlertManagerDatasource.testDatasource() branches on exactly that.
+ *
+ * Grafana's branch is `implementation === 'prometheus' ? root : '/alertmanager'`, so Grafana
+ * treats an *unset* implementation as Mimir — ConfigEditor.tsx defaults the dropdown to Mimir
+ * and writes it back on first edit. We deliberately treat unset as the root path instead:
+ * provisioning is the main way `implementation` stays unset, and a provisioned Alertmanager
+ * datasource in this plugin's target environment is almost always the Prometheus-operator's
+ * plain Alertmanager, which serves /api/v2 at the root. A wrong guess is not silent — the read
+ * 404s and Current reports `Alertmanager alerts unavailable (...)` rather than "no alerts".
  */
 function alertmanagerApiPrefix(settings: DataSourceInstanceSettings): string {
   const implementation = (settings.jsonData as { implementation?: string } | undefined)?.implementation;

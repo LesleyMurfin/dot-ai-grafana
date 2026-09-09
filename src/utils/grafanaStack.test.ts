@@ -399,6 +399,22 @@ describe('fetchStackContext', () => {
     expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/alertmanager/api/v2/alerts`);
   });
 
+  // Grafana's own testDatasource() treats an unset jsonData.implementation as Mimir (its config
+  // UI defaults the dropdown to Mimir). We deliberately diverge and use the root path, because a
+  // provisioned datasource — the main way implementation stays unset here — is almost always a
+  // plain Prometheus-operator Alertmanager. Pinned so the divergence stays a decision, not drift.
+  test('treats an unset jsonData.implementation as a root-path Prometheus Alertmanager', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string }) =>
+      opts?.type === 'alertmanager' ? [{ uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', url: AM_URL }] : []
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+    mockBackendGet.mockResolvedValue([]);
+
+    await fetchStackContext('how healthy is the cluster?');
+
+    expect(mockBackendGet).toHaveBeenCalledWith(`${AM_URL}/api/v2/alerts`);
+  });
+
   test('an empty alert list reads as "no alerts firing", never as a 15m window claim', async () => {
     mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
     mockBackendGet.mockResolvedValue([]);
