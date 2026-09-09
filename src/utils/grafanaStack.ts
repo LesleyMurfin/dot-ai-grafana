@@ -7,7 +7,7 @@ import {
   TimeRange,
 } from '@grafana/data';
 import { getDataSourceSrv } from '@grafana/runtime';
-import { lastValueFrom, Observable } from 'rxjs';
+import { isObservable, lastValueFrom, Observable } from 'rxjs';
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
@@ -236,7 +236,9 @@ export function pickDataSource(
 
 /**
  * Configured datasource of a Grafana type, default-first.
- * getDataSourceSrv().getList({ type }) then get(ref) — no hardcoded uids, no picker UI.
+ * getDataSourceSrv().getList({ type, all: true }) then get(ref) — no hardcoded uids, no picker UI.
+ * `all: true` is required: getList() otherwise hides any datasource whose plugin.json declares none
+ * of metrics/annotations/tracing/logs/alerting, which is exactly Grafana's built-in Alertmanager.
  */
 export async function getDataSourceByType(
   type: 'loki' | 'prometheus' | 'tempo' | 'alertmanager'
@@ -244,7 +246,7 @@ export async function getDataSourceByType(
   const srv = getDataSourceSrv();
   let list: DataSourceInstanceSettings[] = [];
   try {
-    const raw = srv.getList({ type } as never);
+    const raw = srv.getList({ type, all: true } as never);
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
@@ -275,7 +277,7 @@ async function runDsQuery(ds: DsQueryable, request: DataQueryRequest): Promise<D
   if (result && typeof (result as Promise<DataQueryResponse>).then === 'function') {
     return result as Promise<DataQueryResponse>;
   }
-  if (result && typeof (result as Observable<DataQueryResponse>).subscribe === 'function') {
+  if (isObservable(result)) {
     return lastValueFrom(result as Observable<DataQueryResponse>);
   }
   return undefined;

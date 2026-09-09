@@ -29,7 +29,7 @@ Whoever is signed in to Grafana uses it under their existing **org role**; there
 
 ### Query
 
-Ask natural language questions about your cluster. The engine's answer renders as plain text.
+Ask natural language questions about your cluster. The engine's answer is displayed as plain text; a later release renders it as sanitized markdown — headings, lists, tables, links, and code blocks (unhighlighted). The plugin never asks the engine for rich visualizations, so no diagrams or charts are generated either way.
 
 On Query, the page reads the configured Loki, Prometheus, Tempo, and Alertmanager datasources via Grafana's datasource service (no hardcoded UIDs; Alertmanager is normally reported missing — see the note under [Configure](#configure)) and packs **Current** + **Map** into the same `{intent}` string. **History** stays on screen only — the last 5 entries, counting each You and each Answer as one — and is never sent to the engine. The packed intent is capped at 1000 characters, and your question is reserved *before* the evidence is packed: under pressure the packer sheds plugin-written follow-up instruction lines until Current can hold its 240-character floor, then drops Map, drops the Tempo block, peels Loki, then Prometheus, then Alertmanager lines, and finally caps the Current block itself rather than blind-capping the packed tail that carries the question. On a busy cluster the Loki block can shrink to `…`, so a full log excerpt is not guaranteed. Keep questions short anyway: a long question crowds out evidence, and if the preamble plus the question alone overflow the budget the question is capped as the last resort. One Ask may issue up to 3 dot-ai POSTs.
 
@@ -91,7 +91,7 @@ As Grafana **Admin**: open **Configuration** under **dot-ai** in the left nav, o
 | Auth Token | _(empty)_ | Plugin backend credential to the dot-ai engine, stored in Grafana encrypted settings and sent as `Authorization: Bearer`. Use an analysis-only token with no apply rights. |
 | Debug Log | Off | JSONL ask log at `/var/lib/grafana/dotai-ask.log`. May include packed Current (Loki/Prom lines). Each line records the Grafana user `login` and org `role`; never their email or display name. No Grafana tokens. |
 | Show context | On | Show Current, Map, and History on the page. Display only; intent packing still runs when this is off. |
-| Send Grafana evidence | On | When on, Asks pack Grafana datasource facts and the page shows a consent info Alert naming them (Loki, Prometheus, Tempo, Alertmanager). Missing/undefined = send. Independent of Show context. |
+| Send Grafana evidence | On | When on, a Query Ask that reads the stack replaces Current with fresh Grafana datasource facts, and the page shows a consent info Alert naming them (Loki, Prometheus, Tempo, Alertmanager). Remediate never reads a datasource, on or off. Missing/undefined = send. Independent of Show context. |
 | Test connection | — | Admin-only. Probes `POST /api/v1/tools/version` through the plugin backend |
 
 Alertmanager is named in that consent Alert because an Ask queries a configured Alertmanager datasource alongside the other three, scoped to the pod or namespace the question names and cluster-wide otherwise. It is resolved like the others, through Grafana's datasource service rather than a hardcoded UID, which does not surface Grafana's own built-in Alertmanager — so in practice Current reports it as missing unless a standalone Alertmanager datasource is configured ([issue #47](https://github.com/vfarcic/dot-ai-grafana/issues/47)). That is why the evidence described above is Loki, Prometheus, and Tempo.
@@ -116,7 +116,7 @@ An Ask resolves in at most three engine hops. The browser never talks to the eng
           hop 3: still hedges → hedge     (cap 3)
           Go strips hop meta, writes ask log, Bearer to dot-ai
           dot-ai query toolLoop (kubectl/MCP) returns summary
-          Answer renders as plain text
+          Answer renders as plain text (sanitized markdown in a later release)
 ```
 
 Each POST above travels that same path:
