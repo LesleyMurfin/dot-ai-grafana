@@ -220,17 +220,28 @@ def _num(token: str) -> int | None:
     return WORD_NUMBERS.get(token.lower())
 
 
-LADDER_MARKERS: list[tuple[str, str]] = [
-    (r"\binstr\b[^\n]*\.slice\(", "instructions"),
-    (r"map = ''", "map"),
-    (r"dropTempoSection\(", "tempo"),
-    (r"for \(const head of TRIM_ORDER\)", "@TRIM_ORDER"),
-    (r"trimLokiSection\(", "loki"),
-    (r"trimSection\(current, '([A-Za-z]+)", "@literal"),
-    (r"cap\(current,", "current"),
-    (r"cap\(box,", "question"),
-    (r"return cap\(text,", "packed-tail"),
+# (pattern, token, rung). `rung` names the step the marker proves; markers sharing a
+# rung are alternative spellings of it. Every rung in LADDER_RUNGS must be proven or
+# the row skips rather than compare a half-resolved order - see derive_source_ladder.
+# A marker with no rung ("") is a regression sentinel, not a step.
+LADDER_MARKERS: list[tuple[str, str, str]] = [
+    (r"^\s*instr = instr\.slice\(", "instructions", "instructions"),
+    (r"^\s*map = ''", "map", "map"),
+    # Reassignment only: `let prior = condensePriorTurns(...)` builds Prior, it does
+    # not shed it. Both the shrink and the later drop are hits; first one wins.
+    (r"^\s*prior = ", "prior", "prior"),
+    (r"\bdropTempoSection\(", "tempo", "tempo"),
+    (r"for \(const head of TRIM_ORDER\)", "@TRIM_ORDER", "evidence"),
+    (r"\btrimLokiSection\(", "loki", "evidence"),
+    (r"trimSection\(current, '([A-Za-z]+)", "@literal", "evidence"),
+    (r"\bcap\(\s*(?:reduced\.)?current\b", "current", "current"),
+    (r"\bcap\(\s*box\b", "question", "question"),
+    (r"return cap\(\s*text\b", "packed-tail", ""),
 ]
+
+# The rungs a trustworthy ladder must resolve. Losing one means the table above has
+# rotted against a refactor, not that the step is gone: the row skips and says so.
+LADDER_RUNGS = ("instructions", "map", "prior", "tempo", "evidence", "current", "question")
 
 DOC_LADDER_TOKENS: list[tuple[str, str]] = [
     (r"plugin-written|follow-up (?:instruction )?lines|instruction lines", "instructions"),
@@ -249,8 +260,79 @@ DOC_LADDER_TOKENS: list[tuple[str, str]] = [
 LADDER_VERB = re.compile(r"\b(sheds?|peels?|drops?|trims?)\b", re.IGNORECASE)
 
 
-def derive_source_ladder(rel: str) -> tuple[list[str], dict[str, int]] | None:
-    """Read the shedding order out of buildRequestText. Never hardcoded."""
+def _lift_closures(body: str) -> dict[str, tuple[str, int]]:
+    """Pull `const name = (...) => { ... };` helpers out of a function body.
+
+    Returns {name: (definition, offset)}. A helper's markers belong to the rung that
+    CALLS it, not to the line it is written on: `reduceEvidence` is declared above the
+    ladder but runs in the middle of it, so a flat textual scan reads the evidence
+    steps first and derives an order the code never applies.
+    """
+    found: dict[str, tuple[str, int]] = {}
+    for m in re.finditer(r"^  const (\w+) = \([^)]*\)[^=]*=> \{", body, re.M):
+        depth, i = 0, m.end() - 1
+        while i < len(body):
+            if body[i] == "{":
+                depth += 1
+            elif body[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        found[m.group(1)] = (body[m.start(): i + 1], m.start())
+    return found
+
+
+def _blank(body: str, spans: list[tuple[int, int]]) -> str:
+    """Blank out spans, keeping newlines so offsets and line numbers still hold."""
+    out = list(body)
+    for lo, hi in spans:
+        for i in range(lo, min(hi, len(out))):
+            if out[i] != "\n":
+                out[i] = " "
+    return "".join(out)
+
+
+def _scan_rungs(text: str, offset: int, trim_order: list[str],
+                closures: dict[str, tuple[str, int]], seen: frozenset[str]):
+    """Yield (token, offset, rung) for every marker in `text`, in textual order.
+
+    A call to a lifted closure expands in place to that closure's own markers, so the
+    yielded sequence is the order the ladder runs rather than the order it is written.
+    """
+    events: list[tuple[int, tuple]] = []
+    for pattern, token, rung in LADDER_MARKERS:
+        for m in re.finditer(pattern, text, re.M):
+            events.append((m.start(), ("marker", m, token, rung)))
+    for name, (definition, at) in closures.items():
+        if name in seen:
+            continue
+        for m in re.finditer(rf"\b{re.escape(name)}\(", text):
+            events.append((m.start(), ("call", name, definition, at)))
+    events.sort(key=lambda e: e[0])
+    for _, ev in events:
+        if ev[0] == "call":
+            _, name, definition, at = ev
+            yield from _scan_rungs(definition, at, trim_order, closures, seen | {name})
+            continue
+        _, m, token, rung = ev
+        if token == "@TRIM_ORDER":
+            tokens = trim_order
+        elif token == "@literal":
+            tokens = [m.group(1).lower()]
+        else:
+            tokens = [token]
+        for tok in tokens:
+            yield tok, offset + m.start(), rung
+
+
+def derive_source_ladder(rel: str) -> tuple[list[str], dict[str, int], list[str]] | None:
+    """Read the shedding order out of buildRequestText. Never hardcoded.
+
+    Third element is the rungs no marker proved. A non-empty list means the marker
+    table has rotted against a refactor and the derived order is a truncated guess,
+    so the caller must skip rather than report the difference as drift.
+    """
     text = read(rel)
     if text is None:
         return None
@@ -263,25 +345,18 @@ def derive_source_ladder(rel: str) -> tuple[list[str], dict[str, int]] | None:
     m = re.search(r"const TRIM_ORDER = \[(.*?)\]", text, re.S)
     if m:
         trim_order = [s.split()[0].lower() for s in re.findall(r"'([^']+)'", m.group(1))]
+    closures = _lift_closures(body)
+    ladder = _blank(body, [(at, at + len(d)) for d, at in closures.values()])
     order: list[str] = []
     lines: dict[str, int] = {}
-    base_line = line_of(text, start) - 1
-    for i, line in enumerate(body.splitlines(), start=1):
-        for pattern, token in LADDER_MARKERS:
-            hit = re.search(pattern, line)
-            if not hit:
-                continue
-            if token == "@TRIM_ORDER":
-                tokens = trim_order
-            elif token == "@literal":
-                tokens = [hit.group(1).lower()]
-            else:
-                tokens = [token]
-            for tok in tokens:
-                if tok not in order:
-                    order.append(tok)
-                    lines[tok] = base_line + i
-    return (order, lines) if order else None
+    proven: set[str] = set()
+    for tok, off, rung in _scan_rungs(ladder, 0, trim_order, closures, frozenset()):
+        proven.add(rung)
+        if tok not in order:
+            order.append(tok)
+            lines[tok] = line_of(text, start) + body.count("\n", 0, off)
+    missing = [r for r in LADDER_RUNGS if r not in proven]
+    return (order, lines, missing) if order else None
 
 
 def _doc_ladder(text: str) -> tuple[int, list[str]] | None:
@@ -328,7 +403,17 @@ def gate_c(rep: Report) -> None:
             if derived is None:
                 rep.skip(gate, row["id"], f"could not read buildRequestText from {row['source']['file']}")
                 continue
-            src_order, src_lines = derived
+            src_order, src_lines, missing = derived
+            # A half-resolved ladder is not evidence of drift, it is evidence that the
+            # marker table lost a step to a refactor. Say that instead of comparing a
+            # truncated order against the doc and calling the difference a doc bug.
+            if missing:
+                rep.skip(
+                    gate, row["id"],
+                    f"no marker in LADDER_MARKERS resolves {', '.join(missing)} in "
+                    f"{row['source']['file']} - refresh the table before trusting the order",
+                )
+                continue
             for rel in files:
                 text = read(rel) or ""
                 doc = _doc_ladder(text)

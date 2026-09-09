@@ -30,7 +30,7 @@
       "kind": "numeric_member",
       "source": {
         "file": "src/utils/progressiveContext.ts",
-        "regex": "export const (?:MAX_INTENT_CHARS|MAX_CURRENT_CHARS|MAX_MAP_CHARS|MIN_CURRENT_CHARS) = (\\d+);",
+        "regex": "(?:CHARS = |oneLine\\([A-Za-z.]+, |cap\\([A-Za-z.]+, |Math\\.min\\()(\\d+)",
         "mode": "set"
       },
       "doc": { "anchor": "character|chars\\b", "extract": "\\b(\\d{2,4})[-\\s](?:character|chars)" },

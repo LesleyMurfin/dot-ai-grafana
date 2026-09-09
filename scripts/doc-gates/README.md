@@ -72,6 +72,11 @@ sides at once and the gate stays quiet. Kinds:
   `TRIM_ORDER` array. Reading it from source is the point: PR #49 inverted the
   ladder so the question is now capped **last**, and a hardcoded expectation
   would have had to be rewritten (or, worse, would have kept passing).
+  A helper closure declared above the ladder (`reduceEvidence`) is expanded where
+  it is **called**, not where it is written, so the derived order is the order the
+  code runs. Each rung in `LADDER_RUNGS` must be proven by a marker; if one is not,
+  the marker table has rotted against a refactor and the row skips saying which
+  rung it lost, rather than reporting a truncated order as doc drift.
 
 If a value cannot be extracted unambiguously the row **skips** and says so under
 `-v`. A skipped row is better than a fragile regex that fires on clean code.
