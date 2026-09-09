@@ -30,6 +30,36 @@ function frameWithValue(labels: Record<string, string>, value: number) {
   };
 }
 
+type ListedDataSource = {
+  uid: string;
+  name: string;
+  type: string;
+  isDefault?: boolean;
+  meta: { metrics?: boolean; annotations?: boolean; tracing?: boolean; logs?: boolean; alerting?: boolean };
+};
+
+// Mirrors grafana/grafana public/app/features/plugins/datasource_srv.ts getList(): a datasource is
+// dropped unless `all: true` is passed OR its plugin meta declares at least one of
+// metrics/annotations/tracing/logs/alerting.
+function filterLikeGrafanaGetList(list: ListedDataSource[], opts?: { type?: string; all?: boolean }) {
+  return list.filter((s) => {
+    if (opts?.type && s.type !== opts.type) {
+      return false;
+    }
+    if (
+      !opts?.all &&
+      s.meta.metrics !== true &&
+      s.meta.annotations !== true &&
+      s.meta.tracing !== true &&
+      s.meta.logs !== true &&
+      s.meta.alerting !== true
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 beforeEach(() => {
   mockGet.mockReset();
   mockGetList.mockReset();
@@ -282,5 +312,47 @@ describe('getDataSourceByType selection', () => {
 
     const picked = await getDataSourceByType('loki');
     expect(picked?.settings?.uid).toBe('loki-a');
+  });
+
+  test('finds Alertmanager even though its plugin.json declares no capability flag', async () => {
+    // Grafana's built-in Alertmanager plugin.json declares none of
+    // metrics/annotations/tracing/logs/alerting, so getList() hides it unless `all: true` is passed.
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-1', name: 'Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
+          { uid: 'am-1', name: 'Alertmanager', type: 'alertmanager', meta: { metrics: false } },
+        ],
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const picked = await getDataSourceByType('alertmanager');
+    expect(picked?.settings?.uid).toBe('am-1');
+  });
+
+  test('all:true does not change which datasource is picked for loki/prometheus/tempo', async () => {
+    mockGetList.mockImplementation((opts?: { type?: string; all?: boolean }) =>
+      filterLikeGrafanaGetList(
+        [
+          { uid: 'loki-a', name: 'Extra Loki', type: 'loki', meta: { logs: true } },
+          { uid: 'loki-b', name: 'Team Loki', type: 'loki', meta: { logs: true }, isDefault: true },
+          { uid: 'prom-1', name: 'Prometheus', type: 'prometheus', meta: { metrics: true } },
+          { uid: 'tempo-1', name: 'Tempo', type: 'tempo', meta: { tracing: true } },
+        ],
+        opts
+      )
+    );
+    mockGet.mockImplementation(async () => ({ query: () => of({ data: [] }) }));
+
+    const loki = await getDataSourceByType('loki');
+    expect(loki?.settings?.uid).toBe('loki-b');
+    const prom = await getDataSourceByType('prometheus');
+    expect(prom?.settings?.uid).toBe('prom-1');
+    const tempo = await getDataSourceByType('tempo');
+    expect(tempo?.settings?.uid).toBe('tempo-1');
   });
 });
