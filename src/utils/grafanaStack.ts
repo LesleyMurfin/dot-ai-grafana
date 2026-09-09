@@ -6,13 +6,22 @@ import {
   dateTime,
   TimeRange,
 } from '@grafana/data';
-import { getDataSourceSrv } from '@grafana/runtime';
+import { getBackendSrv, getDataSourceSrv } from '@grafana/runtime';
 import { isObservable, lastValueFrom, Observable } from 'rxjs';
 import { HINT_STOPWORDS } from './progressiveContext';
 // Grafana 13 deprecates many legacy /api HTTP routes. This module never calls
 // GET /api/search (will not migrate), /api/datasources, or /api/dashboards.
-// Stack reads go through getDataSourceSrv + ds.query (Explore path). If we later
-// add "open this dashboard", use Grafana 12+ Dashboard /apis only.
+// Stack reads go through getDataSourceSrv + ds.query (Explore path), except
+// Alertmanager: Grafana's built-in AlertManagerDatasource.query() is an explicit
+// stub that always returns { data: [] } (grafana/grafana
+// public/app/plugins/datasource/alertmanager/DataSource.ts). Its own
+// testDatasource()/_request() instead call getBackendSrv().fetch() against
+// `instanceSettings.url + path` — for a proxy-access datasource that url is
+// already Grafana's own `/api/datasources/proxy/uid/<uid>` prefix, so this is
+// not a hand-rolled proxy URL, it is the exact mechanism Grafana's own
+// Alertmanager datasource uses. We mirror it with getBackendSrv().get() against
+// `${instanceSettings.url}/api/v2/alerts` to read real alerts.
+// If we later add "open this dashboard", use Grafana 12+ Dashboard /apis only.
 
 
 export const LOG_LINE_CAP = 30;
@@ -54,7 +63,6 @@ type DsQueryable = {
 type LokiTarget = { refId: string; expr: string; queryType: string; maxLines: number };
 type PromTarget = { refId: string; expr: string; instant?: boolean; format?: string };
 type TempoTarget = { refId: string; queryType?: string; query?: string; limit?: number };
-type AlertTarget = { refId: string; expr?: string; queryType?: string };
 
 /** Resource-kind / filler words that must never become a pod or namespace. */
 const NAME_DENY: Record<string, true> = {
@@ -246,8 +254,14 @@ export async function getDataSourceByType(
   const srv = getDataSourceSrv();
   let list: DataSourceInstanceSettings[] = [];
   try {
-    const raw = srv.getList({ type, all: true } as never);
-    list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
+    // getList() excludes datasources whose plugin.json declares none of
+    // metrics/annotations/tracing/logs/alerting — that is exactly Grafana's built-in
+    // Alertmanager datasource (grafana/grafana public/app/plugins/datasource/alertmanager/plugin.json
+    // only sets "metrics": false). Pass all: true so a real, configured Alertmanager datasource is
+    // still returned; pickDataSource()'s default/name/first ordering below is unaffected because it
+    // already narrows to `type` first.
+    const raw = srv.getList({ type, all: true });
+    list = Array.isArray(raw) ? raw : [];
   } catch {
     const raw = typeof srv.getList === 'function' ? srv.getList() : [];
     list = Array.isArray(raw) ? (raw as DataSourceInstanceSettings[]) : [];
@@ -402,6 +416,89 @@ export function tracesFromTempoFrames(frames: DataFrame[]): string[] {
   return out;
 }
 
+/** Minimal shape of a Prometheus Alertmanager /api/v2/alerts entry we read. */
+type AlertmanagerAlert = {
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+  startsAt?: string;
+  status?: { state?: string };
+};
+
+/** One evidence line per alert: name, severity, state, start time, and summary/description. */
+function formatAlertLine(alert: AlertmanagerAlert): string {
+  const labels = alert.labels ?? {};
+  const annotations = alert.annotations ?? {};
+  const summary = annotations.summary || annotations.description || '';
+  const base = `${labels.alertname || 'alert'} severity=${labels.severity || 'unknown'} state=${
+    alert.status?.state || 'unknown'
+  } since=${alert.startsAt || 'unknown'}`;
+  return summary ? `${base} summary=${summary}` : base;
+}
+
+/** Flatten a raw Alertmanager /api/v2/alerts response into capped evidence lines. */
+export function linesFromAlertmanagerAlerts(alerts: unknown, cap: number): string[] {
+  if (!Array.isArray(alerts)) {
+    return [];
+  }
+  return (alerts as AlertmanagerAlert[]).slice(0, cap).map(formatAlertLine);
+}
+
+/**
+ * Alertmanager v2 API label matchers (`label=value`, `label=~regex`) for the
+ * /api/v2/alerts `filter` query param — same namespace/pod scoping the old
+ * (never-functional, because ds.query() is a stub) LogQL/PromQL-style expr
+ * attempted, but applied server-side by Alertmanager itself rather than
+ * guessed at from whatever labels happen to be present client-side.
+ */
+function alertFilterQuery(target: PodNamespaceTarget): string {
+  const matchers: string[] = [];
+  if (target.namespace) {
+    matchers.push(`namespace="${target.namespace}"`);
+  }
+  if (target.pod) {
+    matchers.push(`pod=~"${escapeRegex(target.pod)}.*"`);
+  }
+  return matchers.map((m) => `filter=${encodeURIComponent(m)}`).join('&');
+}
+
+/**
+ * Mimir and Cortex serve the Alertmanager v2 API under an `/alertmanager` prefix;
+ * a plain Prometheus Alertmanager serves it at the root. Grafana records which one
+ * the operator selected in `jsonData.implementation` and its own
+ * AlertManagerDatasource.testDatasource() branches on exactly that.
+ *
+ * Grafana's branch is `implementation === 'prometheus' ? root : '/alertmanager'`, so Grafana
+ * treats an *unset* implementation as Mimir — ConfigEditor.tsx defaults the dropdown to Mimir
+ * and writes it back on first edit. We deliberately treat unset as the root path instead:
+ * provisioning is the main way `implementation` stays unset, and a provisioned Alertmanager
+ * datasource in this plugin's target environment is almost always the Prometheus-operator's
+ * plain Alertmanager, which serves /api/v2 at the root. A wrong guess is not silent — the read
+ * 404s and Current reports `Alertmanager alerts unavailable (...)` rather than "no alerts".
+ */
+function alertmanagerApiPrefix(settings: DataSourceInstanceSettings): string {
+  const implementation = (settings.jsonData as { implementation?: string } | undefined)?.implementation;
+  return implementation === 'mimir' || implementation === 'cortex' ? '/alertmanager' : '';
+}
+
+/**
+ * Real alerts, not ds.query() (a permanent stub — see header comment). Mirrors
+ * grafana/grafana AlertManagerDatasource._request(): GET against the datasource's
+ * own configured URL, which Grafana resolves to its proxy route for proxy-access
+ * datasources. Throws on a missing URL or a failed request so the caller can report
+ * the failure distinctly from a genuine empty result.
+ */
+async function fetchAlertmanagerAlerts(
+  settings: DataSourceInstanceSettings,
+  target: PodNamespaceTarget
+): Promise<unknown> {
+  if (!settings.url) {
+    throw new Error('Alertmanager datasource has no URL configured');
+  }
+  const query = alertFilterQuery(target);
+  const base = `${settings.url.replace(/\/+$/, '')}${alertmanagerApiPrefix(settings)}`;
+  return getBackendSrv().get(`${base}/api/v2/alerts${query ? `?${query}` : ''}`);
+}
+
 function scopeSuffix(target: PodNamespaceTarget): string {
   const where = [
     target.pod ? `pod/${target.pod}` : undefined,
@@ -451,8 +548,10 @@ function formatCurrent(args: {
 
 /**
  * Grafana stack → Current/Map for Query (connect-only).
- * Pattern: getDataSourceSrv().getList({ type }) → get(ref) → ds.query(DataQueryRequest).
- * Packs DataFrame text into Current. No hardcoded uids, no proxy URLs, no picker UI.
+ * Pattern: getDataSourceSrv().getList({ type }) → get(ref) → ds.query(DataQueryRequest),
+ * except Alertmanager, whose query() is a stub (see header comment): its alerts come
+ * from getBackendSrv().get() against its own configured datasource URL instead.
+ * Packs DataFrame text into Current. No hardcoded uids, no invented proxy URLs, no picker UI.
  * Always queries Loki + Prometheus (cluster-wide when no pod/ns). Alertmanager cluster-wide too.
  */
 export async function fetchStackContext(question: string): Promise<StackContextResult> {
@@ -511,6 +610,30 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     }
   };
 
+  const queryAlertmanager = async (): Promise<{ lines: string[]; note?: string }> => {
+    if (!am?.settings) {
+      return { lines: [], note: 'Alertmanager datasource missing' };
+    }
+    try {
+      const raw = await fetchAlertmanagerAlerts(am.settings, target);
+      const lines = linesFromAlertmanagerAlerts(raw, ALERT_CAP);
+      if (lines.length === 0) {
+        return {
+          lines,
+          // /api/v2/alerts is a current-state snapshot, not a time window like the
+          // Loki/Prometheus/Tempo notes, so this must not claim "in the last 15m".
+          note: scoped ? 'no alerts firing for this pod/namespace' : 'no alerts firing',
+        };
+      }
+      return { lines };
+    } catch (e) {
+      return {
+        lines: [],
+        note: `Alertmanager alerts unavailable (${e instanceof Error ? e.message : 'request failed'})`,
+      };
+    }
+  };
+
   const [lokiRes, promRes, tempoRes, amRes] = await Promise.all([
     queryOne(loki, 'Loki datasource missing', 'no log lines', async () => {
       const resp = await runDsQuery(
@@ -556,22 +679,7 @@ export async function fetchStackContext(question: string): Promise<StackContextR
       const lines = tracesFromTempoFrames(framesOf(resp));
       return { lines, emptyNote: 'no traces for this target in the last 15m' };
     }),
-    queryOne(am, 'Alertmanager datasource missing', 'no alerts', async () => {
-      const exprParts: string[] = [];
-      if (target.namespace) {
-        exprParts.push(`namespace="${target.namespace}"`);
-      }
-      if (target.pod) {
-        exprParts.push(`pod=~"${escapeRegex(target.pod)}.*"`);
-      }
-      const expr = exprParts.length > 0 ? `{${exprParts.join(',')}}` : undefined;
-      const resp = await runDsQuery(
-        am!.ds!,
-        baseRequest<AlertTarget>([{ refId: 'D', expr, queryType: 'alerts' }], 'dotai-alertmanager') as DataQueryRequest
-      );
-      const lines = textLinesFromFrames(framesOf(resp), ALERT_CAP);
-      return { lines, emptyNote: 'no alerts' };
-    }),
+    queryAlertmanager(),
   ]);
 
   logLines = lokiRes.lines;
