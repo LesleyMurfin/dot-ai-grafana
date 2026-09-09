@@ -12,7 +12,7 @@ Companion to the [Headlamp plugin](https://github.com/vfarcic/dot-ai-headlamp): 
 
 ## Requirements
 
-- Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.0)
+- Grafana >= 11.0 (reference host **11.4**; `@grafana/*` libraries pinned to 11.4.8)
 - Grafana org **Editor** or **Admin** to use Query / Remediate; **Admin** for Configuration and Test connection (see [Configuration](#configuration))
 - [DevOps AI Toolkit](https://devopstoolkit.ai) MCP server reachable from the Grafana plugin backend
 - Unsigned load until the plugin is signed:
@@ -257,6 +257,18 @@ The published OpenAPI document for dot-ai includes execute/operate/recommend. Th
 **Debug Log** in plugin settings (`jsonData.debugLog`) enables it. **Off by default.** When on, every query/remediate hop appends one JSON line to `/var/lib/grafana/dotai-ask.log` (rotate at 1MiB → `.1`): `time`, `tool`, truncated `body`, `status`, `summary`, `hop`, `hops`, `first_hop`, `branch`, `current_empty`, `login`, `role`. The Grafana user `login` and org `role` are recorded on every line (`unauthenticated` when a line is written with no user on the context); the user's email address and display name are never written. Tokens never written. Hop meta stripped before dot-ai.
 
 Grafana plugin debug (`GF_LOG_FILTERS=plugin.devopstoolkit-dotai-app:debug`) is separate and only set in create-plugin docker for `npm run server`.
+
+## Running CI Locally
+
+`scripts/ci-local.sh` runs the cheap [CI](.github/workflows/ci.yml) gates — types, lint, unit tests,
+frontend and backend builds, changelog — on your own machine. Its `drift` gate
+(`scripts/ci-drift-check.sh`) fails if the gate registry and `ci.yml`'s step list disagree in either
+direction, so a `ci.yml` step that is added, removed or edited surfaces as drift the next time
+someone runs the suite. These are developer tools: no workflow invokes them, so the guard bites on a
+local run rather than on the pull request. Packaging, the plugin validator and the Playwright e2e
+suite are out of scope, as are the `compare` and `compatibilitycheck` workflows. See
+[docs/ci-local.md](docs/ci-local.md) for scope, flags, exit codes, and what the drift guard does and
+does not prove.
 
 ## Related Projects
 
