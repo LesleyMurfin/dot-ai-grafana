@@ -477,12 +477,21 @@ export async function runAskOrchestrator(args: {
       if (stackEmpty && drilldowns.length === 0) {
         return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
       }
-      // Links exist (a datasource is configured) but the read itself came back empty — Current
-      // says "no lines in the last 15m", so the summary must offer the links WITHOUT claiming
-      // evidence sits in Current. Only say evidence is in Current when it actually is.
+      // Say only what is actually on screen. Two independent things can be present or
+      // absent here: evidence in Current, and links in Map. The guard above rules out
+      // "neither", which leaves three cases — and `stackEmpty` implies links exist, since
+      // otherwise the guard would have returned.
+      //
+      // Evidence with no link is reachable: alert lines make the stack non-empty but
+      // `buildDrilldownLinks` emits no alerts link (#66), so a target whose only evidence
+      // is a firing alert, on a Grafana with no Loki/Prometheus/Tempo datasource, has
+      // Current to read and nothing to open. Do not send that user to Map.
+      const hasLinks = drilldowns.length > 0;
       lastSummary = stackEmpty
         ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
-        : 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.';
+        : hasLinks
+          ? 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.'
+          : 'Grafana evidence is in Current. No Explore or Drilldown link for this target — read Current.';
       history = appendHistory(history, question, lastSummary);
       return {
         ok: true,

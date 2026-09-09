@@ -703,10 +703,10 @@ export async function fetchStackContext(question: string): Promise<StackContextR
     promql,
     tempoSearch,
     traceIds: tempoLines.map((line) => line.replace(/^trace\s+/i, '').trim()).filter(Boolean),
-    // Firing alerts carry dashboard uids in their annotations, but Alertmanager
-    // evidence does not reach this function yet (#47), so there is nothing to
-    // pass. Left explicit rather than made optional so the wiring surfaces the
-    // moment a source exists.
+    // Firing alerts carry dashboard uids in their annotations, but the alert reader
+    // above keeps only `summary`/`description` (#47 landed the evidence, not the uid),
+    // so there is still nothing to pass. Left explicit rather than made optional so
+    // the wiring surfaces the moment a source exists — see #66 for the follow-up.
     dashboardUids: [],
   });
 

@@ -840,6 +840,41 @@ describe('runAskOrchestrator', () => {
     expect(result.summary).not.toMatch(/evidence is in Current/i);
     expect(result.summary).toMatch(/Map links/i);
   });
+
+  /**
+   * The mirror of the case above. Alert lines make the stack non-empty, but
+   * `buildDrilldownLinks` emits no alerts link (#66), so on a Grafana with no
+   * Loki/Prometheus/Tempo datasource there is Current to read and nothing to open.
+   * The summary must not send that user to a Map panel that has no links in it.
+   */
+  test('show me the logs does not offer Map links when evidence has no drilldown', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Alertmanager:\nalert KubePodCrashLooping firing',
+        mapHint: 'Alertmanager',
+        logLines: [],
+        promLines: [],
+        alertLines: ['alert KubePodCrashLooping firing'],
+        currentEmpty: false,
+        drilldowns: [],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the logs',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([]);
+    // Evidence is real, so say so — but do not point at links that were never rendered.
+    expect(result.summary).toMatch(/evidence is in Current/i);
+    expect(result.summary).not.toMatch(/Map links/i);
+  });
 });
 
 /**
