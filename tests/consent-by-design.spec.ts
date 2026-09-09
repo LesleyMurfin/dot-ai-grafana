@@ -81,6 +81,15 @@ test.describe('Consent by design — no execute/operate surface', () => {
     expect(env.ok).toBe(true);
     expect(String(env.summary || '')).not.toMatch(/STUB_SAW_EXECUTE/i);
   });
+
+  /**
+   * The evidence-off half of this surface — a show-me Ask reporting the disabled
+   * setting instead of an empty success, and POSTing nothing — is asserted in jsdom
+   * (`DotAIPage.test.tsx`, "evidence off: a show-me Ask reports the disabled setting
+   * and POSTs nothing") for the same reason the notice case below stays read-only on
+   * plugin settings: the setting is org-wide, so flipping it here races the other
+   * specs under `fullyParallel: true`.
+   */
 });
 
 

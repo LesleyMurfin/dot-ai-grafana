@@ -1,4 +1,5 @@
 import { DotAITool } from './dotaiApi';
+import { DrilldownLink } from './grafanaExplore';
 
 /** Conversation turn. UI shows full text; packer may send a condensed Prior block. */
 export type HistoryTurn = {
@@ -10,6 +11,8 @@ export type ToolThread = {
   current: string;
   map: string;
   history: HistoryTurn[];
+  /** UI-only Explore/Drilldown links. Never POSTed. */
+  drilldowns: DrilldownLink[];
 };
 
 /** Max History turns shown on screen (each You or Answer counts as one). */
@@ -32,7 +35,7 @@ export const MAX_MAP_CHARS = 400;
 export const MAX_INTENT_CHARS = 1000;
 
 export function emptyThread(): ToolThread {
-  return { current: '', map: '', history: [] };
+  return { current: '', map: '', history: [], drilldowns: [] };
 }
 
 export function stablePreamble(tool: DotAITool): string {
