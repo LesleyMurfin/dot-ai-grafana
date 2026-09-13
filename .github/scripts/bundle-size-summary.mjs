@@ -33,6 +33,9 @@ export function parseThreshold(raw, fallback = 5) {
   if (!Number.isFinite(value)) {
     throw new Error(`BUNDLE_SIZE_THRESHOLD is not a number: ${JSON.stringify(raw)}`);
   }
+  if (value < 0) {
+    throw new Error(`BUNDLE_SIZE_THRESHOLD must be non-negative: ${JSON.stringify(raw)}`);
+  }
   return value;
 }
 
