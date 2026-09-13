@@ -1,0 +1,40 @@
+# CodeRabbit Configuration
+# Documentation: https://docs.coderabbit.ai/guides/configure-coderabbit
+# Pattern copied from vfarcic/dot-ai (and vfarcic/dot-ai-controller path notes).
+
+reviews:
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: false
+  collapse_walkthrough: true
+
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/dist/**"
+    - "!**/tmp/**"
+    - "!**/playwright-report/**"
+    - "!**/test-results/**"
+    - "!**/coverage/**"
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  tone_instructions: "Focus only on critical bugs, security issues, and architectural concerns. Skip style nitpicks and minor improvements unless they significantly impact code quality."
+
+  path_instructions:
+    - path: "**/*.{spec,test}.ts"
+      instructions: "Focus on test correctness and coverage gaps only. Skip style suggestions."
+    - path: "tests/**"
+      instructions: "Only flag critical test bugs or missing coverage. Skip minor improvements."
+    - path: "prds/**"
+      instructions: "Only review for clarity and completeness. Skip markdown style suggestions."
+
+language: "en-US"
+early_access: false
+
+chat:
+  auto_reply: false

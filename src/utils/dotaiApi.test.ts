@@ -149,14 +149,14 @@ describe('callDotAITool', () => {
     expect(result.raw).toEqual({ detail: 'upstream' });
   });
 
-  test('client abort maps to the 120s plugin-limit message', async () => {
+  test('client abort maps to Ask cancelled', async () => {
     const abort = new Error('The user aborted a request.');
     abort.name = 'AbortError';
     mockFetch.mockReturnValue(throwError(() => abort));
 
     const result = await callDotAITool('query', 'long question');
     expect(result.ok).toBe(false);
-    expect(result.errorMessage).toBe(ASK_TIMEOUT_MESSAGE);
+    expect(result.errorMessage).toBe('Ask cancelled.');
   });
 
   test('proxy 502 deadline envelope maps to the 120s plugin-limit message', async () => {
