@@ -276,7 +276,7 @@ export async function runAskOrchestrator(args: {
 }): Promise<OrchestratorResult> {
   const question = args.question.trim();
   const fetchStack = args.fetchStack ?? fetchStackContext;
-  const callTool = args.callTool ?? ((t, text, meta) => callDotAITool(t, text, meta, args.signal));
+  const callTool = args.callTool ?? ((t, text, meta) => callDotAITool(t, text, meta));
   const tool = args.tool;
 
   const aborted = () => Boolean(args.signal?.aborted);
