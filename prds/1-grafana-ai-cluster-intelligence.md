@@ -2,9 +2,8 @@
 
 **Issue**: [#1](https://github.com/vfarcic/dot-ai-grafana/issues/1)
 **Priority**: High
-**Status**: In Progress
-**Updated**: 2026-09-01T17:00:31-0600
-
+**Status**: Implemented (Phase 1 v1)
+**Updated**: 2026-09-01
 > **How this revision is organized:** This is **PRD #1 as written on `main`**, with build-ready detail layered directly on top of it. Under every `##` heading you will find the **original section text first** (unchanged — same words, same bullets, same milestones), then one or more `### Expansion:` blocks. Expansions are **additive only**. Strip every Expansion block (and the reviewer appendices) and you get the original PRD back byte-for-byte. We are not rewriting the PRD; we are building on it.
 
 ## Problem Statement
@@ -50,16 +49,12 @@ execute path, and no second (Headlamp) surface** — the three things dot-ai add
 
 ## Solution Overview
 
-A Grafana App Plugin that combines **this K3s cluster**, **this Grafana observability stack**, and **dot-ai** in one Ask — Grafana is not only the host UI shell.
-
-Two read-only dot-ai tools, same page:
+A Grafana App Plugin that embeds two read-only dot-ai tools directly into Grafana:
 
 1. **Query** — Natural language questions about Kubernetes cluster resources
 2. **Remediate (Analysis Only)** — AI-powered issue analysis without execution capability
 
-**Map** is the existing Grafana datasources already configured on this instance: **Loki, Prometheus, Tempo, and Alertmanager**. The plugin reads them through Grafana’s runtime (`getDataSourceSrv` / `ds.query` / `getBackendSrv`) — no new datasource picker, no new screens, no parallel observability UI.
-
-**UI surface stays the existing thread:** Tool selector, intent/issue box, Ask, Analyze this, Current (sent), History (display-only). Stack context is packed into **Current**, then shipped as plain-text `intent` / `issue` on the same POST shapes. No rich visualizations — text responses only.
+The plugin provides a simple interface: tool selector, text input for the intent, and a response area displaying the agent's response. **Amendment (2026-09-05, Design Decision 12):** the original text-only decision is retired for *rendering* only. That response area renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML, code blocks unhighlighted — landed in **PR #51**. The *request* half stands unchanged: the plugin never requests rich visualizations from dot-ai (no `[visualization]` prefix; see the tool→endpoint map below and Design Decision 1).
 
 ### Expansion: Tool → endpoint map
 
@@ -86,7 +81,7 @@ dot-ai wraps every REST response in a standard envelope:
 
 dot-ai's tools are built for an *LLM agent*, so `data.result` carries **structured JSON plus agent-oriented fields** (`agentInstructions`, `sessionId`), not a prose string. The plugin extracts the human-readable content per tool (confirmed against source and against how `dot-ai-headlamp` unwraps `data.result`):
 
-| Tool | Render as text | Ignore in the text-only UI |
+| Tool | Display | Ignore in the UI |
 |------|----------------|-----------------------------|
 | `query` | **`data.result.summary`** (`QueryOutput.summary`, `src/tools/query.ts` L54) | `agentInstructions`, `sessionId`, `visualizationUrl`, `iterations`, `toolsUsed` |
 | `remediate` | `message`, `analysis.rootCause`, `analysis.confidence`, `analysis.factors[]`, `remediation.summary`, `remediation.actions[]` (`command`/`rationale`/`risk`), `guidance` | `executionChoices`, `nextAction`, `sessionId`, `visualizationUrl`, `agentInstructions` |
@@ -187,6 +182,132 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 9. **Strategic positioning vs Grafana Assistant (read-only scope).** Grafana Assistant + Sift now cover NL analysis of telemetry natively, so this plugin must lead with dot-ai's wedge — **K8s API state, remediation, sovereignty** (see [Competitive landscape](#competitive-landscape--differentiation)). **Leaning:** v1 honors PRD #1's read-only scope and differentiates on **K8s-state + sovereign self-hosting** (not a telemetry-chat clone); **remediation** (GitOps PR) is the strongest differentiator but is out of PRD #1 scope — flagged as the highest-value expansion and the central go/no-go ([Open Question 6](#open-questions)). If neither wedge is compelling for the target users, the honest call is **not** to ship a standalone plugin and instead expose dot-ai via a Grafana Assistant Skill / the Grafana MCP.
 10. **Deployment target: self-managed Grafana only for this contribution.** **Leaning:** design, CI, and install docs target **self-managed Grafana** (reference **11.4**; matrix includes a current 13.x). **Grafana Cloud is explicitly not planned** for this PRD's delivery track — see [Deployment targets](#deployment-targets-self-managed-vs-grafana-cloud). Cloud may still matter to other adopters (including the maintainer); it is left as an optional follow-on for whoever finds value, not a Phase 1/2/3 commitment here.
 11. **Companion vs core ownership.** **Leaning:** this PRD follows the Headlamp companion pattern — UI/host only; capabilities land in **dot-ai** first. Applies especially to **Kubeshark / evidence** (Phase 3): see [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives).
+12. **Markdown rendering vs. text-only — RESOLVED, amends Decision 1; landed in PR #51.** The original text-only decision banned both *requesting* and *rendering* rich visualizations. Only the rendering half is retired. **State on `main`:** the response area renders the model's own GFM markdown (headings, lists, tables, code blocks, links) as sanitized HTML — `src/pages/DotAIPage.tsx` renders `<ResponseMarkdown text={responseText} />`, `src/components/ResponseMarkdown.tsx` owns the parse + sanitize pipeline and the plugin's only `dangerouslySetInnerHTML`, and `marked` is a direct dependency. Code blocks are **unhighlighted** — the sanitizer strips `class` (including marked's `language-*`) and no highlighter is added. The renderer treats the answer as untrusted input: raw HTML is re-escaped at the parser, no remote-reference element is ever emitted, only absolute `https:` and same-origin hrefs survive, and a parse or sanitize failure falls back to escaped plain text (controls **S1** and **R1** below). **Merge order, as executed:** this decision landed *before* #51, worded in the future tense so it described `main` accurately while #51 was open; #51 then carried the flip to the present tense across this entry, line 57, the UX-states success step, the out-of-scope bullet, the M4 row, the original-section comparison table, `README.md`, `docs/index.md` and `CLAUDE.md`, along with the S1/R1/G1 status updates. The request half is unchanged and holds today — the plugin never prefixes `[visualization]` to the intent (Decision 1); dot-ai is never asked to switch into rich-visualization mode. **Caveat:** that surviving half holds largely by *absence* rather than by an enforced control. It is not wholly unguarded — `src/utils/progressiveContext.test.ts` asserts the first-turn packing by exact equality (`expect(text).toBe(...)`), so a `[visualization]` prefix introduced inside `pack()` would fail today. The uncovered path is `stablePreamble()` itself: that assertion interpolates `stablePreamble`, so it is self-referential, and the `stablePreamble` tests only use `toMatch`. A prefix added there passes both. A one-line assertion that `stablePreamble()`'s output — and the packed text — contain no `[visualization]` would close it; out of scope for this documentation-only change.
+
+### Expansion: As-built v1 (this contribution)
+
+What shipped in the plugin PR. Original outline + earlier expansions stay above; this block is the as-built contract.
+
+| Topic | As-built |
+|---|---|
+| Plugin id | `devopstoolkit-dotai-app` (unsigned allow-list uses this id) |
+| Author / module | DevOps Toolkit · `github.com/vfarcic/dot-ai-grafana` |
+| Tools | Query (`intent`) + Remediate analysis-only (`issue` / mapped `intent`). No execute / operate / recommend UI |
+| Client | Thin Grafana SDK `httpclient` for query, remediate, version only. **No** generated OpenAPI client (full schema includes mutation tools) |
+| Timeouts | Probe/version **15s**; query/remediate **120s** blocking. **No** async `202` + job poll |
+| UI | Tool select, intent box, Ask/Analyze, **Cancel** while in flight, spinner, error `Alert` with **Retry** (intent preserved). Titles: timeout / 401 / 403 / 404 / unreachable / cancelled. Analysis-only banner on Remediate. Current/Map/History gated by Show context (on-page panels only). Packing gated by **Send Grafana evidence** (default on). Intent also carries a condensed **Prior:** block (≤240 chars) from recent turns inside the 1000-char budget. Egress notice `Alert` always rendered, with copy that differs by evidence-toggle state. |
+| Ask log | **Debug Log** (`jsonData.debugLog`, off by default): JSONL ask log. Failed tool calls also go to Grafana plugin **error log** (`log.DefaultLogger.Error`, no tokens/body). |
+| vs Headlamp / core | Headlamp Query = box → one POST. Resource-detail passes the **K8s object** into remediate/operate. `sessionId` is the **execute** round-trip, not Grafana DS packing. No Loki/Prom/Tempo/AM in `dot-ai-headlamp`. Closest core plan: [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) (Low, draft — evaluate external monitoring MCP). This packing is Grafana-host glue |
+| Config | Admin: **MCP Server URL**, **Auth Token**, **Debug Log** (off by default), **Show context** (on by default; on-page panels only, does not control packing), **Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; independent of Show context). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Test connection = `POST /api/v1/tools/version` |
+| Auth | `Authorization: Bearer` (not `X-Dot-AI-Authorization`) |
+| Grafana | `grafanaDependency: ">=11.0.0"`; `@grafana/*` **11.4.0**; CI Playwright on Grafana 11.0–13 + nightly |
+| Deferred | **GitOps execute** → [PRD #2](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) / [PR #18](https://github.com/LesleyMurfin/dot-ai-grafana/pull/18). Also: async 202; generated OpenAPI client; Grafana.com signing |
+
+```
+  Ask
+   |
+   +-- Remediate ── pack existing Query Current + issue
+   |                 1x POST /remediate (analysis) ── done
+   |
+   +-- Query
+         |
+         v
+      Read Grafana DS: Loki, Prometheus, Tempo, Alertmanager
+      (no hardcoded uids; types via getDataSourceSrv().getList({type}); skip when sendGrafanaEvidence is false)
+         |
+         v
+      Current + Map + condensed Prior (≤240 chars in 1000-char budget; shed under pressure)
+         |
+         v
+      classifyFirstHop(question)
+         |                              |
+         | alerts/logs/metrics/traces   | list/show namespaces|pods|...
+         | "top issues" / default       | (inventory language)
+         v                              v
+      first_hop=grafana            first_hop=dot-ai
+         |                              |
+         +--------------+---------------+
+                        v
+      hop 1  POST /query
+             intent = Stable + Current + Prior + Map + question
+                        |
+         +--------------+--------------+
+         | unscoped (no pod/ns/app)?   | answer denies facts in Current?
+         v                             v
+      hop 2 across                  hop 2 conflict
+         |                             |
+         |          hop 2 still hedges on Current?
+         |                             v
+         +---------------------- hop 3 hedge
+                        |
+                        v
+      cap 3; stop. Rewrite Current from the answer (for next Ask /
+      Analyze this). Each hop = one ask-log line.
+
+  Go backend (every hop):
+    strip hop/branch/first_hop before upstream
+    append JSONL ask log if Debug Log on (off by default; no Grafana tokens)
+    Authorization: Bearer  -->  dot-ai
+
+  dot-ai (unchanged):
+    query toolLoop (kubectl / capabilities / optional MCP, <=30)
+    intent max 1000 chars; sessionId = visualization cache, not chat
+    remediate sessionId = execute round-trip — this plugin never sends it
+
+  Headlamp (not this PR): K8s resource object + execute / operate
+```
+
+Headlamp remains the operate/execute companion. Grafana v1 is diagnosis: **Grafana stack facts packed into the same intent**, then Grafana-first vs inventory-first hops, so Asks see the dashboards the operator is looking at.
+
+**Send Grafana evidence** (`jsonData.sendGrafanaEvidence`, default on; missing/undefined = send) is independent of **Show context**. When send is off, Asks do not pack Grafana DS facts (`fetchStackContext` / `loadStack` not called). No datasource UID pickers: types discovered via `getDataSourceSrv().getList({ type, all: true })`. Per-type checkboxes are future. Related alerts are already in **Current** from Alertmanager when send is on. Map/Explore/show-me is **folded into PRD #1** rather than deferred to PRD #3, and is landing in code as its own PRs: the Explore/Drilldown link builders are on `main` ([#52](https://github.com/vfarcic/dot-ai-grafana/pull/52)), and the Map-panel wiring plus the show-me 0-hop path come with [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79). This change records the fold; it carries none of that code. Markdown Answer is **not** this PR — [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Grafana `/apis` dashboard inventory is later than PRD #3.
+
+**Grafana APIs this plugin uses (existing host APIs — no custom Loki/Prom HTTP client):**
+
+```
+  Browser (signed-in Grafana user)
+           │
+           │  1. Grafana runtime (existing)
+           │     getDataSourceSrv()
+           │       .getList({ type: loki|prometheus|tempo|alertmanager })
+           │       .get(uid)
+           │       ds.query(DataQueryRequest)   ← same path as Explore
+           ▼
+  Current + Map + condensed Prior packed into {intent}
+           │
+           │  2. Grafana plugin resource API (existing)
+           │     getBackendSrv().fetch
+           │       POST /api/plugins/devopstoolkit-dotai-app/resources/{query|remediate}
+           ▼
+  Grafana server → our Go backend (plugin SDK httpadapter)
+           │
+           │  3. Not Grafana — outbound to dot-ai
+           │     Authorization: Bearer
+           ▼
+  POST /api/v1/tools/query | /remediate | /version
+```
+
+Settings (Admin): Grafana plugin `jsonData` / `secureJsonData` (URL, token, Debug Log, Show context, Send Grafana evidence).
+Not used: Grafana Assistant, LLM app plugin, `mcp-grafana` (engine-side: vfarcic/dot-ai#463).
+
+**Grafana 12+ `/apis` HTTP structure** ([docs](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis/), [migration](https://grafana.com/docs/grafana/latest/developer-resources/api-reference/http-api/apis-migration/)): Grafana 12 adds Kubernetes-style `/apis/<group>/<version>/namespaces/<ns>/<resource>`. Grafana 13 **deprecates** legacy `/api` HTTP APIs (they stay up but stop receiving updates). **This plugin does not call those Grafana resource HTTP APIs.** Stack reads go through `getDataSourceSrv` / `ds.query` (Explore path). Asks go through the **plugin resource** contract `POST /api/plugins/<id>/resources/*` and settings `POST /api/plugins/<id>/settings` — Grafana plugin SDK, not dashboard HTTP. CI Playwright already runs Grafana **11.0–13 + nightly**. We do not use removed Grafana 12 UI-extension APIs (`getPluginExtensions`, etc.). Tool dropdown stays `@grafana/ui` `Select` because `Combobox` landed in 11.5 and our libs are pinned **11.4.0** for the 11.4 floor; migrate to Combobox when the floor rises.
+
+**Future-proof (do not regress):**
+
+- Never `GET /api/search` — Folder/Dashboard Search **will not be migrated**.
+- Never Grafana Data source HTTP (`/api/datasources`) — deprecated; we already use `getDataSourceSrv`.
+- Never Alerting Provisioning HTTP for “related alerts” — we read the configured Alertmanager datasource's own `/api/v2/alerts` proxy route, the same mechanism Grafana's built-in Alertmanager datasource uses (its `query()` is a stub, so `ds.query` cannot serve this one source).
+- If we add “which dashboard to open”: Grafana 12+ **Dashboard `/apis`** only (`dashboard.grafana.app`), not `/api/dashboards` or `/api/search`.
+- Plugin `/api/plugins/<id>/resources/*` and `/settings` stay until Grafana publishes a plugin-SDK replacement; they are not the dashboard `/api` deprecation.
+
+
+### Expansion: By Design (as-built honesty)
+
+| Pillar | Verdict | What we did | Gap |
+|---|---|---|---|
+| **Reliability** | Partial | Fail-fast config + Test connection; hop cap 3; Cancel; Retry; stack DS throw isolated; 120s classified timeout | No async 202 — long remediate can still hit 120s |
+| **Security** | Partial | Token in `secureJsonData` (backend only); remediate allowlist (no execute); 401/403 → 502 no secret leak; no generated OpenAPI client; Debug Log off by default; public `http` rejected | `http` only for loopback, RFC1918, or in-cluster DNS (`*.svc` / `*.cluster.local`); shared Bearer (any user who can open the plugin); Current/logs go to the LLM when send is on |
+| **Privacy** | Partial | Condensed Prior (≤240 chars) may leave the browser inside intent; full History stays on screen; error log has no body/token; Debug Log opt-in; **Send Grafana evidence** opt-out | Show context toggles on-page panels only (does not stop packing) |
+| **Consent** | Partial | Admin configures; user clicks Ask; Debug Log opt-in; analysis-only banner; egress notice `Alert` always rendered, naming every block an Ask POSTs (question, `Current:`, `Map:`, condensed `Prior:`) and stating that evidence-off stops the datasource read but not `Prior:`/`Current:`/`Map:` | Grafana users share one token; no per-user consent / OAuth |
 
 ## User Journey
 
@@ -203,7 +324,7 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 2. Selects Query or Remediate; the active **cluster/context is always displayed** (from `version → system.kubernetes.context`) so the answer's scope is unambiguous.
 3. Types intent (live 1000-char counter); submits.
 4. **In-flight**: spinner + **elapsed-time counter** + staged copy ("Investigating cluster state… up to a few minutes"); a **Cancel** button aborts (AbortController / abandons the async poll) and re-enables the form.
-5. **Success**: plain-text answer; **Copy** on the whole response and per recommended `command`; a "Show raw response" toggle.
+5. **Success**: answer rendered as sanitized markdown (Decision 12); **Copy** on the whole response and per recommended `command`; a "Show raw response" toggle.
 6. **Error**: specific `Alert` (unreachable / 401 / 403 / 404 / timeout / tool error) with a one-click **Retry** that preserves the intent.
 7. Ask a follow-up (single-shot — the prior answer stays visible while composing the next).
 
@@ -211,11 +332,9 @@ That is **not** Kubeshark/PCAP and **not** this Grafana UI — it is what makes 
 
 ### Architecture
 
-- **Grafana App Plugin** with a custom page (React + TypeScript) — plugin id `lesleymurfin-dotai-app`
-- **This cluster + this stack + dot-ai:** one Ask fuses K3s intelligence (via dot-ai) with live reads from Grafana’s already-wired Loki, Prometheus, Tempo, and Alertmanager datasources
-- **Grafana stack → Current → dot-ai:** plugin gathers stack signals through `getDataSourceSrv` / `ds.query` / `getBackendSrv`, packs them into the client-side **Current** block, then POSTs query/remediate to dot-ai with that block in plain `intent` / `issue`
-- **Backend plugin component** (Go) proxies those POSTs to the dot-ai MCP server with authentication
-- Leverages Grafana’s built-in auth, RBAC, and datasource credentials — no separate observability auth path and no new DS configuration UI
+- **Grafana App Plugin** with a custom page (React + TypeScript)
+- **Backend plugin component** (Go) to proxy requests to the dot-ai MCP server with authentication
+- Leverages Grafana's built-in auth and RBAC — no separate authentication needed
 
 ### MCP Server Integration
 
@@ -232,29 +351,31 @@ Grafana admin configures via plugin settings:
 - **MCP Server URL** — dot-ai MCP server endpoint
 - **Auth Token** — Authentication token for the MCP server
 
-Observability wiring is **not** re-configured here: Loki, Prometheus, Tempo, and Alertmanager come from Grafana’s existing datasources.
+### Expansion: Plugin configuration (as-built)
+
+Grafana admin configures via plugin settings:
+- **MCP Server URL** — `jsonData.apiUrl` (absolute http(s) base, no `/api/v1` suffix). HTTPS required except loopback / RFC1918 / in-cluster `*.svc` / `*.cluster.local`. Public `http` is rejected.
+- **Auth Token** — `secureJsonData.apiKey` (Bearer; stored encrypted)
+- **Debug Log** — `jsonData.debugLog` enable/disable the JSONL ask log (`/var/lib/grafana/dotai-ask.log`). **Off by default.** Tokens never written; hop meta stripped before upstream.
+- **Show context** — `jsonData.showContext` show Current, Map, and History panels on the page. **On by default.** On-page display only; independent of Send Grafana evidence. Does not control intent packing (Current/Map/Prior).
+- **Send Grafana evidence** — `jsonData.sendGrafanaEvidence`. **On by default** (missing/undefined = send). When off, do not pack Grafana DS facts into Asks. Independent of Show context.
 
 ### UI Components
 
-Same minimal surface (no new screens or pickers):
+Minimal UI surface:
 - **Tool selector dropdown** — Switch between Query and Remediate
-- **Intent / issue box** — Natural language input with context-aware placeholder
-- **Ask** — Submit Current-packed intent/issue to dot-ai
-- **Analyze this** — Copies Current → Remediate box
-- **Current** — Client-built context block (includes Grafana stack reads); **sent** on Ask
-- **History** — Display-only (last N turns); not sent as a session protocol
+- **Intent text input** — Natural language input field with context-aware placeholder
 - **Response area** — Scrollable text display for the agent's response
 - **Loading indicator** — While waiting for response
-- **Error display** — Connection errors, auth failures, datasource read failures
+- **Error display** — Connection errors, auth failures
 
 ### What's Explicitly Out of Scope
 
-- Rich visualizations (Mermaid diagrams, cards, code blocks with syntax highlighting)
+- Rich visualizations *requested from dot-ai* (Mermaid diagrams, cards, charts) — the plugin never prefixes `[visualization]` to the intent (Decision 1). Rendering the model's own GFM markdown as sanitized HTML is **in** scope and shipped in **PR #51** (Decision 12 amends this line for rendering only). Syntax highlighting stays out of scope either way: code blocks render unhighlighted, since the sanitizer strips the `language-*` class and no highlighter ships.
 - Action execution (remediation execution, operate, recommend)
-- GitOps-PR remediate execute (post-v1) — see `prds/2-gitops-pr-remediate.md` (PRD #2); not scoped here
 - Multi-stage workflows or wizards
-- **New UI for resource or datasource selection** — no new screens, no custom DS picker, no dashboard-resource browser; use Grafana’s existing Loki / Prometheus / Tempo / Alertmanager wiring only (and any selector Grafana already shows natively)
-- **MCP / server session management** (no `sessionId`, no server conversation store, no multi-turn protocol fields). A **display-only** on-screen History and a client-rewritten **Current** block packed into the next plain-text `intent`/`issue` are in scope for progressive context — they are **not** MCP session management. See Decisions and `docs/progressive-context.md`.
+- Resource selection from dashboards
+- Session management or conversation history
 
 ### Expansion: Architecture — implementation detail
 
@@ -305,15 +426,253 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
   - Token only in `secureJsonData`; backend-only read; never logged; `Authorization` redacted and **upstream dot-ai error bodies sanitized** before surfacing to the browser. Custom auth header sent only when configured — never both unconditionally.
   - **Egress/SSRF**: `apiUrl` **must** be `https://` (reject `http://`) and the backend **must** block link-local/metadata (`169.254.169.254`), loopback, and RFC1918 targets unless an operator explicitly allowlists them (fail-closed). Admin-only config lowers but doesn't remove the risk in multi-tenant Grafana.
   - **Read-only**: enforced server-side via a no-`apply` RBAC token *and* a backend fail-closed request-field allowlist (Design Decision 3).
-  - **Prompt/command injection**: free-text `intent`/`issue` reaches an LLM with read-only cluster tools; the token's read scope bounds the blast radius, and remediate's suggested `command`s are advisory/untrusted (a human runs them). Least-privilege token; rotation; per-Grafana-org isolation.
-  - **Identity**: single shared token → no per-user attribution in dot-ai audit logs (accepted v1 risk).
+  - **Indirect prompt injection — telemetry is the vector, the operator is the victim** (OWASP LLM01): the evidence pack packs *attacker-writable* signal into the prompt — Loki log bodies (including externally supplied strings reflected into a log line, e.g. a `User-Agent` on a 404), Alertmanager annotations templated from workload-exposed metric labels, trace attributes, and live K8s object metadata — and the answer renders in the operator's authenticated browser. A least-privilege read-only token does **not** bound this: the blast radius is what the operator's *browser* fetches and what the operator is *persuaded to run*. Least-privilege token, rotation, and per-Grafana-org isolation stay, but they are not the control for this class.
+    Full trust boundary, impact classes **I1–I12** and controls **S1–S5 / P1–P2 / C1–C2 / R1–R2 / G1–G2**: [Expansion: Untrusted telemetry trust boundary](#untrusted-telemetry-trust-boundary). (I12/S5 are process/tooling-scope — reviewer/CI trust in the artifact under review — not telemetry-to-model like I1–I11; see that section.)
+  - **Identity**: single shared token → no per-user attribution in dot-ai audit logs (accepted v1 risk) — and, per control **P1**, attribution is not the only consequence: the model answers from a *superset* of what the asking operator is authorized to see, so the I1 exfiltration primitive crosses an **authorization boundary** (a tenant that can write to namespace B can have namespace A's telemetry echoed out of an operator's browser). Accepted for v1 **only** with S1+S2 in place; per-operator credential propagation is the actual fix.
 - **Observability**: backend logs request id, tool, status, duration (no secrets).
 - **Compatibility**: pin `@grafana/*` libs (to support 11.4) + `grafanaDependency: >=11.0`; CI build+smoke on **11.4 (reference deployment, must-pass) and a current release (13.x)**.
 - **Accessibility**: labelled controls; announced response; keyboard submit.
 
+<a id="untrusted-telemetry-trust-boundary"></a>
+
+### Expansion: Untrusted telemetry trust boundary
+
+**Start with the accident, not the attacker (I6).** A stack trace that contains HTML, a log line that quotes a previous model answer, an exception dumping a payload with an `<img>` tag, a CI job legitimately named something imperative — all reach the prompt and then the rendered answer through exactly the same path an attacker would use. Accident is *guaranteed*; the attacker is optional. That is why this is a design driver and not an incident class.
+
+This is [OWASP LLM01 — indirect prompt injection](https://owasp.org/www-project-top-10-for-large-language-model-applications/), applied to an observability surface: nothing here is novel research, and the defence is a documented trust boundary rather than a filter list. The log channel specifically is **already demonstrated in the wild against a shipping observability product** (GrafanaGhost, Grafana's own AI assistant, patched 2026-04-07) and benchmarked academically (LogJack, arXiv:2604.15368) — see *Published precedent* below.
+
+**Trust chain**
+
+```
+  attacker-writable signal        Grafana datasources / live K8s state
+  (log line · alert label   ──►   Loki · Prometheus · Tempo · Alertmanager · dot-ai cluster reads
+   trace attr · object meta)                          │
+                                                      ▼
+                                            plugin evidence pack (Current)
+                                                      │
+                                                      ▼
+                                              dot-ai LLM prompt ──► answer
+                                                      │
+                                                      ▼
+                              operator's authenticated browser        [Phase 1 — today]
+                                                      │
+                                                      ▼
+           Headlamp operate / remediate execute / GitOps PR           [Phase 2 — North Star]
+```
+
+**Entry points** — 1–4 and 6–9 need **no Grafana and no dot-ai credential** at all; 5 needs only ordinary Grafana edit rights; 10 is written by Grafana itself out of (2); 11 has no external author at all — it is our own prior output coming back:
+
+1. **Log lines (Loki).** Any pod in any monitored namespace writes them. Worse: any *externally supplied* string reflected into a log — a `User-Agent`, a 404 request path, a username in an auth-failure line, a JSON field — means an **unauthenticated internet user** can write into the prompt.
+2. **Alert annotations / labels (Alertmanager).** `summary`/`description` are templated from metric labels; labels come from workload-exposed `/metrics` and from `kube_pod_labels` — attacker-chosen at deploy time. Grafana has already had to fix this channel reaching the DOM: **CVE-2026-17033** (2026-08-24, CWE-79, fixed `>=13.1.0`) is `alert.generatorURL` rendered as a link href with no scheme sanitisation.
+3. **Trace attributes / span names (OTel).** Request-derived strings, so again caller-controlled. **This entry point is vendor-conceded, with a CVE, and with no LLM anywhere in it:** **CVE-2025-41117** (2026-02-12, CVSS 6.8 `AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N`, CWE-79) — "Stack traces in Grafana's Explore Traces view can be rendered as raw HTML, and thus inject malicious JavaScript in the browser. Only datasources with the Jaeger HTTP API appear to be affected." `PR:N`: no Grafana privileges required. Telemetry is untrusted input independently of anything we build; the assistant does not create that problem, it widens the exit and wraps the content in something that looks authoritative.
+4. **Live Kubernetes object metadata.** dot-ai `query`/`remediate` read cluster state: annotations, labels, container names, image tags, ConfigMap contents, Event messages. A namespace-scoped tenant with `create pod` chooses a container name.
+5. **Dashboard titles / panel descriptions**, plus the plugin's own drilldown text and the evidence pack it assembles.
+6. **Kubernetes Events.** kubelet and controller messages quote attacker-chosen strings verbatim — an image reference in `ImagePullBackOff`, a probe-failure body, an eviction message. Anyone who can create a pod in a monitored namespace picks that text.
+7. **Metric label values.** Any workload's `/metrics` chooses its own label values; those values reach alert templates, top-N evidence tables, and the pack. Unbounded cardinality is a second lever here (I10).
+8. **Tenant-created `PrometheusRule` / recording rules.** A tenant that owns a namespace owns the rule's `annotations` (including `runbook_url`) and the rule name — both are read as authoritative alerting context.
+9. **ConfigMap-sourced sidecar dashboards.** Where a dashboard sidecar imports dashboards from labelled ConfigMaps, a tenant with `create configmap` writes dashboard titles and panel descriptions into Grafana without ever holding a Grafana credential — which is entry point 5 reached from inside the cluster.
+10. **The Grafana annotation store**, including alert-state annotations: content from (2) is persisted into Grafana's own database and read back later, so an injection outlives the alert that carried it.
+11. **Prior model output re-entering context.** The Ask follow-up branches (`across`/`conflict`/`hedge`/`refine`) and any answer pasted into a ticket or log re-enter the pack as if they were evidence. Self-poisoning needs no attacker (I6) and no new write access.
+
+#### Invariant — telemetry is data, never instruction
+
+> **Telemetry is data, never instruction.** Anything that entered the system from a monitored workload is **untrusted content**. Every downstream component — renderer, prompt packer, output contract, and any future execution surface — **MUST NOT** treat that content as an instruction, as a URL to fetch, or as a command to run.
+
+Normatively: model output derived from telemetry MUST render as inert text; the plugin MUST NOT automatically fetch any model-authored URL; and no answer content may reach an execution affordance without an explicit, provenance-bearing human gate.
+
+**Impact classes**
+
+| ID | What happens | Why existing controls miss it |
+|----|--------------|-------------------------------|
+| I1 | **Exfiltration without script execution.** Rendered markdown/HTML causes the operator's browser to fetch an attacker-controlled URL. Leaks the fact and time of render, which Grafana rendered it, and arbitrary text encoded into the request — including telemetry the operator was authorized to see and the attacker was not. | Read-only tokens, RBAC, and CSP-less deployments are all silent here: no script runs. Sanitizers that allowlist embed tags (`img`/`iframe`/`video`/`audio`) permit it by construction — PR [#13](https://github.com/vfarcic/dot-ai-grafana/pull/13) review finding **B5**. |
+| I2 | **Operator-actioned harm.** Injected content steers the *recommendation*: a plausible root cause plus a destructive command, delivered dressed in real cluster evidence by a trusted assistant. The human is the execution engine. | Least-privilege tokens and read-only enforcement do **nothing** — the operator's own credentials run the command. This is the class the prior "commands are advisory, a human runs them" framing mistook for a mitigation. |
+| I3 | **Agent actuation (North Star).** Once diagnosis output feeds an execution surface (Headlamp `executeRemediation`/`operate`, remediate → GitOps PR), injection becomes remote code execution with a human rubber-stamp. | No control exists yet because the wiring does not exist yet. A control retro-fitted after Phase 2 ships is a control that ships late — see **Phase 2 gate** below. |
+| I4 | **Persistence via knowledge poisoning.** If injected content is ever ingested through dot-ai `manageKnowledge` (auto-ingested runbook, incident summary written back), the injection outlives the session and steers unrelated future questions for other operators. | Session-scoped reasoning about a single Ask does not cover a store that is read by later, unrelated Asks. |
+| I5 | **Context denial / evidence displacement.** A flood of adversarial tokens burns model context and forces truncation that drops the real evidence; the model then answers confidently from attacker-chosen material. | Cheap, deniable, indistinguishable from noisy logging. Per-source caps bound entry *count*, not size (`LOG_LINE_CAP` 30, `PROM_SERIES_CAP` 8, `TEMPO_TRACE_CAP` 5, `ALERT_CAP` 8) and no entry is truncated, so a few oversized entries still consume the 1000-char intent budget; what is then shed follows a fixed source order (Map, then Tempo via `dropTempoSection`, then Loki, Prometheus, Alertmanager via `TRIM_ORDER`), not evidential value. |
+| I6 | **Accident, no attacker.** HTML or markdown in a stack trace, a log line quoting a prior model answer, an imperative-sounding job name — same mechanism, no malice. | Guaranteed to occur in normal operation; the only defence is that the rendering and prompt contracts are safe by construction. |
+| I7 | **Silent decision corruption.** Content nudges the answer into being *subtly* wrong — a plausible but false causal claim, an innocent neighbour named as the culprit — while everything about the answer looks normal. | **There is no detection story for this class at all.** Nothing renders suspiciously, no URL is fetched, no destructive command appears; no CI assertion, log line, or metric would notice. Provenance (C1) is the only partial answer: it makes each claim traceable to the source that produced it, so a wrong claim can at least be checked. |
+| I8 | **Attribution / audit integrity loss.** With a single shared service token, dot-ai's audit trail records *the plugin*, not the operator who asked; telemetry-derived content can additionally seed a false timeline into an incident record. | Read-only enforcement is irrelevant. This is the accepted v1 identity risk (NFR → Identity) seen as an integrity property rather than a convenience gap — the cause is P1. |
+| I9 | **Authenticated-session abuse — the browser as confused deputy.** A model-authored URL causes the operator's authenticated, inside-the-perimeter browser to issue a request to an **internal** origin: endpoints reachable from the operator's network but not from the attacker's. | The backend's egress controls (`https`-only `apiUrl`, link-local/loopback/RFC1918 fail-closed) govern the *plugin backend*'s outbound calls and say nothing about what the *browser* fetches. Same S1 primitive, pointed inward instead of outward. |
+| I10 | **Resource / cost amplification.** Volume or cardinality in one source inflates prompt tokens and model spend and pushes Asks into the 120s plugin ceiling, degrading diagnosis exactly when it is needed. | Per-source caps bound entry count but not entry size, and there is no cardinality bound (S3); it bills and times out like an attack while looking like noisy logging. Retry makes it worse, not better. |
+| I11 | **Downstream automation compromise.** An answer consumed by something other than a careful human — a chatops relay, ticket automation, a scheduled report feeding a higher-privileged agent — reaches an execution surface with **no human in the loop**. Reachable **today**, with no Phase 2 wiring, wherever answers are forwarded automatically. | C1/C2 assume a human reads and confirms. Nothing in the answer marks it as untrusted-derived for a *machine* consumer, and S4's copy-only affordance is UI-side only — a relayed answer loses even that. |
+| I12 | **Reviewer/CI tooling trusting the artifact it reviews.** A different surface than I1–I11: not the model's *output* reaching an operator, but this repository's own *inbound* code/PR content reaching review or CI tooling with reviewer-level trust — a script executed from the PR's own checkout, or instructions embedded in a PR title, body, comment, or file treated as directives rather than data. This repo does run PR-supplied code in CI — `.github/workflows/ci.yml` triggers on `pull_request` and executes `npm ci` (lifecycle scripts included), `npm run lint`, `npm run test:ci` and `npm run build` from the PR's own checkout — but the blast radius is bounded by construction (see `S5`), and no *review*-side script here consumes PR text as instruction. Recorded because the *class* has live, named precedent, not because a specific unmitigated instance was found here. | Same blind spot as I1–I6 (untrusted content, privileged consumer) but the consumer is tooling/CI, not the operator's browser or the model — none of S1–S4/C1/C2 govern this inbound path at all. Two precedents, kept apart because only one carries a CVE — conflating them would import a CVSS score into a finding that has none. **(a) The GitHub-native vector, no CVE assigned:** the *Comment and Control* disclosures hijacked three AI coding-agent platforms through GitHub's own comment surfaces — Anthropic's Claude Code Security Review via a crafted **PR title**, Google's Gemini CLI Action via **issue bodies and comments**, and GitHub's Copilot Agent via **HTML comments hidden in an issue body** — each exfiltrating CI-runner credentials (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `GEMINI_API_KEY`, `GITHUB_COPILOT_API_TOKEN`) back out through GitHub itself. Reported via HackerOne and Google VRP and handled as bug-bounty findings: **no CVE, therefore no CVSS score** — cite it by name, never by number. **(b) The scored precedent, a different bug:** **CVE-2025-66032** / [GHSA-xq4m-mc3c-vvg3](https://github.com/advisories/GHSA-xq4m-mc3c-vvg3) (CVSS **v4.0** 8.7 — the advisory carries no v3.1 score — CWE-20 + CWE-77) is *Claude Code Command Validation Bypass Allows Arbitrary Code Execution*: `$IFS` and short-CLI-flag parsing errors let an attacker bypass Claude Code's read-only validation and reach arbitrary code execution in `@anthropic-ai/claude-code` < 1.0.93. Its stated precondition — "the ability to add untrusted content into a Claude Code context window" — is this impact class exactly, reached by a different mechanism than (a). Maps to OWASP Top 10 for LLM Applications 2026, **Excessive Agency** (**LLM03**, up from **LLM06** in 2025). |
+
+**Controls** — statuses are honest about this repo today, not aspirational. `Horizon` is the
+sequencing call (`now` = lands with/next to the S1 fix; `next` = Phase 1 hardening before any
+execute wiring; `future` = needs a design change beyond this PRD) and is subject to adjudication
+by the per-pillar now/future plan; the IDs are the stable key.
+
+| ID | Pillar | Control | What it enforces | Status | Horizon |
+|----|--------|---------|------------------|--------|---------|
+| S1 | Security | **Drop the embedding elements; do not validate their URLs.** No raw HTML from model output: disable HTML passthrough in the markdown renderer, or post-process with a restrictive allowlist — no `iframe`/`img`/`video`/`audio`/`object`/`embed`, no remote `src`, and **strip `style`** (the inherited sanitizer adds `style` to every allowed tag, so `background-image:url(...)` is a click-free fetch of its own). Link-scheme allowlist that also rejects **protocol-relative** (`//host/...`) URLs, in markdown link form as well as image form; `rel="noopener noreferrer"` on every model-authored link; **no automatic network fetch of any model-authored URL**. CSA recommends allow-listing domains and disallowing protocol-relative URLs; **we go further and remove the elements, because URL inspection is precisely what failed both times it was tried** — GrafanaGhost's `//host` bypass (2026-04) and CVE-2026-17033's comment-hidden `://` bypass (2026-08), two independent defeats four months apart in non-AI Grafana code. The allow-list is depth, not the control. | I1, I6, I9 — and it is the **only** control on the remote-image path (see below) | **shipped** — PR #51 (raised as PR #13 finding B5). `src/components/ResponseMarkdown.tsx`: raw HTML is re-escaped to visible text by a renderer override on a **plugin-owned `new Marked()` instance** (Grafana mutates the global singleton, and `marked`'s `sanitize` option was removed in v8.0.0), markdown image syntax yields bare alt text with the URL discarded, and a DOM allowlist runs after it as a second layer — `style` is stripped from every tag, so no CSS `url()` path exists, and no `img`/`iframe`/`video`/`audio`/`object`/`embed`/`svg`/`source`/`track`/`link` element is ever emitted. `safeHref` admits only absolute `https:` or a same-origin path, rejecting protocol-relative `//host` and `/\host` explicitly, in markdown link form as well as image form; every surviving anchor carries `rel="noopener noreferrer"`. Grafana's own `renderMarkdown` is **not** in this path — the constraint that it keeps `img`/`iframe`/`video`/`audio`, adds `class`+`style` to every tag, and lets js-xss `safeAttrValue` pass any `href`/`src` beginning with `/` is what ruled it out. | now |
+| S2 | Security | Install docs state the plugin's threat model assumes a **tightened** `media-src`/`frame-src`/`connect-src` CSP in `grafana.ini`, and say plainly that CSP does **not** cover the image path. | I1 **partially** — bounds the `video`/`audio` and `fetch` variants only; **not** the image beacon | **open** — reduced scope after verification: `conf/defaults.ini` ships `content_security_policy = false` (off by default), and the default CSP template allows `img-src * data:` even when an operator turns it on, so the image beacon is permitted with or without CSP. `media-src 'none'` and `connect-src 'self' grafana.com` do bound media embeds and fetch. | now — docs-only, but no longer counted as defence in depth for I1 |
+| S3 | Security | Prompt-side: provenance tagging of every evidence block (source, stream, tenant), an explicit system instruction that tagged blocks are data and not instructions, and per-source **size** caps — today's caps bound entry *count*, not bytes — so no single source can dominate the context window. Explicitly **not** per-entry payload matching: LogInject fragments a payload across multiple log entries, so any control that inspects one entry at a time is the wrong shape. | I2, I5, I6, I10 | **open** — `Current` packing exists (`src/utils/grafanaStack.ts`, `src/utils/progressiveContext.ts`) and already does the structural half: `formatCurrent` writes one labelled block per source (`Loki last 15m:` / `Prometheus last 15m:` / `Tempo last 15m:` / `Alertmanager:`, matched for trimming by `SECTION_HEADS`, `progressiveContext.ts:116`), and per-source count caps exist — `LOG_LINE_CAP` 30, `PROM_SERIES_CAP` 8, `TEMPO_TRACE_CAP` 5, `ALERT_CAP` 8 (`grafanaStack.ts:18-22`) — alongside the budgets `MAX_CURRENT_CHARS` 700, `MAX_MAP_CHARS` 400, `MAX_INTENT_CHARS` 1000 and `MAX_HISTORY_TURNS` 5 (`progressiveContext.ts:16-25`), shed via `TRIM_ORDER` / `trimSection` / `dropTempoSection`. What is missing is the trust half: no block carries a provenance or trust label, and nothing tells the model a block is data rather than instruction. `stablePreamble()` instructs the opposite — "Answer FROM Current when present. Prefer concrete Current facts (logs, metrics, alerts, cluster data) over generic advice." | next |
+| S4 | Security | Output contract: commands are inert and copy-only, never one-click; destructive verbs (`delete`, `drain`, `cordon`, `scale --replicas=0`, `patch`) are visually quarantined with a banner naming that the suggestion derives from untrusted telemetry. | I2, I11 | **open** — copy-only/no-execute half is shipped (analysis-only v1, Decisions 2026-09-01); the quarantine + untrusted-origin banner are not built. | next |
+| S5 | Security | Review/CI tooling (risk assessors, validators, linters, any script the review process runs) is sourced from a pinned, trusted location outside the artifact under review — never executed from the PR/branch/commit being reviewed. Instructions embedded in PR titles, bodies, comments, or file content are inert data, never directives, regardless of phrasing. | I12 | **open** — nothing urgent here, but not because PR code does not run: `ci.yml` executes it on every `pull_request`. The blast radius is what bounds it today, and those bounds are inherited from the `@grafana/create-plugin` scaffolding rather than chosen here as a control — `pull_request` rather than `pull_request_target`, `persist-credentials: false` on every checkout, `permissions: contents: read`, and no secret reaching a fork PR (`GRAFANA_ACCESS_POLICY_TOKEN` is empty there, so the `Sign plugin` step is skipped by its own `if:` guard). What is missing is the review-side half: no pinning requirement is written down, so the first review/CI automation that reads PR text as instruction would inherit I12 with nothing in its way. Recorded as a standing design constraint, not a remediation of an existing gap. | next — binding before any custom review/CI automation is added, not before this PR |
+| P1 | Privacy | Multi-tenant containment: the asking operator's authorization should bound what the model sees. A single shared service token means it does not, so I1 exfiltrates across an authorization boundary and I8 removes the audit trail that would show it. | I1 blast radius, I8 | **open** — accepted v1 risk, now recorded with its exfiltration and attribution consequences (NFR → Identity). | future — per-operator credential propagation is an auth-model change |
+| P2 | Privacy | Redaction pass over the evidence pack before it enters the prompt: secrets, tokens, PII in log bodies. | I1, I4 | **open** | next |
+| C1 | Consent | No autonomous actuation — and confirmation is meaningful only with provenance: every claim in an answer must be attributable to a named evidence source, visible in the UI. Consent without provenance is rubber-stamping. | I2, I3, I7, I11 | **open** — no-actuation half shipped (no execute path presented); per-claim provenance is not built. | next — prerequisite for Phase 2 |
+| C2 | Consent | Explicit opt-in gate on any Grafana → Headlamp / execute handoff, and on any automated relay of answers to a machine consumer. | I3, I11 | **planned** — Phase 2 / PRD #2 (`prds/2-gitops-pr-remediate.md`); the machine-relay half is needed sooner (I11 is reachable today). | future — gated with the execute surface, must precede its wiring |
+| R1 | Reliability | Fail closed on sanitizer error or unparseable model output — never render the fallback raw. | I1, I6 | **shipped** — PR #51. `renderAnswerHtml` returns `undefined` if the parser or the sanitizer throws, or if `marked` returns a non-string, and `ResponseMarkdown` then renders the answer as a React text child (escaped by React, never as raw HTML). Pinned by the "fail closed" tests, which force `DOMParser.parseFromString` to throw. | now — same code path as S1 |
+| R2 | Reliability | Truncation is visible in the UI and never silently drops the highest-priority evidence. | I5, I10 | **open** | next |
+| G1 | Governance | The trust boundary is documented **and testable**: an adversarial-telemetry corpus runs in CI against the rendering path. | I1, I6, I9 regression | **shipped** — PR #51. The **20-case** corpus (`src/utils/__fixtures__/adversarialTelemetry.ts`, exports `ADVERSARIAL_TELEMETRY_CASES` / `AdversarialTelemetryCase`) landed with its consuming test, `src/components/ResponseMarkdown.test.tsx`, which runs every case through the real component and asserts the rendered DOM. Covers remote-image, `iframe`, media, protocol-relative (image *and* link form), `style` attribute *and* `style` element CSS `url()`, `target="_blank"` without `rel`, instruction-override, oversized stuffing, markdown-native image/autolink, accidental HTML in a stack trace, obfuscated `javascript:` schemes (mixed case, embedded tab, HTML numeric entity, percent-encoding, NUL byte), `vbscript:`, `data:image/svg+xml` in image *and* link position, reference-style link definitions, and `object`/`embed`/`base`/`meta`/`form`/`input`. A second layer runs the same class through a real browser: `tests/security-by-design.spec.ts` asserts on `page.on('request')` and `performance.getEntriesByType('resource')`, so a surviving embed is counted as an attempted request even though the beacon host never resolves. See Milestones. | now |
+| G2 | Governance | Every new evidence source (Kubeshark, traces, knowledge-base ingest, ticket/chatops relays) passes a "does this add attacker-writable input?" gate before it is wired. | I4, I11, and any new I1/I2 surface | **planned** | next |
+
+**S1 is the sole control on the remote-image path — there is nothing behind it.** Grafana's shared sanitizer (`packages/grafana-data/src/text/sanitize.ts`, v11.4.0) is a js-xss `FilterXSS` instance that *adds* `class` and `style` to every allowed tag and keeps `XSSWL.iframe = ['src', 'width', 'height']`, alongside `img`, `video`, and `audio` — an allowlist built for trusted dashboard text, not for model output derived from untrusted telemetry. The obvious compensating control does not compensate: `conf/defaults.ini` ships `content_security_policy = false`, so CSP is off unless an operator turns it on, and Grafana's default policy template permits `img-src * data:` even then. So an image beacon is allowed **with or without** CSP, while `media-src 'none'` and `connect-src 'self' grafana.com` bound only the media and fetch variants. That is why S1 is `now` and why S2 is recorded as partial: for I1's cheapest path, S1 is not the first of several layers — it is the only one.
+
+**Why *drop* rather than *filter* — the `style` counter-example.** Verified empirically against the real component: `style` **survives** the sanitizer applied to answer content, and js-xss adds `class` and `style` to *every* allowed tag. So `style="background-image:url(...)"` was a live, **click-free** fetch path with no `img`, `iframe`, `video` or `audio` element involved at all. Anyone reasoning "removing the embedding elements is enough" would have left it open, because the vulnerable surface was **invisible from the element list** — which is the transferable lesson for auditing any render path: enumerate the ways markup can *cause a fetch*, not the tags you happen to be thinking about. S1 therefore strips `style` from model output outright rather than parsing or filtering CSS. The regression corpus pins both this case (`style-url-fetch`) and the protocol-relative case (`protocol-relative-src`), which covers the markdown **link** form `[runbook](//example.invalid/r)` as well as the image form: the same `startsWith('/')` weakness applies to `href`, and CVE-2026-17033 is exactly that link-side instance.
+
+#### Published precedent — the channel is demonstrated, not hypothetical
+
+The vector is published and OWASP-classified: one real-world case against a shipping observability product, plus an academic benchmark on log-embedded payloads. This section is not a novel claim, and it is not speculation either.
+
+| Source | What it establishes |
+|--------|---------------------|
+| [OWASP LLM01 — prompt injection](https://owasp.org/www-project-top-10-for-large-language-model-applications/) | The class, including indirect injection from content the system ingests. |
+| **GrafanaGhost** — Noma Security, disclosed 2026-04-07, patched | Indirect prompt injection in Grafana's *own* AI assistant, exfiltrating via markdown image rendering with no login and no click. **The injection channel is log content.** [CSA AI Safety Initiative, *Indirect Prompt Injection Goes Operational*, 2026-04-26](https://labs.cloudsecurityalliance.org/research/csa-research-note-indirect-prompt-injection-in-the-wild-2026/): "an attacker could poison Grafana log entries with carefully crafted query parameters that caused Grafana's AI assistant to interpret embedded text as instructions when it summarized logs. The exfiltration channel exploited Markdown image rendering with protocol-relative URLs (paths beginning with //), which passed Grafana's URL validation." Noma's own writeup redacts the channel; CSA names it. The OWASP round-up below classifies the same case but does not name the channel. |
+| [OWASP GenAI Exploit Round-up Q1 2026](https://genai.owasp.org/2026/04/14/owasp-genai-exploit-round-up-report-q1-2026/) (2026-04-14) | Tabulates GrafanaGhost as LLM01/LLM02/LLM05 · ASI01/ASI02/ASI09 — an industry body has already classified exactly this path. Its summary names the rendering channel but not the injection channel, and does not mention logs: "Researchers disclosed GrafanaGhost, a prompt-injection path in Grafana's AI features that could force the platform to send sensitive enterprise data to attacker-controlled servers through external rendering flows." |
+| **LogJack** — [arXiv:2604.15368v1](https://arxiv.org/abs/2604.15368), Harsh Shah, 2026-04-15 (cs.CR) | *Indirect Prompt Injection Through Cloud Logs Against LLM Debugging Agents*: 42 payloads across 5 cloud-log categories against 8 models. Verbatim command execution ranges from 0% (Claude Sonnet 4.6) to 86.2% (Llama 3.3 70B); a passive "do not execute fixes" instruction drops most models to 0% but leaves Llama at 30.0%; `curl \| bash` RCE succeeds on 6 of 8 models; AWS/GCP/Azure guardrails largely fail to detect log-embedded injections. Model choice is a mitigation *variable*, never the control — which is why S3/S4/C1 are model-independent. |
+| **CamoLeak** — GitHub Copilot Chat, October 2025, CVSS 9.6 | The precedent for S1's shape: GitHub's fix was to **disable image rendering** in chat output rather than filter it. |
+| [grafana/mcp-grafana#680](https://github.com/grafana/mcp-grafana/issues/680) — open since 2026-03-24, unanswered | An upstream report already naming dashboard titles, panel descriptions, annotation text and Alertmanager incident descriptions as injection channels into a Grafana MCP surface. Not answered yet. |
+| **CVE-2025-41117** — *XSS in Grafana Explore stack trace*, published 2026-02-12, CVSS 6.8 (`AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N`), CWE-79 | The vendor's own register already concedes that telemetry is untrusted, with no LLM involved: "Stack traces in Grafana's Explore Traces view can be rendered as raw HTML, and thus inject malicious JavaScript in the browser… Only datasources with the Jaeger HTTP API appear to be affected." Note **`PR:N`** — no Grafana privileges needed. This is entry point 3 (trace content) and impact I6 (the accident), pre-AI and CVE-tracked. |
+| **CVE-2026-17033** — Alertmanager `generatorURL` stored XSS, published 2026-08-24, CVSS 6.8, CWE-79, fixed `>=13.1.0` | "Grafana renders `alert.generatorURL` directly as the Alert Details *See source* `LinkButton` href without URL-scheme sanitization or a safe-protocol allowlist. The click interceptor's `://` heuristic can be bypassed by placing `://` inside a JavaScript comment." Entry point 2 (alert content), and the **second** independently reported defeat of a Grafana URL-inspection heuristic in 2026 — four months after GrafanaGhost's `//host` bypass, in non-AI code. |
+
+**S1 is externally recommended, not just our opinion — and we go further.** The CSA note's own guidance, verbatim: "Where Markdown-based output rendering is enabled — particularly for image embeds — restrict to allow-listed domains and disallow protocol-relative URLs, the specific exfiltration channel exploited by GrafanaGhost." We adopt the protocol-relative prohibition as written, but **not** the domain allow-list as the primary control. The evidence is that URL *inspection* is the thing that keeps failing in this codebase: GrafanaGhost defeated a client-side image-URL validator with a protocol-relative prefix (2026-04), CVE-2026-17033 defeated a `://` substring heuristic by hiding the marker in a JavaScript comment (2026-08), and the sanitizer we inherit accepts any `src` beginning with `/`. Three published defeats of prefix/substring checks, so S1 removes the embedding elements outright — the shape GitHub chose for CamoLeak — and a domain allow-list is at most a second layer, for links the operator explicitly clicks. The same lesson appears in `mcp-grafana`'s SSRF pair, where the follow-up advisory admits the first fix "prevented the configured service-account token from being sent to unintended destinations but did not restrict the destinations themselves": scoping a fix to the credential instead of to the capability is the mistake S1 must not repeat.
+
+**The tracking asymmetry is worth naming when this is reported upstream.** Grafana *does* assign CVEs when telemetry content reaches the browser as markup — CVE-2025-41117 (trace stack traces rendered as raw HTML) and CVE-2026-17033 (alert `generatorURL` rendered as an href) — yet the AI-mediated version of the same outcome got no advisory and no CVE. Identical defect, tracked when framed as XSS in a panel, untracked when framed as prompt injection in an assistant. So the finding should be filed as the former: *untrusted telemetry rendered as markup in an authenticated browser*, with the LLM as the transport rather than the subject.
+
+**What is still genuinely absent:** MITRE ATLAS has not catalogued this channel — all 57 case studies (`mitre-atlas/atlas-data`, `dist/ATLAS.yaml`, 2026-09-04) contain zero cases whose injection channel is a log line, metric label, span attribute, or alert annotation — and `mcp-grafana#680` remains unanswered. Neither absence is evidence of safety; the channel is demonstrated, the catalogue is simply behind.
+
+**Citation hygiene** (each of these errors would discredit the finding): CamoLeak is widely mis-attributed to **CVE-2025-59145**, which is an unrelated npm `color-name` malware advisory — cite CamoLeak by name, no CVE. GrafanaGhost has **no CVE either**, and the two high-severity Grafana CVEs often mentioned near it are neither simultaneous nor related. **CVE-2026-27876** — published **2026-03-27 (NVD) / 2026-03-30 (Grafana's own advisory)**, CVSS 9.1 `AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H`, CWE-94 (CWE-89 appears on the Red Hat record) — is, in Grafana's words, "A chained attack via SQL Expressions and a Grafana Enterprise plugin can lead to a remote arbitrary code execution impact (RCE)… Only instances with the `sqlExpressions` feature toggle enabled are vulnerable." Arbitrary file write is the **primitive**, not the impact — Grafana's own security-release blog for this CVE says the syntax "also permitted writing arbitrary files to the file system in such a way that one could chain several attack vectors to achieve remote code execution", so cite it as chained RCE rather than as a file-write CVE. **CVE-2026-27880** — same publication dates, CVSS 7.5, `PR:N`, classified inconsistently (NVD lists CWE-787, CWE-125 *and* CWE-770) — is the OpenFeature toggle-evaluation endpoint reading unbounded values into memory, i.e. an unbounded read leading to OOM. Both fixed in 11.6.14 / 12.1.10 / 12.2.8 / 12.3.6 / 12.4.2. Either register puts them **before** GrafanaGhost's 2026-04-07 disclosure, so CSA's "simultaneously patched" phrasing is refuted twice over — and neither number may ever be attached to the prompt-injection finding. By contrast, EchoLeak (Microsoft 365 Copilot, zero-click LLM exfiltration) **does** carry a verified identifier, **CVE-2025-32711** — so "same class, no CVE" is a property of these two cases, not of the class.
+
+#### Prior art in the literature, and what is actually ours
+
+The mechanism is established prior art. It has a name, a benchmark, and a defence proposal in the peer-reviewed literature; this section applies that work to one plugin rather than restating it as a discovery.
+
+| Work | What it contributes |
+|------|---------------------|
+| **AIOpsDoom / AIOpsShield** — Pasquini et al. (RSAC Labs / George Mason), *When AIOps Become AI Oops: Subverting LLM-driven IT Operations via Telemetry Manipulation*, [arXiv:2508.06394](https://arxiv.org/abs/2508.06394), 2025-08-08, **USENIX Security '26** | Coins **"tainted telemetry"** for exactly this trust boundary, names the reflected-log channel by field (`User-Agent`, 404 request URLs), and evaluates the attack on a Kubernetes cluster. AIOpsShield is the accompanying defence. |
+| **LogInject** — [arXiv:2607.14493](https://arxiv.org/abs/2607.14493), 2026-07-16 | Coins **"passive prompt injection"**; 88.2% peak attack-success rate; fragments payloads across multiple log entries, which defeats per-entry inspection. Frames the problem as a **confused deputy** (Hardy, 1988): "there is no architectural trust bit that marks system-prompt tokens as instructions and log tokens as data." |
+| **LogJack** — [arXiv:2604.15368](https://arxiv.org/abs/2604.15368), 2026-04-15 | Cited above: cross-model benchmark on log-embedded payloads; establishes that model choice is a variable, not a control. |
+
+**The confused-deputy framing is the most useful sentence for a reader deciding whether this applies to them.** The model is a deputy acting with the operator's authority on content supplied by a third party, and nothing in the token stream distinguishes instruction from data. Any system that packs untrusted text into a prompt and then renders or acts on the result inherits the problem, regardless of provider, prompt wording, or model.
+
+**Our narrow contribution.** AIOpsShield's defence rests explicitly on "the minimal role of user-generated content" in telemetry. That premise does not hold for the reflected-log class: a `User-Agent` or request path echoed into a 404 line is not incidental user content sitting alongside the signal — it *is* the signal, and the field is chosen by an unauthenticated caller. Entry point 1 above is therefore a channel the leading published defence assumes away. That, plus the render-side control (S1, drop rather than inspect), is what this PRD adds; the class, the naming, and the benchmarks are the cited work's.
+
+**Industry posture, factually.** Across 18 surveyed AIOps/observability-assistant products, three vendors publish any telemetry-specific trust statement, and each of those is scoped to a single narrow control. Grafana's own Assistant/AI documentation set (124 pages, 802,622 bytes as fetched) contains no occurrence of "prompt injection" or "untrusted". This is the reason the boundary is documented here rather than deferred to a platform guarantee: at present there is no platform guarantee to point at.
+
+#### Phase 2 gate
+
+The North Star is explicit: **Grafana diagnoses; Headlamp operates** — and Headlamp is *not* read-only (`executeRemediation`, `operate`, `recommend`). The moment diagnosis output becomes an input to that execution surface, I2 (operator-actioned) becomes I3 (agent actuation with a human rubber-stamp). **C1 (per-claim provenance) and C2 (explicit opt-in handoff gate) are therefore prerequisites for wiring Grafana output into any execution surface, together with S1 and S4** — the controls must land *before* the wiring, not after it, because a control designed after the integration ships is a control that never gets to say no.
+
+**The exposure is not entirely future, though.** I11 says an execution surface is reachable **today**: any relay that forwards an answer to a machine consumer — a chatops bot, ticket automation, a scheduled report read by a higher-privileged agent — removes the human this design leans on, with none of the Phase 2 wiring in place. So the C2 gate is really two gates: the Headlamp/execute handoff (Phase 2), and *automated relay of answers to any non-human consumer*, which needs a decision now. Until that decision exists, an answer must be treated as untrusted-derived content by whatever consumes it, and G2's "does this add attacker-writable input?" question applies in reverse to every new **output** integration as well.
+
+Reporting channel for content-derived findings: [`SECURITY.md`](../SECURITY.md).
+
+<a id="ai-security-strategy"></a>
+
+### Expansion: AI-security strategy — what the plugin owns and what the engine owns
+
+This PRD's threat model (above) inventories the impact classes. This section is the maintainer-facing
+follow-on: what to build, in which repo, and in what order — read for `vfarcic/dot-ai-grafana` and
+`vfarcic/dot-ai` together, since several of the recommended controls are structurally unbuildable on one
+side of that boundary.
+
+#### Horizon — today, tomorrow, future
+
+**Today.** I1 (exfiltration without script execution), I6 (the accidental case — no attacker required),
+and I9 (the browser as confused deputy against internal origins) are all live on the render path right
+now, with the plugin shipping in its current, undated-fix state. I11 (downstream automation compromise
+via a machine relay) is also reachable **today** — it needs no Phase 2 wiring at all, only an existing
+chatops bot, ticket automation, or scheduled report that forwards an answer without a human in the loop.
+None of these four wait on a future milestone; they are properties of the plugin as designed.
+
+**Tomorrow.** I3 (agent actuation) activates the day an execute surface is wired to this plugin's output —
+Phase 2 / PRD #2, `Headlamp operate`/`executeRemediation`, remediate → GitOps PR. I4 (persistence via
+knowledge poisoning) activates if an answer, or evidence derived from one, is ever ingested back into a
+knowledge store that later Asks read from. Neither is live yet; both are one integration away, which is
+why C1/C2/S4 are stated as prerequisites to that wiring rather than follow-on hardening.
+
+**Future.** I7 — silent decision corruption, where the answer is subtly wrong rather than exploited —
+is the horizon that outlasts every render-side or prompt-side fix, because it is not a rendering failure
+or a fetch: it is a plausible-but-false causal claim, or an innocent neighbour named as the culprit, with
+nothing about the answer looking abnormal. The threat model above is explicit that **there is no detection
+story for this class at all** — no URL is fetched, no destructive verb appears, no CI assertion or log
+line would notice. The same failure mode extends to model- and prompt-template configuration drift and to
+diagnostic skew (the system silently becoming less accurate over time rather than being attacked): both
+are indistinguishable from I7 at the render layer, because in every case the output looks like a normal
+answer. Provenance (C1) is the only partial answer available today — it makes a claim traceable to its
+source so a wrong claim can at least be checked — and it is a partial answer precisely because
+traceable is not the same property as correct.
+
+#### The design principle
+
+Controls that **drop** structure beat controls that **validate** content. This is not a stylistic
+preference: on this exact surface, URL/content *inspection* has already been defeated three times
+(GrafanaGhost's protocol-relative bypass of a client-side image-URL validator, CVE-2026-17033's
+comment-hidden `://` bypass of a click-interceptor heuristic, and the inherited sanitizer's own
+allowlist-by-construction permitting the embed tags it was meant to guard), documented above under
+*Published precedent*. A control set that relies on inspecting content for badness is the configuration
+that keeps failing; a control that removes the structure a payload needs (no embed elements, no raw HTML,
+a separate non-instruction field) cannot be bypassed by a cleverer payload, because there is nothing left
+for the payload to be clever about. Every recommendation below is a consequence of this one preference.
+
+#### Recommendations — this plugin (`dot-ai-grafana`)
+
+The plugin owns the render path, evidence-pack assembly, and the operator-facing UI. Every row below is
+something the plugin can implement without depending on an engine change.
+
+| Recommendation | Why it belongs plugin-side | Mapped IDs | Status |
+|---|---|---|---|
+| Drop-not-validate rendering: no `iframe`/`img`/`video`/`audio`/`object`/`embed`, strip `style`, no automatic fetch of any model-authored URL | The render path — the DOM the operator's browser receives — exists only in the plugin frontend; the engine never touches it | S1, I1, I6, I9 | open |
+| Output contract / destructive-verb quarantine: commands are inert, copy-only, never one-click; a banner names that a suggestion derives from untrusted content | The presentation layer that decides what an operator sees and how it invites action is plugin UI, not engine output | S4, I2, I3 | open |
+| Per-claim provenance in the UI: every claim attributable to a named evidence source, visible to the operator | Provenance only has to be *displayed* to be useful to the operator reading it; the plugin already assembles the evidence pack and knows which source fed which claim | C1, I2, I3, I7, I11 | open — no-actuation half shipped; per-claim provenance not built |
+| Per-source caps and visible truncation in the evidence pack | The plugin is what assembles the pack from Loki/Prometheus/Tempo/Alertmanager/K8s reads, so the cap and the truncation banner are both operations on data the plugin already holds | S3, R2, I5, I10 | open |
+| Redaction pass over the evidence pack before it enters the prompt (secrets, tokens, PII in log bodies) | Redaction has to run before the pack leaves the plugin's process, since it is the last point that still has the raw, unpacked telemetry | P2, I1, I4 | open |
+| Adversarial-telemetry corpus as a CI gate against the rendering path | The render path is plugin code; a regression suite for it runs in the plugin's own CI | G1, I1, I6, I9 | planned |
+| New-evidence-source gate: any new source (traces, additional datasources, ticket/chatops relays) is checked for "does this add attacker-writable input?" before it is wired | The plugin decides what sources it reads from and forwards, so this is a plugin-side design review gate, exercised each time the evidence pack's inputs change | G2, I4, I11 | planned |
+| Emit an `integrity` label (`operator` \| `vendor` \| `attacker-influenced`) per evidence item at pack-assembly time | The plugin is the only component that knows, at the point of collection, which bytes came from a Loki log body versus the operator's own typed intent versus a vendor-supplied document — that knowledge does not survive into the engine unless the plugin states it explicitly | I2, I3, I7 | planned — producer half only; see engine table for the half that must carry it |
+
+#### Recommendations — dot-ai core engine
+
+These cannot be fixed from the plugin at any level of effort, because the plugin does not compose the
+prompt, does not hold the knowledge base, and does not gate tool calls — all three live in the engine.
+
+```ts
+type Integrity = 'operator' | 'vendor' | 'attacker-influenced';
+
+interface EvidenceItem {
+  content: string;
+  integrity: Integrity;   // required, no default
+  source: string;         // datasource / tool / KB entry id
+}
+```
+
+| Recommendation | Why it belongs engine-side | Mapped IDs | Status |
+|---|---|---|---|
+| Carry the `integrity` label through prompt composition and consult it at tool gating; a **missing** label defaults to `attacker-influenced`, never `vendor` | Prompt composition and tool gating happen inside the engine; the plugin can emit the label but cannot make it survive composition or reach a gate it never touches. A label that defaults to trusted quietly disappears at every integration point not yet updated — the fail-closed default is what makes the field load-bearing rather than decorative | C1, C2, I2, I3, I7, I11 | open |
+| A separate `evidence` field on `POST /api/v1/tools/{tool}`, distinct from `intent`, so untrusted telemetry text does not share a field with instruction | The request schema is engine-owned; today untrusted text and operator instruction are tagged in-band inside the same field, which is a visible workaround rather than a structural separation | S3, I2, I6 | open |
+| Per-operator credential propagation, replacing today's single shared service token | Credential handling and RBAC live in the engine's auth layer; the plugin has no mechanism to attribute a request to an individual operator once it reaches the engine. Today's shared token means the I1 exfiltration primitive crosses an **authorization boundary** — the model can answer from a superset of what the asking operator is authorized to see | P1, I1, I8 | open — accepted v1 risk (NFR → Identity) |
+| Expose provider/model identity in the `version` response body | Model/provider selection is an engine-side routing decision (the engine routes models via a gateway, per its own design docs); the plugin can only surface what the body contains, and today reads `version` and discards everything except `connected` (`resources.go:447-463`) | I7 | planned — whether `version` currently carries provider/model fields is `[UNVERIFIED]` |
+
+#### What this deliberately does not recommend
+
+Pursuing a management-system certification (e.g. an ISO information-security or AI-management-system
+certification) is not recommended here: those certify an *organisation's* processes, not a plugin's code,
+and would not change anything an operator's browser renders or an engine's tool gate consults. Aligning
+the project to a standard whose treatment of AI observability assumes it is purely a monitoring
+*capability* is also not recommended, because on this surface the observability pipeline is the attack
+surface — the same Loki/Prometheus/Tempo/Alertmanager reads that make diagnosis useful are exactly what
+make telemetry attacker-writable; a standard that does not model that duality would validate a posture
+this PRD's threat model has already shown to be insufficient. Finally, pinning any future governance gate
+to identifiers from a source still in beta or still subject to revision is not recommended: this PRD's own
+control IDs (`S`/`P`/`C`/`R`/`G`) are declared stable and reserved for that reason, and a gate built on
+numbers that can still renumber upstream would break silently the day they did.
+
+
 ## Success Criteria
 
-- Plugin installs cleanly into Grafana (9.x+/10.x/11.x)
+- Plugin installs cleanly into Grafana (`>=11.0`; 11.4 reference)
 - Users can submit natural language queries and receive text responses
 - Users can submit issue descriptions and receive analysis text
 - Configuration via Grafana plugin settings works (MCP URL + auth token)
@@ -329,13 +688,13 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 - Misconfiguration fails fast; specific errors with Retry
 - *(NFR)* plugin proxy < 500 ms overhead vs direct call (excluding model think time)
 
-**Note on version floor:** original success criteria list 9.x+/10.x/11.x; this revision proposes `>=11.0` with **11.4** must-pass (see Open Questions / deliberate deltas).
+**Note on version floor:** original success criteria listed 9.x+/10.x/11.x; **as-built is `>=11.0`** with **11.4** must-pass. 9.x/10.x not claimed.
 
 ## Risks & Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Grafana plugin API changes across versions | Plugin breaks on upgrade | Target Grafana 10.x+ with stable APIs, test across versions |
+| Grafana plugin API changes across versions | Plugin breaks on upgrade | Target Grafana `>=11.0` with stable APIs; CI 11.0–13 + nightly |
 | MCP server authentication complexity | Users can't configure plugin | Clear setup docs, connection test button in settings |
 | Go backend proxy adds latency | Slow responses | Minimal proxy logic, streaming if Grafana supports it |
 | Plugin review process (if publishing to marketplace) | Delayed availability | Start with unsigned/private distribution, publish later |
@@ -352,7 +711,7 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 
 - dot-ai MCP server running and accessible from Grafana instance
 - MCP server exposes `/api/v1/tools/query` and `/api/v1/tools/remediate` endpoints
-- Grafana 10.x or later (for stable app plugin APIs)
+- Grafana `>=11.0` (reference **11.4**; CI 11.0–13 + nightly)
 - `@grafana/create-plugin` toolchain for scaffolding
 
 ### Expansion: Additional dependencies
@@ -373,9 +732,13 @@ A `getBackendSrv().post(...resources...)` call crosses: browser fetch → Grafan
 - [x] **Query tool UI** — Users can type natural language queries, submit, and see text responses from the MCP server
 - [x] **Remediate analysis UI** — Users can describe issues, submit, and see AI-powered analysis text (no execution)
 - [x] **Tool selector and shared layout** — Dropdown to switch between Query and Remediate, shared input/response layout, context-aware placeholders
-- [x] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests
-- [~] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
-- [~] **Grafana version compatibility testing** — Verified working on Grafana 10.x and 11.x
+- [x] **Error handling and loading states** — Connection errors, auth failures, timeouts displayed clearly; loading spinner during requests; Cancel + Retry in v1
+- [x] **Documentation and installation guide** — README with setup instructions, configuration guide, and screenshots
+- [x] **Grafana version compatibility testing** — CI Playwright on Grafana **11.0–13 + nightly** (floor `>=11.0.0`, 11.4 libs). Not 9.x/10.x.
+- [x] **Elevated-role gate on tool resource routes** ([#26](https://github.com/vfarcic/dot-ai-grafana/issues/26) / [#25](https://github.com/vfarcic/dot-ai-grafana/pull/25)) — Query/Remediate resource routes require org **Editor or Admin**; denial happens before any upstream engine call; requests with no user fail closed; the existing Admin gate on Configuration and Test connection is unchanged. Shipped: #25 merged 2026-09-04, #26 closed. See [Decision Log](#decision-log).
+- [x] **Adversarial-telemetry test programme (G1)** — the 20-case regression corpus (`src/utils/__fixtures__/adversarialTelemetry.ts`, landed in PR #51 with its consuming test `src/components/ResponseMarkdown.test.tsx`) runs in CI against the answer-rendering path: no remote embed (`img`/`iframe`/`video`/`audio`/`object`/`embed`/`svg`/`source`/`track`/`link`), no remote `src`/`srcset`, no surviving `style` attribute *or* `style` element (CSS `url()` is a click-free fetch), no protocol-relative `//host` in raw-HTML, image *or* link form, no `target="_blank"` without `rel="noopener noreferrer"`, obfuscated `javascript:`/`vbscript:`/`data:` schemes demoted to text, and instruction-override text rendered inert. `tests/security-by-design.spec.ts` runs the same class through a real browser across the CI Grafana matrix, asserting on attempted requests and resource timings. **Not** covered by this milestone: visible truncation of oversized stuffing, which is control **R2** and remains `next` — the corpus case pins only that a ~200 KB answer renders inert (see [Expansion: Untrusted telemetry trust boundary](#untrusted-telemetry-trust-boundary))
+
+As-built: M0–M9 cover v1 (M7 in scope and landing — see the M7 row). Floor is `grafanaDependency: ">=11.0.0"` (11.4 libs), not 10.x. See [As-built v1](#expansion-as-built-v1-this-contribution).
 
 ### Expansion: Phase 1 detail (M0–M9 mapping to the checklist above)
 
@@ -384,24 +747,24 @@ and **3 (sovereign / self-hosted)** — the two that matter on self-managed **v1
 Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 
 **Stage 1a — Foundation**
-- [~] **M0 — Validation spike.** Against a live dot-ai: confirm `data.result.summary` unwrapping and remediate analysis fields; confirm `version → system.kubernetes.{connected,context}`; confirm a **no-`apply` token** yields analysis + `fallbackReason`; confirm the auth header; **measure the Grafana resource-call deadline** to decide blocking vs async default. *Done when the presentation table, cluster-context source, read-only guarantee, and timeout strategy are confirmed.*
-- [~] **M1 — Scaffolding, build & generated client.** `@grafana/create-plugin` app+backend; `@grafana/*` libs **pinned to support Grafana 11.4** (the scaffold defaults to ~13.x); a dot-ai client **generated from `schema/openapi.json`**; builds and loads. *Done when the app appears in the sidebar (correct `includes` nav entry), the Mage backend builds, the generated client compiles, and it loads on 11.4.*
+- [x] **M0 — Validation spike.** Envelope `summary` + analysis-only remediate + Bearer auth confirmed. Grafana host deadline measured at **120s** → v1 stays **blocking**, no async `202`. Cluster-context chip not on the page (Test connection still calls `version`).
+- [x] **M1 — Scaffolding and build.** `@grafana/create-plugin` app+backend; `@grafana/*` **11.4.0**. **No** generated OpenAPI client (as-built: thin SDK `httpclient` for three paths).
 
 **Stage 1b — Connectivity**
-- [~] **M2 — Configuration page.** apiUrl + token (secureJsonData); Test-connection (post-Save) via `version`, failing fast on misconfig, and surfacing the cluster context. *Done when settings persist and Test-connection reports OK/failure + cluster.*
-- [~] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/status/{jobId}`; `httpclient` + generated client; token injection; envelope+status mapping; async `202`+poll default (per M0); egress/SSRF fail-closed; redaction; fail-fast. *Done when unit tests cover success + all error classes + timeout + token-never-logged.*
+- [x] **M2 — Configuration page.** apiUrl + token (`secureJsonData`); Test-connection via `version`. Draft URL gated to org Admin.
+- [x] **M3 — Backend proxy (Go).** `/query`, `/remediate`, `/health`, `/test-connection`; SDK `httpclient`; remediate field allowlist; token never logged. **No** `/status/{jobId}` (no 202).
 
 **Stage 1c — Intelligence surfaces**
-- [~] **M4 — Query UI.** Plain-text answer from `summary`; cluster-context display (from `version`); raw-response toggle; char counter. *Done when a real query renders its answer with visible cluster context.*
-- [~] **M5 — Remediate analysis UI.** Analysis text; per-command Copy; **no execution surfaced**. *Done when a real remediate renders root cause + recommended actions and offers no execute path.*
+- [x] **M4 — Query UI.** Shipped the `summary` response area as **plain text**; sanitized-markdown rendering of that same `summary` field landed in PR #51 (Decision 12), not with M4. Grafana DS **Current/Map** packed into `{intent}`; condensed **Prior:** from recent turns (≤240 chars inside 1000-char budget). Full History on screen. No cluster-context chip, raw-response toggle, or char counter in v1.
+- [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
-- [~] **M6 — Shared layout, selector & firefighting controls.** Tool selector + context-aware placeholders; Cancel, Retry (preserves intent), elapsed-time/staged progress; response Copy; specific error `Alert`s. *Done when switching tools shares state and long/failed calls are cancelable/retryable with clear errors.*
-- [~] **M7 — Dashboard deep-link.** Intent pre-filled via URL query param / template variable from a panel link. *Done when a panel data-link opens the page with the intent populated.*
+- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. Cancel + Retry shipped in v1; no elapsed timer.
+- [x] **M7 — Map/Explore/show-me navigation surface.** In v1 scope, folded back from [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) — tracked as [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6). **State on `main` today:** the Explore/Drilldown link builders shipped with [#52](https://github.com/vfarcic/dot-ai-grafana/pull/52) (`src/utils/grafanaExplore.ts`); the Map-panel wiring and the show-me 0-hop classifier come with [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79). Checked for **scope** — M7 belongs to v1, not to PRD #3 — which is what this section decides; #79 completes the surface.
 
 **Stage 1e — Ship**
-- [~] **M8 — Docs & install guide.** README: setup, config, read-only token guidance, **unsigned-plugin allow-list step**, screenshots; a `changelog.d` fragment per repo convention. *Done when a new user installs+configures from the README alone.*
-- [~] **M9 — End-to-end + compatibility.** A **live-stack integration test** (real Grafana **11.4** + a current release **13.x**, live dot-ai): real Query + Remediate round-trip, token flow, and no-`apply` read-only enforcement verified end-to-end — not just mocks. *Done when the CI matrix passes and the live e2e is green on 11.4 and current.*
+- [x] **M8 — Docs & install guide.** Product README: setup, config, unsigned allow-list, 120s timeout. No screenshot set / `changelog.d`.
+- [x] **M9 — Compatibility.** CI: unit/lint + Playwright on Grafana 11.0–13 + nightly (provisioned dummy token). Live operator stack is adopter-side.
 
 > **Phase 1 exit:** a self-managed 11.4 operator gets AI **cluster-state** answers + remediation
 > **analysis** inside **Grafana** — sovereign, read-only, verified against a live stack.
@@ -436,7 +799,7 @@ Kubeshark connectivity inside this plugin repo.**
 | Layer | Owns | Does **not** own |
 |---|---|---|
 | **Core `vfarcic/dot-ai` PRD** (open first) | Kubeshark as an MCP/tool (or evidence source): discover, auth, **redaction**, capability gate (`mcp:use` or equivalent), when remediate may call it, OpenAPI/tool schema, fail-closed without Kubeshark installed | Grafana/Headlamp page chrome |
-| **Platform deploy / MOP** (adopter-specific; e.g. RILEY `riley_infrastructure`) | Installing the privileged Kubeshark tap, NetworkPolicy, storage, on-demand vs always-on, operator approval | Tool contract or UI |
+| **Platform install** (adopter-specific) | Installing the privileged Kubeshark tap, NetworkPolicy, storage, on-demand vs always-on, operator approval | Tool contract or UI |
 | **Companion UIs** (this Grafana PRD, Headlamp) | Optionally show analysis text that **already cites** packet evidence once the server returns it; no special Kubeshark client | Direct Kubeshark API, PCAP storage, decrypt keys, privilege |
 
 **Order of work (fail-closed):**
@@ -464,6 +827,24 @@ Same rule for cheaper senses: registering **`mcp-grafana`** (Prom/Loki/Hubble) i
 ---
 
 # Reviewer appendices (not part of the original PRD)
+
+### Expansion: Related PRDs (not this contribution)
+
+Do **not** mix these into vfarcic/dot-ai-grafana#3. Unsigned alpha **0.1.0** is this file only.
+
+```
+  PRD #1  this file / vfarcic#3 / fork #21     v1 0.1.0   analysis-only pack + Map/Explore/show-me
+  PRD #2  issue #13 / fork #18                  post-v1    GitOps PR execute
+  PRD #3  issue #23 / fork #22                  0.2.x      markdown Answer
+```
+
+| PRD | GitHub | Owns | Does not own |
+|---|---|---|---|
+| **#1** (this file) | [vfarcic#3](https://github.com/vfarcic/dot-ai-grafana/pull/3) · [fork #21](https://github.com/LesleyMurfin/dot-ai-grafana/pull/21) | Query + analysis-only remediate, Current packing, Map `/d/uid` / Explore / show-me navigation, 0.1.0 | markdown Answer, GitOps execute |
+| **#2** | [issue #13](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) · [PR #18](https://github.com/LesleyMurfin/dot-ai-grafana/pull/18) | GitOps PR execute | M7 Map, v1 packing |
+| **#3** | [issue #23](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) · [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) | markdown Answer | Map/Explore/show-me (folded into PRD #1), GitOps execute, v1 0.1.0 |
+
+Fork [PR #16](https://github.com/LesleyMurfin/dot-ai-grafana/pull/16) (`feat/upstream-plugin` → `main`) is **not** a product split. Do not merge it as v1+M7.
 
 ## Related / prior art (for this revision)
 
@@ -493,7 +874,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | Original draft | This revision | Notes |
 |---|---|---|
 | **Problem Statement** | [Problem Statement](#problem-statement) + [Competitive landscape](#competitive-landscape--differentiation) | Same gap (context-switch for NL / analysis); framing expanded with Grafana Assistant / Sift so the plugin's wedge is honest |
-| **Solution Overview** | [Solution Overview](#solution-overview) | Same: Query + Remediate analysis-only; plain-text presentation |
+| **Solution Overview** | [Solution Overview](#solution-overview) | Same: Query + Remediate analysis-only; presentation amended from plain text to sanitized markdown (Decision 12, PR #51) |
 | **User Journey** | [User Journey](#user-journey) | Same path; adds cancel / retry / cluster-context / deep-link detail |
 | **Architecture** | [Architecture](#architecture) + [Companion-project model](#companion-project-model-same-as-headlamp) | Same app+Go proxy; contracts pinned to source; companion vs core ownership explicit |
 | **MCP Server Integration** (query + remediate endpoints) | [Tool → endpoint map](#tool--endpoint-map) and [MCP Server Integration](#mcp-server-integration) | Same two tools; fields/`summary`/auth headers validated against `vfarcic/dot-ai` |
@@ -519,7 +900,7 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 | Error handling and loading states | **M6** (cancel / retry / elapsed / alerts) |
 | Documentation and installation guide | **M8** |
 | Grafana version compatibility testing | **M9** (11.4 must-pass + current 13.x; **floor raised** — see deltas) |
-| *(new in this revision)* | **M7** dashboard→intent deep-link (still analysis-only) |
+| *(new in this revision)* | **M7** Map/Explore/show-me navigation surface — shipped in v1, folded from [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) |
 
 ### Deliberate deltas from the original draft (please confirm or redirect)
 
@@ -564,113 +945,81 @@ Phases 2–3 are **proposed roadmap only** and are **not** part of original scop
 7. **Grafana Cloud (optional, not planned here)** (Design Decision 10 / [Deployment targets](#deployment-targets-self-managed-vs-grafana-cloud)) — does the maintainer or community want a **later** Cloud track (catalog signing, Cloud-reachable dot-ai HTTPS, install path)? This contribution will not take it on; answer only if someone is volunteering to own that follow-on.
 8. **Kubeshark / evidence ownership** (Design Decision 11 / [Where Kubeshark connectivity lives](#where-kubeshark-connectivity-lives)) — confirm: **core `dot-ai` PRD + platform MOP** for connectivity; this companion only presents server output (optional M16). Reject putting a Kubeshark client in the Grafana plugin.
 
-## Progress (evidence log only — not a second milestone list; SSOT is ## Milestones above)
+### Expansion: As-built answers (v1)
 
+| # | Answer |
+|---|---|
+| 1 | Still open for maintainer docs. v1 uses a Bearer token; recommend no `apply`. |
+| 2 | **Resolved:** id `devopstoolkit-dotai-app`; home this repo. |
+| 3 | **Resolved:** `>=11.0`, reference **11.4**, pins 11.4.0. 9.x/10.x not claimed. |
+| 4 | **Resolved for v1:** unsigned/private first. Catalog later. |
+| 5 | **Resolved for v1:** blocking 120s (15s probes). Async 202 deferred. |
+| 6 | **Resolved for v1:** analysis-only Grafana; execute stays Headlamp. GitOps-PR execute is a later PRD if wanted. |
+| 7 | Unchanged — not this contribution. |
+| 8 | Unchanged — core engine first; no Kubeshark client in this plugin. |
 
-| date | milestone | status | evidence |
-|------|-----------|--------|----------|
-| 2026-09-01 | M-scaffold | [x] complete | PR #1 merged; `d46bc5d` feat(m1) scaffold app+backend; `src/plugin.json` type app + backend; e2e `tests/appNavigation.spec.ts` |
-| 2026-09-01 | M-config | [x] complete | `385354b` AppConfig apiUrl+token+Test connection; PR #12 **merged** (`65cd8d5`); Admin draft-`apiUrl` gate (#7) + success-copy (#8); `AppConfig.tsx` + unit tests; working tree |
-| 2026-09-01 | M-proxy | [x] complete | `22dc7a2`/`75295bf` proxy query/remediate/test-connection; envelope normalize via PR #12; `63994e7` SDK `httpclient`; `pkg/plugin/app.go` `newPluginHTTPClient`; `go test ./pkg/...` |
-| 2026-09-01 | M-query | [x] complete | `f4c1d8f` DotAIPage query + `callDotAITool('query')`; stack Current packing (`grafanaStack.ts`/`progressiveContext.ts`/`askOrchestrator.ts`); live Ask **2026-09-01T22:46–22:48Z** PASS 3 golden asks (`scripts/golden-ask-results.json`: hops=3, first_hop=grafana, used_current=true); jest DotAIPage/orchestrator |
-| 2026-09-01 | M-remediate | [x] complete | `f4c1d8f` remediate mode + analysis-only banner; no execute UI/payload (`dotaiApi.ts` omits execute/apply; tests assert); Execute blocked (PRD #2 owns execute); working tree |
-| 2026-09-01 | M-selector | [x] complete | `f4c1d8f` Query/Remediate dropdown + shared layout; Analyze this / Clear thread; e2e + unit coverage |
-| 2026-09-01 | M-errors | [x] complete | `f4c1d8f` spinner + error alerts; fetch-reject path via PR #12; AppConfig test-connection error path; loading disables controls |
-| 2026-09-01 | M-docs | [~] partial | PR #5 merged (`cfc6bc1`/`11bd7b6`); README install/config; `docs/progressive-context.md` + `docs/grafana-stack-test-plan.md`; hop-cap-3 + §7 Measures; screenshots still open — `src/plugin.json` `screenshots: []` |
-| 2026-09-01 | M-compat | [~] partial | `grafanaDependency: ">=11.0.0"`; `@grafana/*` 11.4 pins; 11.x reference host proven (live Ask); **10.x dual-version not proven** |
-| 2026-09-01 | quality | landed | PR #12 **merged** (`65cd8d5`); issues #7–#11 **closed**; public-surface CI (`scripts/public-surface-check.sh`, `6e08d39`); webpack + jest + go tests in tree |
-| 2026-09-01 | live-ask | proof | **2026-09-01T22:46:04Z–22:48:35Z** live UI: 3 golden asks PASS; first ask hops=3 first_hop=grafana used_current=true (`scripts/golden-ask-results.json` / `scripts/golden-ask-log.jsonl`). Lesley AP-003 override: working-tree + this window as `[x]` evidence for M-config–M-errors |
+## Decision Log
 
+Numbered **Design Decisions** (above) are the v1 design record. This log holds decisions
+taken *after* the plugin PR merged, in review of shipped behaviour, where there was no
+numbered decision to amend.
 
-## Decisions
-
-| date | decision | rationale |
-|------|----------|-----------|
-| 2026-09-01 | Analysis-only remediate; no execute UI | Product scope is read-only analysis; DotAIPage banner and tests assert no execute/apply payload fields |
-| 2026-09-01 | Plugin id `lesleymurfin-dotai-app`; code home LesleyMurfin/dot-ai-grafana fork | `src/plugin.json` id; README/CLAUDE.md; unsigned allow-list uses this id |
-| 2026-09-01 | `grafanaDependency: ">=11.0.0"`; `@grafana/*` 11.4.0 pins; unsigned/private dist first | plugin.json + README pins; marketplace publish deferred (risks table) |
-| 2026-09-01 | Test connection = `POST /api/v1/tools/version` with Bearer | README + backend `/test-connection` proxy contract |
-| 2026-09-01 | Grafana plugin HTTP client 120s ceiling; no async 202 this pass | `docs/quality-review.md` known host limits / non-goals |
-| 2026-09-01 | Draft `apiUrl` on `/test-connection` requires Grafana Admin | **On `main`** via PR #12 merge `65cd8d5`; issue #7 **closed** (was quality-review P1) |
-| 2026-09-01 | Quality review 2026-09-01 board | no P0; P1 #7 + P2 #8–#11 all **closed** with PR #12 **merged** to `main` (`65cd8d5`); see `docs/quality-review.md` for original verdict index |
-| 2026-09-01 | **Open Question 6:** v1 stays analysis-only; GitOps-PR remediate-execute is **PRD #2** (`prds/2-gitops-pr-remediate.md`, https://github.com/LesleyMurfin/dot-ai-grafana/issues/13), opened now — not parked as Phase 2 bullets inside this PRD | Viktor on vfarcic/dot-ai-grafana PR #2; RULE-027 — execute/mutation scope gets its own PRD so PRD #1 remains read-only |
-| 2026-09-01 | Progressive context is client-only: Stable+Current+Map+box in plain `intent`/`issue`; History display-only (last 5); no `sessionId`; Analyze this copies Current → Remediate box | Clarifies upstream “session/history out of scope”: forbids MCP sessions and new REST fields, not UI thread packing. Same POST shapes. `docs/progressive-context.md` |
-| 2026-09-01 | **Stack intelligence in one Ask:** this K3s + this Grafana stack (Loki, Prometheus, Tempo, Alertmanager via existing DS / `getDataSourceSrv`·`ds.query`·`getBackendSrv`) + dot-ai; Grafana is not host-only; no new UI/screens/pickers; stack reads pack into Current then POST query/remediate as plain `intent`/`issue` | Product binding for what we build now — Map = already-configured Grafana datasources; same Tool/box/Ask/Analyze this/thread; analysis-only; no `sessionId`. Replaces “Grafana as shell + resource selection from dashboards” framing |
-| 2026-09-01 | **Hop cap 3** per user Ask (`MAX_ASK_HOPS = 3`); Grafana DS reads do not count as hops; first_hop grafana\|dot-ai by question class; orchestrator may multi-hop on unscoped/conflict/hedge | `src/utils/askOrchestrator.ts`; live Ask 22:46Z scored hops=3 first_hop=grafana used_current=true; RULE-027 loop bound |
-| 2026-09-01 | **Stack Current packing:** client builds Current from Loki/Prometheus/Tempo/Alertmanager via type discovery (no hardcoded uid); packs Stable+Current+Map+box into plain `intent`/`issue`; History never POSTed | `src/utils/grafanaStack.ts` + `progressiveContext.ts`; U1–U6 + DotAIPage tests |
-| 2026-09-01 | **Public-surface strip:** CI forbids internal host/marker/secret leakage on public docs and shipped surfaces | `scripts/public-surface-check.sh` + `.github/workflows/ci.yml` job `public-surface` (`6e08d39`) |
-| 2026-09-01 | **SDK httpclient** for backend outbound HTTP (`grafana-plugin-sdk-go/backend/httpclient`); probe 15s / tools 120s; DefaultMiddlewares + DefaultTimeoutOptions | `pkg/plugin/app.go` `newPluginHTTPClient`; replaces ad-hoc `http.Client` construction |
-| 2026-09-01 | **Live Ask proof window** 2026-09-01T22:46:04Z–22:48:35Z — 3 golden asks PASS (hops/first_hop/used_current scored); Execute remains blocked on this PRD | `scripts/golden-ask-results.json`; evidence for v1 Ask path; execute stays PRD #2 |
-
-
-
-
+| Decision | Date | Rationale | Impact | Code Impact | Owner |
+|----------|------|-----------|--------|-------------|-------|
+| Plugin tool resource routes require an elevated Grafana org role (**Editor or Admin**); denial happens before any upstream engine call; requests with no user fail closed; the existing Admin gate on Configuration and Test connection is unchanged. The gate lives in the Go handlers (`isEditorOrAbove`) and **not** in `plugin.json`, because neither `plugin.json` knob reaches an app resource route: `includes[].role` controls nav visibility only, and `routes[].reqRole` does not apply to `resources/*`. Upstream calls continue to use the single shared configured Bearer, so this is per-user **authorization**, not per-user upstream identity — Design Decision 4 (single shared service token, no per-user attribution in dot-ai audit logs) is unchanged | 2026-09-03 | Raised as a non-blocking observation during review of the merged plugin PR, and landed separately rather than folded into that merge | Operators need Editor or Admin to use Ask; lower roles get a clear denial and never reach dot-ai. Individual attribution upstream is still unavailable | Shipped in [#25](https://github.com/vfarcic/dot-ai-grafana/pull/25) (merged 2026-09-04), tracked by [#26](https://github.com/vfarcic/dot-ai-grafana/issues/26) (closed): `isEditorOrAbove` in `pkg/plugin/resources.go`, with handler coverage in `pkg/plugin/resources_test.go`. Mirrored in `CLAUDE.md` Key Design Decisions | Maintainer + contributor |
 
 ## Work Log
 
-### 2026-09-01 — /prd update-progress
+### 2026-09-01 — as-built v1
 
-- **Issue**: PRD #1 milestone checkboxes were all unchecked despite merged M1/M8–M9 work and in-tree M2–M7 implementation.
-- **Action**: Evidence-only progress refresh from scout map + workspace tree. Set M-scaffold `[x]`; M-config through M-compat `[~]`. Added Progress table with commit/PR evidence. Status left **Draft** (not `/prd start`). Session preflight / quality-circuit-breaker / `.ai/learning/anti_patterns.yaml` absent — skipped. `scripts/git.py` absent — no commit. Ledger scripts absent — WARN.
-- **Prompt**: `/prd update-progress` on PRD-1 (conservative AP-003 checkboxes).
+- **Issue**: Plugin implementation shipped; PRD #1 still read as Draft and still listed async 202 / generated OpenAPI client as Phase 1 defaults.
+- **Action**: Status → Implemented (Phase 1 v1). Added as-built table; marked M0–M6/M8–M9 done with honest gaps; M7 open. Recorded answers for open questions 2–6.
+- **Prompt**: update PRD #1 on the upstream plugin PR.
 
-### 2026-09-01 — /prd update-decisions
+### 2026-09-02 — progressive context + ask log
 
-- **Issue**: Product/architecture decisions lived in README, plugin.json, and quality-review but were not captured on the PRD.
-- **Action**: Added Decisions table (7 rows) for analysis-only remediate, plugin id/fork home, Grafana 11 floor + pins + unsigned dist, version test-connection probe, 120s/no-async-202, Admin draft-apiUrl gate, and quality-review severity board.
-- **Prompt**: `/prd update-decisions` on PRD-1 (RULE-027 where architectural).
+- **Issue**: Packing restored on this PR for the maintainer to try. Headlamp/core have no Grafana DS Current (resource-scoped `sessionId` / execute only; [vfarcic/dot-ai#463](https://github.com/vfarcic/dot-ai/issues/463) is evaluate-external-MCP, Low). Ask log has **no enable/disable**.
+- **Action**: As-built Ask-log + vs-Headlamp rows; README progressive-context + ask-log notes.
+- **Prompt**: keep the updated PRD on PR #3 (not a new PR).
 
-### 2026-09-01 — Viktor PR #2 comments
+### 2026-09-02 — related PRDs named (split)
 
-- **Issue**: vfarcic/dot-ai-grafana PR #2 — keep v1 analysis-only; open separate PRD for GitOps-PR execute (not Phase 2 parking); scrub public docs of internal infra names; avoid double-tracking milestones (Progress vs Milestones).
-- **Action**: Restated OQ6 in Decisions (analysis-only v1; execute → PRD #2). Pointed out-of-scope execute at `prds/2-gitops-pr-remediate.md`. Labeled Progress as evidence-only (Milestones remain SSOT). Scrubbed README internal GitOps-repo name. Created PRD #2 draft.
-- **Prompt**: Finish Viktor PR #2 comments on PRD/docs in workspace (no plugin code; no commit).
+- **Issue**: M7 extras and GitOps execute had fork PRs but PRD #1 did not point at them, so the split was invisible on vfarcic#3.
+- **Action**: Deferred / M7 / as-built rows now name [PRD #2](https://github.com/LesleyMurfin/dot-ai-grafana/issues/13) and [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23). Related-PRDs table. No Map/Explore/show-me content added here.
 
-### 2026-09-01 — PRD stack-intelligence rewrite
+### 2026-09-05 — retire text-only decision for rendering only
 
-- **Issue**: PRD still framed Grafana as host-only and listed “resource selection from dashboards” OOS without binding Loki/Prometheus/Tempo/Alertmanager or Current packing.
-- **Action**: Rewrote Solution / Architecture / UI / Out of scope; added Decisions row (2026-09-01) for stack-in-one-Ask + no new UI. Plugin id unchanged. No new milestones (Milestones remain SSOT).
-- **Prompt**: Update PRD to match K3s + Grafana stack DS + dot-ai product (analysis-only).
+- **Issue**: PRD line 57, the "What's Explicitly Out of Scope" list, the tool→endpoint response table, and CLAUDE.md's Key Design Decisions still banned rich visualizations outright (Mermaid, cards, tables, syntax-highlighted code) at the presentation layer, but a companion PR renders the model's own GFM markdown (tables, headings, code, links). Raised as blocking finding B4 on review of PR #13. (The number `12.` was free on `main`, whose decision list ran 1–11; an *earlier* revision of #13 had used it for "navigation extras returning", but its current head adds no numbered decision — so this entry does not inherit from #13.)
+- **Action**: Amended PRD line 57, the out-of-scope bullet, and the response-table header; added Design Decision 12 recording that only the *rendering* half of the original text-only decision (Decision 1) is retired — sanitized markdown rendering comes in scope with PR #51. The *request* half is unchanged and holds today: the plugin never prefixes `[visualization]` to the intent. Mirrored the correction in CLAUDE.md's Key Design Decisions.
+- **Sweep completed**: the first revision of this change left the retired claim standing where it had not looked. Also corrected: the UX-states success step (plain-text answer), the M4 milestone row, the original-section comparison table, and `README.md`'s "What It Does" Query bullet ("Responses are text"). Re-grepped the whole repo for `text-only` / `plain text` / `plain-text` / `Render as text` / `no rich visualizations` / `text area`; every remaining hit is either this amendment describing the retired decision, or unrelated (`.config/AGENTS/instructions.md` on fetching docs as plain-text markdown). **Re-swept after rebase:** `docs/index.md` landed on `main` with #46 at `2f779ea`, committed 2026-09-07T22:09:48Z — eighteen minutes after this branch's last commit — and still asserted the retired claim at its Query feature blurb and inside the architecture flow block. Both are corrected. Its wording deliberately omits the #51 reference the other surfaces carry: that page is the published docs portal (devopstoolkit.ai/docs/grafana), whose readers have no `main` and no PR numbers, so it says "a later release" instead. (Its third `plain text` hit describes **Map**, not the answer, and is untouched.)
+- **Over-claim corrected**: an earlier draft said the renderer handles "code blocks with syntax highlighting". It does not — the sanitizer strips `class` (including marked's `language-*`, derived from a model-chosen fence info string) and no highlighter is added, so code blocks render unhighlighted. Syntax highlighting remains out of scope.
+- **Merge order — corrected, it was backwards**: the first revision of this amendment described `src/components/ResponseMarkdown.tsx` in the present indicative while it was **not on `main`** — `main` renders `<pre className={styles.pre}>{responseText}</pre>` (`src/pages/DotAIPage.tsx:299`) and `package.json` carries no markdown or sanitizer dependency — so that revision genuinely had to wait for **PR #51**, and said so. Gating every claim on #51 removed the reason: the wording now asserts `main`'s *current* state, which is true today and false the moment #51 lands. Since #51 touches no documentation at all, nothing would flip it, and merging after #51 would reproduce the same defect mirrored — CLAUDE.md telling every agent session that a renderer which *is* on `main` is not. **So this lands first, and the flip is #51's obligation**, recorded in Decision 12 and raised on #51 itself.
+- **Follow-up recommended (not in this PR)**: the surviving request-side half of Decision 1 holds largely by absence — `buildRequestText()` (`src/utils/progressiveContext.ts:135-161`) simply never emits `[visualization]`. Not wholly: `src/utils/progressiveContext.test.ts` pins the first-turn packing with `expect(text).toBe(...)`, which a prefix added inside `pack()` would break. The gap is `stablePreamble()` — that assertion interpolates it, and the `stablePreamble` tests only use `toMatch`, so a prefix added there passes both. Assert on `stablePreamble()`'s output too. Kept out of this change to preserve its documentation-only scope.
+- **Tense gated on #51 (review follow-up)**: the amendment was first written in the present indicative, which would have made `CLAUDE.md`, `README.md` and this PRD describe a renderer that is not on `main`. Every rendering claim is now either stated as current-and-plain-text or explicitly conditioned on PR #51 landing — PRD line 57, the UX-states success step, Design Decision 12, the out-of-scope bullet, the M4 milestone row, the original-section comparison table, `README.md`'s Query bullet, and `CLAUDE.md`'s Key Design Decisions. The request-side ban is stated unconditionally in each place, because it holds on `main` today (`visualization` appears nowhere in `src/`, `pkg/` or `tests/`).
+- **Response-table header**: `Render (as markdown)` applied a markdown claim to every row, including `version` → `system.kubernetes.context`, which is displayed as the active-cluster label rather than rendered content. Header is now the neutral `Display`; the per-row ignore guidance is unchanged.
+- **Changelog**: `changelog.d/53.doc.md` (towncrier `doc` type, per `pyproject.toml`). Written for plugin **users**, not for this repo: `CHANGELOG.md` is copied into the plugin dist by `.config/bundler/copyFiles.ts` and surfaced by Grafana, so the fragment describes the behaviour change without referring to `main` or to PR numbers its readers cannot see.
+- **Renderer limits recorded**: CLAUDE.md now also states what the renderer will *not* do, since that file is ground truth for every agent session here — only absolute `https:` and same-origin links survive (`http:`, `mailto:`, `data:`, protocol-relative `//host` are demoted to text), markdown images render as bare alt text because no remote-reference element is ever emitted, and a parse or sanitize failure falls back to escaped plain text. Verified against `src/components/ResponseMarkdown.tsx` on #51 at `05573d6`.
+- **Prompt**: land as its own documentation-only PR, based directly on `main`, independent of the navigation PRs.
 
+### 2026-09-05 — M7 folded back into v1
 
-### 2026-09-01 — /prd update-progress (evidence refresh)
+- **Issue**: Branch reshaping dropped the PRD edits that had split M7 Map/Explore/show-me into PRD #3; the plugin code on this PR (`grafanaExplore.ts`, `DotAIPage.tsx` drilldown, `testIds.drilldown`, show-me routing) now ships the navigation surface directly, but the As-built/Deferred/roadmap/related-PRDs text still read it as deferred to PRD #3 / PR #22.
+- **Action**: As-built Deferred row, M7 checkbox, As-built summary line, release-ladder diagram, related-PRDs table, and original-milestone mapping now record Map/Explore/show-me as shipped in v1 (folded from PRD #3). PRD #3 retains only markdown Answer. Text-only-responses language (CLAUDE.md, ResponseMarkdown) is untouched — that decision is retired on PR #51, not here.
+- **Prompt**: keep the updated PRD on this PR (#13).
 
-- **Issue**: Progress table still claimed PR #12 / #7–#8 (and related #9/#11) **open** after merge.
-- **Action**: Verified `gh -R LesleyMurfin/dot-ai-grafana`: PR #12 `MERGED` base `main` mergeCommit `65cd8d5` (2026-09-01T16:03:57Z); issues #7–#11 `CLOSED`. Rewrote Progress evidence rows; left milestone SSOT checkboxes unchanged (AP-003: no new `[x]` without full milestone proof). Status remains **Draft**. Session-preflight / quality-circuit-breaker / anti_patterns absent — WARN skip. Ledger hooks absent — WARN. `scripts/git.py` absent — no commit.
-- **Prompt**: `/prd update-progress` continuation — align Progress with GH/workspace (issue #7 closed, PR #12 on main).
+### 2026-09-08 — #13 narrowed to documentation; access-control decision recorded
 
-### 2026-09-01 — /prd update-decisions (evidence refresh)
+- **Issue**: two problems, one cause. (a) `CLAUDE.md` cited a "PRD Decision Log" **twice** (the response-rendering bullet and the Grafana-native bullet, the latter as *"Rationale: issue #26, PR #25, PRD Decision Log"*) and no such section existed in this file — so the written record for a gate that has been live on `main` since #25 merged 2026-09-04 was a dangling pointer. The row had been drafted on an earlier revision of #13 and was lost when the branch was reshaped. (b) The M7 fold above was written as "ships in this PR" while #13 still carried the navigation code; that code has since moved to [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79), built directly on `main`, leaving the claim attached to the wrong PR.
+- **Action**: added the **Decision Log** section with the elevated-role row (Editor-or-Admin on the tool resource routes, why the gate is in Go rather than `plugin.json`, and the explicit note that it is per-user *authorization* and does not change Design Decision 4's shared-token identity model), and checked the matching Milestones box. Re-pointed the M7 fold text at where the code actually is: builders on `main` via [#52](https://github.com/vfarcic/dot-ai-grafana/pull/52), wiring and the show-me 0-hop path in #79. The M7 checkbox is checked for **scope** — M7 is v1's rather than PRD #3's, which is what that section decides — and says so, with #79 named as what completes the surface.
+- **Tense gated on #79**: same discipline as the #51 gating in the entry above. No claim here says the navigation surface is complete on `main`, because it is not; every such claim names the PR that finishes it. #79 carries the obligation to flip the "state on `main` today" clause in the M7 row when it lands.
+- **Scope**: this PR is now documentation-only — one file, this one. Its navigation code was superseded twice (by #52, then by #79) while the PR sat in review, and carrying an older second copy would have fought both. See the merge commit for the per-file resolution and for the two bugs `main`'s `grafanaExplore.ts` fixes that this branch's copy still had.
+- **Not carried forward**: the alert→dashboard link helpers (`dashboardUidsFromAlertFrames`, `dashboardHintFromUids`, budget-aware hint with a firing-alerts guard, plus `grafanaStack.test.ts` coverage) were real, tested work on this branch that #79 does not include. Tracked separately so it is not lost — see [issue #81](https://github.com/vfarcic/dot-ai-grafana/issues/81).
+- **Prompt**: land the documentation; navigation code lands on its own PRs.
+### 2026-09-08 — renderer landed; tense flipped, S1/R1/G1 closed
 
-- **Issue**: Decisions still said Admin draft-apiUrl gate / quality board with PR #12 open and #7 as open P1.
-- **Action**: Updated those two Decisions rows only — gate **on main** via PR #12 / #7 closed; quality board #7–#11 closed with merge. No invented decisions. Status **Draft**.
-- **Prompt**: `/prd update-decisions` continuation for merge facts only.
-
-
-
-### 2026-09-01 — /prd update-progress (Hop3Build M-docs evidence)
-
-- **Issue**: Peer Hop3Build closed remaining M8 doc gaps in-worktree and reported green typecheck/jest/build/go test; did not edit this PRD.
-- **Action**: Appended/replaced M-docs Progress evidence only; left `[~]` (screenshots still open; AP-003). No Decisions change. Status **Draft**.
-- **Prompt**: Peer IRC evidence note into Progress (PRD owner).
-
-
-### 2026-09-01 — /prd update-progress (M-docs evidence precision)
-
-- **Issue**: Hop3Build corrected M-docs Progress detail (test-plan :411/:423 caps; truncateRunesKeepTail shape; verbatim check commands; screenshots path + spec forbid).
-- **Action**: Rewrote M-docs evidence row for exactness; kept `[~]`. Status **Draft**.
-- **Prompt**: Peer correction on Progress evidence only.
-
-### 2026-09-01 — /prd update-progress (v1 built — AP-003 override)
-
-- **Issue**: Status still Draft and M-config–M-errors still `[~]` despite working-tree v1 + PR #12 + live Ask 22:46Z; Lesley ordered flip off Draft and `[x]` where this tree has implementation + tests.
-- **Action**: Status → **In Progress**. Milestones: M-scaffold already `[x]`; M-config, M-proxy, M-query, M-remediate, M-selector, M-errors → `[x]`; M-docs stays `[~]` (`screenshots: []`); M-compat stays `[~]` (10.x unproven). Progress table rewritten with commits/PR #12/jest/go/webpack + live Ask 22:46–22:48Z (`golden-ask-results.json`: PASS 3 asks, hops=3, first_hop=grafana, used_current=true). AP-003: Lesley override of conservative `[~]` — working-tree + live Ask as evidence. Execute blocked (PRD #2). Session-preflight / QCB / anti_patterns absent — WARN skip. Ledger hooks/db absent — WARN. `scripts/git.py` absent — no commit.
-- **Prompt**: `/prd update-progress` on PRD-1 (v1 built; not Draft; M-docs/M-compat `[~]` only).
-
-### 2026-09-01 — /prd update-decisions (v1 bounds)
-
-- **Issue**: Hop cap, stack Current packing, public-surface strip, SDK httpclient, and live Ask window were implemented/proven but missing from Decisions (or only implicit).
-- **Action**: Appended five Decisions rows (hop cap 3; stack Current packing; public-surface strip; SDK httpclient; live Ask 22:46Z proof / execute still blocked). Did not duplicate progressive-context or stack-intelligence product rows. Status **In Progress**. Ledger absent — WARN. No commit (`scripts/git.py` missing).
-- **Prompt**: `/prd update-decisions` on PRD-1 (missing rows only).
-
-
-
+- **Issue**: [#53](https://github.com/vfarcic/dot-ai-grafana/pull/53) landed the Decision 12 amendment deliberately *before* the renderer, worded in the future tense so it described `main` accurately while #51 was open. It placed the flip on #51: "the same commit that adds the renderer must flip the 'state on `main` today' clauses". #51 originally touched no documentation, so merging it as-authored would have left every doc telling an agent session that a renderer which *is* on `main` is not — inverting the defect rather than fixing it. Raised as blocking finding 1 on review of #51.
+- **Action**: flipped to the present tense in the same PR as the renderer — Design Decision 12, line 57 (Solution Overview), the UX-states success step, the "What's Explicitly Out of Scope" bullet, the M4 milestone row, the original-section comparison table, `README.md`, `docs/index.md` and `CLAUDE.md`. Decision 12 now also names the shipped pipeline (`DotAIPage.tsx` → `ResponseMarkdown.tsx`, the plugin's only `dangerouslySetInnerHTML`) and cross-references S1/R1.
+- **Controls closed**: **S1** open → **shipped**, with the as-built control described (parser-level raw-HTML re-escaping on a plugin-owned `new Marked()` instance, DOM allowlist as second layer, `style` stripped from every tag, `safeHref` rejecting protocol-relative `//host` and `/\host`). **R1** open → **shipped** (`renderAnswerHtml` fails closed to a React text child, pinned by tests that force `DOMParser.parseFromString` to throw). **G1** planned → **shipped**, corpus count corrected **10 → 20** and the added classes named; the browser-side layer (`tests/security-by-design.spec.ts`, asserting on attempted requests and resource timings) is now recorded alongside the jsdom corpus.
+- **Still open, deliberately**: **S3**, **S4** and **R2** remain `next` — nothing here adds provenance tagging, per-source byte caps, visible truncation, or the untrusted-origin banner. Two corpus fixtures (`context-stuffing`, `instruction-override`) describe those controls in their `mustNotRender` prose while the consuming test only asserts S1 inertness; reworded to the S1-scoped claim each case actually tests, so the corpus stops reading as coverage for three unbuilt controls. Raised as finding 4 on #51.
+- **Changelog**: `changelog.d/51.bugfix.md` → `changelog.d/51.feature.md`. Against `main` this is new user-facing functionality, not a repair — `main` had no renderer, no markdown dependency and no HTML sink at all, so a `bugfix` fragment would have told users the released plugin carried an embedding hole it never had. Towncrier `feature` per `pyproject.toml`.
+- **Prompt**: maintainer pushed the documentation and changelog half directly to the fork branch; the two behavioural findings (task-list checkbox state, autolinked telemetry URLs) were left to the author.

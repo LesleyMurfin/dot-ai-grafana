@@ -1,7 +1,7 @@
 import { lastValueFrom, Observable } from 'rxjs';
 import { getBackendSrv } from '@grafana/runtime';
 import pluginJson from '../plugin.json';
-
+import { ASK_CANCELLED_MESSAGE, isAbortError } from './askErrors';
 export type DotAITool = 'query' | 'remediate';
 
 /**
@@ -25,7 +25,8 @@ export type AskCallMeta = {
  * Shown whenever the 120s tool-client ceiling (pkg/plugin newPluginHTTPClient) ends an Ask.
  * One line, actionable; there is no async 202 path to point at.
  */
-export const ASK_TIMEOUT_MESSAGE = 'Ask stopped at the 120s plugin limit; retry or narrow the question.';
+export const ASK_TIMEOUT_MESSAGE =
+  'Ask stopped at the 120s limit per hop (up to 3 hops); retry or narrow the question.';
 
 const TIMEOUT_TEXT = /abort|timed out|timeout|deadline exceeded|gateway time-?out/i;
 
@@ -35,7 +36,10 @@ const TIMEOUT_TEXT = /abort|timed out|timeout|deadline exceeded|gateway time-?ou
  * (dial refused, bad gateway) is a different fault and keeps its own text.
  */
 function timeoutAware(status: number, message: string, name?: string): string {
-  if (name === 'AbortError' || name === 'TimeoutError' || status === 504 || TIMEOUT_TEXT.test(message)) {
+  if (name === 'AbortError' || message === ASK_CANCELLED_MESSAGE) {
+    return ASK_CANCELLED_MESSAGE;
+  }
+  if (name === 'TimeoutError' || status === 504 || TIMEOUT_TEXT.test(message)) {
     return ASK_TIMEOUT_MESSAGE;
   }
   return message;
@@ -80,14 +84,40 @@ function asContract(value: unknown): ResourceContract | undefined {
 }
 
 /** Single cast boundary for Grafana dual-package rxjs types. */
+function abortedError(): Error {
+  const err = new Error(ASK_CANCELLED_MESSAGE);
+  err.name = 'AbortError';
+  return err;
+}
+
+function withAbort<T>(source: Observable<T>, signal?: AbortSignal): Observable<T> {
+  if (!signal) {
+    return source;
+  }
+  return new Observable<T>((subscriber) => {
+    if (signal.aborted) {
+      subscriber.error(abortedError());
+      return;
+    }
+    const inner = source.subscribe(subscriber);
+    const onAbort = () => {
+      inner.unsubscribe();
+      subscriber.error(abortedError());
+    };
+    signal.addEventListener('abort', onAbort);
+    return () => {
+      signal.removeEventListener('abort', onAbort);
+      inner.unsubscribe();
+    };
+  });
+}
+
 async function fetchResource(
   tool: DotAITool,
   text: string,
-  meta?: AskCallMeta
+  meta?: AskCallMeta,
+  signal?: AbortSignal
 ): Promise<FetchResponseLike> {
-  // Query uses {intent}; remediate requires upstream {issue}. Send both on remediate
-  // so the Go proxy and tools REST stay aligned (analysis-only; no execute flags).
-  // Meta fields are for ask-log only; backend strips them before upstream.
   const data: Record<string, unknown> =
     tool === 'remediate' ? { issue: text, intent: text } : { intent: text };
   if (meta) {
@@ -107,24 +137,25 @@ async function fetchResource(
       data.branch = meta.branch;
     }
   }
-  const response = await getBackendSrv().fetch({
+  const response = getBackendSrv().fetch({
+    // Plugin SDK CallResource — not Grafana dashboard/folder HTTP (/api vs /apis).
     url: `/api/plugins/${pluginJson.id}/resources/${tool}`,
     method: 'POST',
     data,
     showErrorAlert: false,
     showSuccessAlert: false,
   });
-  return lastValueFrom(response as unknown as Observable<FetchResponseLike>);
+  return lastValueFrom(withAbort(response as unknown as Observable<FetchResponseLike>, signal));
 }
 
 export async function callDotAITool(
   tool: DotAITool,
   intent: string,
-  meta?: AskCallMeta
+  meta?: AskCallMeta,
+  signal?: AbortSignal
 ): Promise<ToolCallResult> {
   try {
-    const body = await fetchResource(tool, intent, meta);
-    // Grafana FetchResponse wraps JSON in `.data`; tolerate bare contract too.
+    const body = await fetchResource(tool, intent, meta, signal);
     const payload = body && typeof body === 'object' && 'data' in body ? body.data : body;
     const contract = asContract(payload);
     if (contract) {
@@ -147,8 +178,18 @@ export async function callDotAITool(
       errorMessage: 'Invalid resource response',
     };
   } catch (e) {
-    const errObj = e && typeof e === 'object' ? (e as Record<string, unknown>) : undefined;
-    const errData = errObj && 'data' in errObj ? errObj.data : undefined;
+    if (isAbortError(e)) {
+      return {
+        ok: false,
+        status: 0,
+        summary: '',
+        raw: null,
+        errorMessage: ASK_CANCELLED_MESSAGE,
+      };
+    }
+    const errObj = e && typeof e === 'object' ? e : undefined;
+    const errData =
+      errObj && 'data' in errObj ? (errObj as { data: unknown }).data : undefined;
     const contract = asContract(errData);
     if (contract) {
       return {
@@ -161,15 +202,20 @@ export async function callDotAITool(
           : timeoutAware(contract.status, contract.error || `Request failed (HTTP ${contract.status})`),
       };
     }
-    const status = errObj && typeof errObj.status === 'number' ? errObj.status : 0;
-    const name =
-      e instanceof Error ? e.name : errObj && typeof errObj.name === 'string' ? errObj.name : undefined;
-    const message =
-      e instanceof Error
-        ? e.message
-        : errObj && typeof errObj.message === 'string'
-          ? errObj.message
-          : 'Request failed';
+    let status = 0;
+    let name: string | undefined;
+    let message = 'Request failed';
+    if (errObj && 'status' in errObj && typeof errObj.status === 'number') {
+      status = errObj.status;
+    }
+    if (e instanceof Error) {
+      name = e.name;
+      message = e.message;
+    } else if (errObj && 'name' in errObj && typeof errObj.name === 'string') {
+      name = errObj.name;
+    } else if (errObj && 'message' in errObj && typeof errObj.message === 'string') {
+      message = errObj.message;
+    }
     return {
       ok: false,
       status,
