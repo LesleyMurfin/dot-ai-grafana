@@ -1,4 +1,4 @@
-import type { PluginOptions } from '@grafana/plugin-e2e';
+import type { PluginOptions, User } from '@grafana/plugin-e2e';
 import { defineConfig, devices } from '@playwright/test';
 import { dirname } from 'node:path';
 
@@ -10,11 +10,25 @@ const pluginE2eAuth = `${dirname(require.resolve('@grafana/plugin-e2e'))}/auth`;
  */
 // require('dotenv').config();
 
+const viewerUser: User = {
+  user: 'viewer',
+  password: 'viewer-password',
+  role: 'Viewer',
+};
+
+const editorUser: User = {
+  user: 'editor',
+  password: 'editor-password',
+  role: 'Editor',
+};
+
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig<PluginOptions>({
   testDir: './tests',
+  /* Fail fast with a clear message when the dot-ai stub upstream is not up. */
+  globalSetup: './tests/harness/stubPreflight.ts',
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -34,20 +48,35 @@ export default defineConfig<PluginOptions>({
 
   /* Configure projects for major browsers */
   projects: [
-    // 1. Login to Grafana and store the cookie on disk for use in other tests.
+    // 1a. Login to Grafana and store the cookie on disk for use in other tests.
     {
       name: 'auth',
       testDir: pluginE2eAuth,
       testMatch: [/.*\.js/],
     },
-    // 2. Run tests in Google Chrome. Every test will start authenticated as admin user.
+    // 1b. Provision + login Viewer → playwright/.auth/viewer.json
+    {
+      name: 'auth-viewer',
+      testDir: pluginE2eAuth,
+      testMatch: [/.*\.js/],
+      use: { user: viewerUser },
+    },
+    // 1c. Provision + login Editor → playwright/.auth/editor.json
+    {
+      name: 'auth-editor',
+      testDir: pluginE2eAuth,
+      testMatch: [/.*\.js/],
+      use: { user: editorUser },
+    },
+    // 2. Run tests in Google Chrome. Every test will start authenticated as admin user;
+    //    by-design describes that need another role override storageState themselves.
     {
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/admin.json',
       },
-      dependencies: ['auth'],
+      dependencies: ['auth', 'auth-viewer', 'auth-editor'],
     },
   ],
 });
