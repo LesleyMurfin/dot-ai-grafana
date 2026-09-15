@@ -12,10 +12,45 @@
 // growth is reported, never a failure, matching the upstream action's behaviour.
 
 import { readFileSync, appendFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 // Percentage growth of the entrypoint total above which the report is also
-// raised as a workflow warning annotation. Mirrors the upstream action default.
-const THRESHOLD = Number(process.env.BUNDLE_SIZE_THRESHOLD ?? 5);
+// raised as a workflow warning annotation. Mirrors the upstream action default (5).
+// Must be set, non-empty, and numeric (optional trailing %). Fails closed.
+export function parseThreshold(raw) {
+  if (raw == null) {
+    throw new Error('BUNDLE_SIZE_THRESHOLD is required and was not provided');
+  }
+  const trimmed = String(raw).trim();
+  if (trimmed === '') {
+    throw new Error('BUNDLE_SIZE_THRESHOLD is empty');
+  }
+  const numeric = trimmed.endsWith('%') ? trimmed.slice(0, -1).trim() : trimmed;
+  if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(numeric)) {
+    throw new Error(`BUNDLE_SIZE_THRESHOLD is not a number: ${JSON.stringify(raw)}`);
+  }
+  const value = Number(numeric);
+  if (!Number.isFinite(value)) {
+    throw new Error(`BUNDLE_SIZE_THRESHOLD is not a number: ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
+// Parses and validates baseline run ID from GitHub actions artifact lookup.
+// Must be non-empty digits-only. Fails closed with an error signal.
+export function parseBaselineRunId(raw) {
+  if (raw == null) {
+    return { runId: '', error: 'baseline run-id is missing' };
+  }
+  const cleaned = String(raw).replace(/[\r\n]+/g, '').trim();
+  if (cleaned === '') {
+    return { runId: '', error: '' };
+  }
+  if (!/^[0-9]+$/.test(cleaned)) {
+    return { runId: '', error: `baseline run-id is not numeric: ${cleaned}` };
+  }
+  return { runId: cleaned, error: '' };
+}
 
 // Longest asset/entry tables to render, so a chunk-splitting change cannot bury
 // the summary under hundreds of rows.
@@ -80,6 +115,11 @@ function diffRows(oldSizes, newSizes) {
   return rows.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff) || a.name.localeCompare(b.name));
 }
 
+// Note: sums entrypoints[*].assetsSize across all entrypoints. If an asset is
+// shared by two or more entrypoints, it is counted multiple times in this total.
+// This plugin currently has a single entrypoint ("module"), so there is no
+// double-counting in practice. This matches grafana/plugin-actions/bundle-size
+// compareStats.js deliberately so totals remain consistent with historical runs.
 function total(sizes) {
   return [...sizes.values()].reduce((sum, size) => sum + size, 0);
 }
@@ -98,6 +138,23 @@ function table(rows) {
   return lines.join('\n');
 }
 
+// Compares entrypoint growth against threshold. Returns whether threshold was reached/exceeded.
+export function evaluateGrowth(baseTotal, prTotal, threshold) {
+  const totalDiff = prTotal - baseTotal;
+  const growth = baseTotal === 0 ? 0 : ((prTotal - baseTotal) / baseTotal) * 100;
+  const exceeded = growth >= threshold;
+  return { totalDiff, growth, exceeded };
+}
+
+function isMain() {
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) {
 const [baseFile, prFile] = process.argv.slice(2);
 if (!baseFile || !prFile) {
   console.error('Usage: node .github/scripts/bundle-size-summary.mjs <base-stats.json> <pr-stats.json>');
@@ -105,6 +162,7 @@ if (!baseFile || !prFile) {
 }
 
 try {
+  const THRESHOLD = parseThreshold(process.env.BUNDLE_SIZE_THRESHOLD);
   const baseStats = readStats('main branch', baseFile);
   const prStats = readStats('pull request', prFile);
 
@@ -112,9 +170,7 @@ try {
   const prEntries = entrySizes(prStats);
   const baseTotal = total(baseEntries);
   const prTotal = total(prEntries);
-  const totalDiff = prTotal - baseTotal;
-  const growth = baseTotal === 0 ? 0 : ((prTotal - baseTotal) / baseTotal) * 100;
-
+  const { totalDiff, growth, exceeded } = evaluateGrowth(baseTotal, prTotal, THRESHOLD);
   const headline =
     totalDiff === 0
       ? `No change to the entrypoint total (${bytes(prTotal)}).`
@@ -146,7 +202,7 @@ try {
   }
 
   console.log(headline);
-  if (growth >= THRESHOLD) {
+  if (exceeded) {
     console.log(
       `::warning title=Bundle size grew by ${growth.toFixed(2)}%::The entrypoint total grew more than ${THRESHOLD}% against main. See the job summary for the breakdown.`
     );
@@ -155,4 +211,5 @@ try {
   // A stack trace here would only point at this script; the message is the signal.
   console.log(`::error title=Bundle size comparison failed::${error.message}`);
   process.exit(1);
+}
 }

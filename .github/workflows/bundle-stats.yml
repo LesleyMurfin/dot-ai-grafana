@@ -64,10 +64,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: main-branch-stats
         run: |
+          API_ERR=0
           RUN_ID=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${ARTIFACT}&per_page=100" \
-            --jq "[.artifacts[] | select(.name == \"${ARTIFACT}\" and .expired == false and .workflow_run.head_branch == \"main\")] | sort_by(.created_at) | last | .workflow_run.id // empty")
-          echo "run-id=${RUN_ID}" >> "$GITHUB_OUTPUT"
-
+            --jq "[.artifacts[] | select(.name == \"${ARTIFACT}\" and .expired == false and .workflow_run.head_branch == \"main\")] | sort_by(.created_at) | last | .workflow_run.id // empty" 2>&1) || API_ERR=$?
+          # run-id must be digits only so a gh warning on stdout cannot become the baseline.
+          # lookup-error is a heredoc so newlines in gh stderr cannot break GITHUB_OUTPUT.
+          if [ "$API_ERR" -ne 0 ]; then
+            echo "run-id=" >> "$GITHUB_OUTPUT"
+            {
+              echo "lookup-error<<ERR"
+              printf '%s\n' "$RUN_ID"
+              echo "ERR"
+            } >> "$GITHUB_OUTPUT"
+          else
+            RUN_ID=$(printf '%s' "$RUN_ID" | tr -d '\r' | tr -d '\n')
+            if [ -n "$RUN_ID" ] && ! printf '%s' "$RUN_ID" | grep -Eq '^[0-9]+$'; then
+              echo "run-id=" >> "$GITHUB_OUTPUT"
+              {
+                echo "lookup-error<<ERR"
+                printf '%s\n' "baseline run-id is not numeric: ${RUN_ID}"
+                echo "ERR"
+              } >> "$GITHUB_OUTPUT"
+            else
+              echo "run-id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+              echo "lookup-error=" >> "$GITHUB_OUTPUT"
+            fi
+          fi
       - name: Download the latest main branch stats
         if: github.event_name == 'pull_request' && steps.baseline.outputs.run-id != ''
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -78,9 +100,17 @@ jobs:
 
       - name: Report bundle size against main
         if: github.event_name == 'pull_request' && steps.baseline.outputs.run-id != ''
+        env:
+          BUNDLE_SIZE_THRESHOLD: '5'
         run: node .github/scripts/bundle-size-summary.mjs stats.json pr-stats.json
-
       - name: Warn if main stats artifact could not be found
-        if: github.event_name == 'pull_request' && steps.baseline.outputs.run-id == ''
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.run-id == '' && steps.baseline.outputs.lookup-error == ''
         run: |
-          echo "::warning title=Main stats artifact could not be found::Push a commit to main, or run this workflow manually with workflow_dispatch, to generate the baseline."
+          echo "::warning title=Main stats artifact could not be found::No baseline artifact found on main. Push a commit to main, or run this workflow manually with workflow_dispatch, to generate the baseline."
+
+      - name: Warn if main stats artifact lookup failed
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.lookup-error != ''
+        env:
+          LOOKUP_ERROR: ${{ steps.baseline.outputs.lookup-error }}
+        run: |
+          echo "::warning title=Main stats artifact lookup failed::GitHub API lookup failed: ${LOOKUP_ERROR}"
