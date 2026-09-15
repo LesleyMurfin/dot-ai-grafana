@@ -1,6 +1,6 @@
 # Doc gates
 
-Four mechanical checks that reproduce, without a human, the kind of finding a
+Five mechanical checks that reproduce, without a human, the kind of finding a
 docs/config PR review otherwise has to re-derive by hand every time.
 
 ```bash
@@ -23,6 +23,7 @@ Exit code 1 on any finding; warnings never change the exit code.
 | **B** | A doc phrase appears while the symbol implementing it does not exist | Claim/symbol parity. Docs written alongside an unmerged branch describe behaviour the merged tree does not have. Nothing in the build notices. |
 | **C** | A documented number or ordering disagrees with source | Timeouts, character caps, the Map token cap, the Grafana floor, the `@grafana/*` pins, plugin id / nav / role, and the shedding-ladder order. |
 | **D** | A compose image is not pinned by digest; external links | A mutable tag makes the same commit test a different image tomorrow. |
+| **E** | The diff edits an in-tree agent-instruction file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/`, `.codex/`, `.config/AGENTS/`) | A reviewer/CI agent reads these from the checkout while reviewing the PR, so an edit makes it execute instructions supplied by the very PR under review — issue #87 (I12/S5). |
 
 ## Not automated, on purpose
 
@@ -88,3 +89,26 @@ must be pinned to a 40-character commit SHA (e.g. `uses: actions/checkout@<sha> 
 `--warn-unpinned-actions` can be passed to demote unpinned action findings to warnings.
 The external link check is warn-only for the same reason: a link checker that
 fails CI on somebody else's outage is a liability.
+
+## Gate E and agent-instruction files
+
+The diff may not edit any in-tree agent-instruction file: `CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md`, `.claude/skills/*/SKILL.md`, `.codex/skills/*/SKILL.md`, and
+`.config/AGENTS/**`. These are the files a reviewer or CI agent loads as
+instructions from the checkout — the artifact under review — so a PR that edits
+them makes review tooling execute instructions supplied by the PR itself, not by
+a trusted source (issue #87, I12/S5).
+
+Unlike `.config/` regeneration (gate A), these files *are* legitimately edited
+sometimes — new agent guidance, a renamed skill, a corrected instruction. Gate E
+therefore has an explicit escape hatch rather than relying on every such change
+being a mistake:
+
+- **Rebase the edit onto `main` first** (the preferred path): a trusted actor
+  updates the instruction on the default branch, and the PR under review is then
+  simply diffed against the already-updated base. Gate E stays quiet because the
+  file is no longer part of the PR's diff.
+- **Or acknowledge with `--warn-agent-instruction-edits`**: this demotes the
+  findings to warnings so the CLI exits 0. There is intentionally no env-var or
+  PR-label override in CI — a contributor PR cannot self-suppress the gate. Only
+  a human running the command locally who has read the message can downgrade it.

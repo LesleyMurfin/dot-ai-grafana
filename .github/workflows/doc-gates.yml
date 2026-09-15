@@ -1,6 +1,6 @@
 name: Doc gates
 
-# Four mechanical checks that a docs/config PR would otherwise need a human to
+# Five mechanical checks that a docs/config PR would otherwise need a human to
 # re-derive by hand. See scripts/doc-gates/README.md.
 #
 # Deliberately separate from ci.yml: it needs no npm install, no Go toolchain and
@@ -19,16 +19,16 @@ permissions:
 
 jobs:
   doc-gates:
-    name: Doc gates (A-D)
+    name: Doc gates (A-E)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0 # gate A diffs against the PR base
+          fetch-depth: 0 # gates A/E diff against the PR base
 
-      - name: Run gates A-D
+      - name: Run gates A-E
         run: python3 scripts/doc-gates/run.py --base "origin/${GITHUB_BASE_REF}" --verbose
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
