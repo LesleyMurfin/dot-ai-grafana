@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """Doc-drift gates for dot-ai-grafana.
 
-Four mechanical checks that reproduce, by hand-free means, the review findings a
+Five mechanical checks that reproduce, by hand-free means, the review findings a
 human otherwise has to re-derive on every docs PR:
 
   A  generated-directory guard   - .config/** is regenerated monthly; edits are lost
   B  claim/symbol parity         - a doc phrase may appear only if its symbol exists
   C  constants parity            - documented numbers/order must match source
   D  pin + link hygiene          - compose images pinned by digest; links reachable
+  E  agent-instruction guard     - a PR must not edit its own reviewer instructions
 
 Every finding is a fact with a file:line. Nothing here scores style or intent.
 
 Usage:
     python3 scripts/doc-gates/run.py                 # all gates, base auto-detected
-    python3 scripts/doc-gates/run.py --base main     # explicit diff base for gate A
+    python3 scripts/doc-gates/run.py --base main     # explicit diff base for gates A/E
     python3 scripts/doc-gates/run.py --gates bcd     # subset
     python3 scripts/doc-gates/run.py --links         # add the (warn-only) link check
     python3 scripts/doc-gates/run.py -v              # also print skipped rows
+    python3 scripts/doc-gates/run.py --warn-agent-instruction-edits  # gate E as warning
 
 Exit code 1 if any gate produced a finding. Warnings never change the exit code.
 Standard library only: no npm install, no pip install.
@@ -119,21 +121,33 @@ def doc_files(globs: list[str]) -> list[str]:
 
 
 # --------------------------------------------------------------------------- A
-def gate_a(rep: Report, base: str | None) -> None:
-    """Fail any diff that touches .config/**."""
-    gate = "GATE-A"
+def diff_changed(rep: Report, gate: str, base: str | None) -> list[str] | None:
+    """Paths changed vs `base` plus any uncommitted work.
+
+    Returns None (having logged a skip) when no usable base ref resolves, so a
+    gate can never report a green result that silently checked nothing.
+    """
     if not base:
         rep.skip(gate, "diff", "no diff base resolved (pass --base <ref>)")
-        return
+        return None
     if not git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"):
         # Silently diffing against a ref that is not there would report a green gate
         # that checked nothing. Say so instead.
         rep.skip(gate, "diff", f"base ref {base} not found in this checkout")
-        return
+        return None
     merge_base = git("merge-base", base, "HEAD") or base
     changed = [p for p in git("diff", "--name-only", merge_base, "HEAD").splitlines() if p]
     # Uncommitted work counts too, so a local run matches what CI will see.
     changed += [p for p in git("diff", "--name-only", "HEAD").splitlines() if p]
+    return list(dict.fromkeys(changed))
+
+
+def gate_a(rep: Report, base: str | None) -> None:
+    """Fail any diff that touches .config/**."""
+    gate = "GATE-A"
+    changed = diff_changed(rep, gate, base)
+    if changed is None:
+        return
     hits = sorted({p for p in changed if p.startswith(".config/")})
     if not hits:
         return
@@ -606,6 +620,48 @@ def gate_d(rep: Report, check_links: bool, warn_actions: bool) -> None:
                     rep.warn(gate, "links", line.strip())
 
 
+# --------------------------------------------------------------------------- E
+# In-tree agent-instruction files. If a PR edits one of these, the reviewer/CI
+# agent that reads instructions from the checkout is executing content supplied
+# by the artifact under review, not from a trusted source (issue #87, I12/S5).
+# `.config/AGENTS/**` is also caught by gate A (auto-generated), but its message
+# says "regenerated monthly", not "trust boundary" - both facts are true, and
+# neither gate is the other's excuse.
+AGENT_INSTRUCTION_GLOBS = (
+    "CLAUDE.md",
+    "AGENTS.md",
+    "GEMINI.md",
+    ".claude/skills/*/SKILL.md",
+    ".codex/skills/*/SKILL.md",
+    ".config/AGENTS/**",
+)
+
+
+def _is_agent_instruction(path: str) -> bool:
+    return any(glob_match(path, g) for g in AGENT_INSTRUCTION_GLOBS)
+
+
+def gate_e(rep: Report, base: str | None, warn_only: bool) -> None:
+    """Fail a diff that edits any in-tree agent-instruction file."""
+    gate = "GATE-E"
+    changed = diff_changed(rep, gate, base)
+    if changed is None:
+        return
+    hits = sorted(p for p in changed if _is_agent_instruction(p))
+    for path in hits:
+        msg = (
+            f"`{path}` is an agent-instruction file: the instructions a reviewer/CI "
+            "agent loads while evaluating this PR. Editing it makes the review tooling "
+            "consume instructions supplied by the PR under review, not from a trusted "
+            "source (issue #87, I12/S5). Rebase the edit onto `main` first, or "
+            "acknowledge with `--warn-agent-instruction-edits`."
+        )
+        if warn_only:
+            rep.warn(gate, path, msg)
+        else:
+            rep.finding(gate, path, msg)
+
+
 # --------------------------------------------------------------------------- main
 def resolve_base(explicit: str | None) -> str | None:
     if explicit:
@@ -623,10 +679,12 @@ def resolve_base(explicit: str | None) -> str | None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", help="diff base for gate A")
-    ap.add_argument("--gates", default="abcd", help="subset of gates to run, e.g. bc")
+    ap.add_argument("--gates", default="abcde", help="subset of gates to run, e.g. bc")
     ap.add_argument("--links", action="store_true", help="run the warn-only external link check")
     ap.add_argument("--warn-unpinned-actions", action="store_true",
                     help="downgrade unpinned workflow `uses:` check to a warning instead of failing")
+    ap.add_argument("--warn-agent-instruction-edits", action="store_true",
+                    help="downgrade agent-instruction-file edit findings to warnings instead of failing")
     ap.add_argument("-v", "--verbose", action="store_true", help="print skipped rows")
     ap.add_argument("--repo", help="repo root to check (default: the repo this script lives in)")
     args = ap.parse_args()
@@ -644,6 +702,8 @@ def main() -> int:
         gate_c(rep)
     if "d" in gates:
         gate_d(rep, args.links, args.warn_unpinned_actions)
+    if "e" in gates:
+        gate_e(rep, resolve_base(args.base), args.warn_agent_instruction_edits)
 
     for line in rep.findings:
         print(line)
