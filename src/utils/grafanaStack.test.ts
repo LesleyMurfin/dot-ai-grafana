@@ -361,6 +361,7 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('/d/abc12def');
     expect(result.mapHint).toContain('dashboards: /d/abc12def');
     expect(result.drilldowns.some((d) => d.href.includes('/d/abc12def'))).toBe(true);
+    expect(result.drilldowns.some((d) => d.id === 'alerting-list' && d.href === '/alerting/list')).toBe(true);
   });
 
   test('never calls GET /api/search to resolve dashboard links from firing alerts', async () => {
@@ -380,8 +381,15 @@ describe('fetchStackContext', () => {
     const result = await fetchStackContext('how healthy is the cluster?');
 
     expect(result.current).toContain('/d/abc12def');
-    expect(JSON.stringify(mockBackendGet.mock.calls)).not.toMatch(/api\/search/);
-    expect(JSON.stringify(mockGet.mock.calls)).not.toMatch(/api\/search/);
+    const backendUrls = JSON.stringify(mockBackendGet.mock.calls);
+    const dsGetUrls = JSON.stringify(mockGet.mock.calls);
+    expect(backendUrls).not.toMatch(/api\/search/);
+    expect(dsGetUrls).not.toMatch(/api\/search/);
+    // Never the deprecated datasource *list* API. The Alertmanager read uses Grafana's
+    // own `/api/datasources/proxy/uid/<uid>` prefix — that is not GET /api/datasources.
+    expect(backendUrls).not.toMatch(/\/api\/datasources(?:\?|"|'|$)/);
+    expect(backendUrls).not.toMatch(/\/api\/datasources\/(?!proxy\/)/);
+    expect(dsGetUrls).not.toMatch(/\/api\/datasources/);
   });
 
   test('hundreds of firing-alert dashboard uids stay bounded at DASHBOARD_UID_CAP', async () => {

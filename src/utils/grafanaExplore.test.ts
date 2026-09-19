@@ -1,10 +1,13 @@
 import { config } from '@grafana/runtime';
 import {
   DIAGNOSIS_TOKENS,
+  alertingListUrl,
   buildDrilldownLinks,
   dashboardUrl,
+  drilldownsServeShowMe,
   exploreUrl,
   isShowMeOnly,
+  showMeNoun,
 } from './grafanaExplore';
 
 jest.mock('@grafana/runtime', () => ({
@@ -26,14 +29,15 @@ describe('isShowMeOnly', () => {
     expect(isShowMeOnly('show me metrics')).toBe(true);
   });
 
-  // #66: the 0-hop path can only answer with buildDrilldownLinks output, which
-  // has no alerts link and no engine-independent dashboard uids, so these two
-  // nouns must take the POST path instead of skipping to an unrelated answer.
-  test('unservable nouns do not skip the engine — alerts / dashboards', () => {
-    expect(isShowMeOnly('show me the alerts')).toBe(false);
-    expect(isShowMeOnly('display alerts')).toBe(false);
-    expect(isShowMeOnly('open the dashboards')).toBe(false);
-    expect(isShowMeOnly('show me dashboards')).toBe(false);
+  // #66 option 1: the phrases are accepted; the orchestrator still POSTs when Map
+  // has no matching link (empty dashboard UIDs). Classifier must not reject them.
+  test('alerts and dashboards are accepted show-me nouns', () => {
+    expect(isShowMeOnly('show me the alerts')).toBe(true);
+    expect(isShowMeOnly('display alerts')).toBe(true);
+    expect(isShowMeOnly('open the dashboards')).toBe(true);
+    expect(isShowMeOnly('show me dashboards')).toBe(true);
+    expect(showMeNoun('show me the alerts')).toBe('alerts');
+    expect(showMeNoun('open the dashboards')).toBe('dashboards');
   });
 
   test('clause: complete phrase verbs — open the traces / display the metrics', () => {
@@ -124,12 +128,12 @@ describe('isShowMeOnly', () => {
       const accepted: string[] = [];
       for (const verb of ['show me', 'open', 'display']) {
         for (const article of ['', ' the']) {
-          for (const noun of ['logs', 'traces', 'metrics']) {
+          for (const noun of ['logs', 'alerts', 'traces', 'metrics', 'dashboards']) {
             accepted.push(`${verb}${article} ${noun}`);
           }
         }
       }
-      expect(accepted).toHaveLength(18);
+      expect(accepted).toHaveLength(30);
       for (const phrase of accepted) {
         expect(isShowMeOnly(phrase)).toBe(true);
         expect(DIAGNOSIS_TOKENS.test(phrase)).toBe(false);
@@ -218,6 +222,10 @@ describe('exploreUrl / dashboardUrl', () => {
     expect(dashboardUrl('abc12def')).toBe('/d/abc12def');
   });
 
+  test('alerting list is /alerting/list', () => {
+    expect(alertingListUrl()).toBe('/alerting/list');
+  });
+
   test('appSubUrl prefix is kept on Explore and dashboard URLs', () => {
     const original = config.appSubUrl;
     config.appSubUrl = '/grafana';
@@ -229,6 +237,7 @@ describe('exploreUrl / dashboardUrl', () => {
       });
       expect(href.startsWith('/grafana/explore?')).toBe(true);
       expect(dashboardUrl('abc12def')).toBe('/grafana/d/abc12def');
+      expect(alertingListUrl()).toBe('/grafana/alerting/list');
 
       const links = buildDrilldownLinks({
         lokiUid: 'loki-1',
@@ -240,6 +249,7 @@ describe('exploreUrl / dashboardUrl', () => {
         dashboardUids: ['dashuid1'],
       });
       expect(links.find((l) => l.id === 'explore-logs')?.href.startsWith('/grafana/explore?')).toBe(true);
+      expect(links.find((l) => l.id === 'alerting-list')?.href).toBe('/grafana/alerting/list');
       expect(links.find((l) => l.id === 'dash-dashuid1')?.href).toBe('/grafana/d/dashuid1');
     } finally {
       config.appSubUrl = original;
@@ -276,8 +286,28 @@ describe('buildDrilldownLinks', () => {
     expect(labels).not.toContain('Metrics Drilldown');
     expect(labels).toContain('Explore traces');
     expect(labels).toContain('Trace abcdef12');
+    expect(labels).toContain('Alerts');
     expect(labels).toContain('Dashboard dashuid1');
+    expect(links.find((l) => l.id === 'alerting-list')?.href).toBe('/alerting/list');
     expect(links.find((l) => l.id === 'dash-dashuid1')?.href).toBe('/d/dashuid1');
+  });
+
+  test('drilldownsServeShowMe requires a noun-matching link', () => {
+    const links = buildDrilldownLinks({
+      lokiUid: 'loki-1',
+      logql: '{namespace="prod"}',
+      promql: '',
+      tempoSearch: '',
+      traceIds: [],
+      dashboardUids: [],
+    });
+    expect(drilldownsServeShowMe('logs', links)).toBe(true);
+    expect(drilldownsServeShowMe('alerts', links)).toBe(true);
+    expect(drilldownsServeShowMe('metrics', links)).toBe(false);
+    expect(drilldownsServeShowMe('dashboards', links)).toBe(false);
+    expect(drilldownsServeShowMe('dashboards', [...links, { id: 'dash-abc12', label: 'Dashboard abc12', href: '/d/abc12' }])).toBe(
+      true
+    );
   });
 
   test('trace labels stay distinct when ids share an 8-char prefix', () => {

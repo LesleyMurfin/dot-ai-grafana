@@ -112,6 +112,11 @@ export function dashboardUrl(uid: string): string {
   return `${appBase()}/d/${encodeURIComponent(uid)}`;
 }
 
+/** Grafana 11+ unified alerting list. Not dashboard /api HTTP. */
+export function alertingListUrl(): string {
+  return `${appBase()}/alerting/list`;
+}
+
 export function drilldownAppUrl(pluginId: string): string | undefined {
   if (!hasApp(pluginId)) {
     return undefined;
@@ -123,7 +128,7 @@ export function drilldownAppUrl(pluginId: string): string | undefined {
  * Diagnosis tokens that force POST (show-me must not skip the engine).
  *
  * INTENTIONALLY UNREACHABLE TODAY — do not delete. `SHOW_ME_PRODUCTION` below
- * is fully anchored with no tail, so it accepts exactly 18 pure navigation
+ * is fully anchored with no tail, so it accepts exactly 30 pure navigation
  * phrases, none of which contains a token here; removing this changes no
  * current result. It is defence for a later slice that widens the production
  * (e.g. re-adding a `for <resource>` tail), at which point it becomes
@@ -142,42 +147,67 @@ export const DIAGNOSIS_TOKENS =
   /\b(why|error\w*|crash\w*|fail\w*|analy[sz]\w*|remediate|how|improve|root cause|because|issue|issues|unhealthy)\b/;
 
 /**
- * The written contract production, narrowed to the nouns the link builder can
- * actually serve. Fully anchored — no `for <resource>` tail.
+ * The written contract production. Fully anchored — no `for <resource>` tail.
  *
- * `alerts` and `dashboards` are deliberately NOT accepted (#66): on the 0-hop
- * path the engine is skipped, so `buildDrilldownLinks` is the only thing that
- * can answer, and it emits no alerts link at all, while `dash-<uid>` links come
- * from `dashboardUids`, which has no engine-independent source today (#47).
- * Accepting those two nouns would answer "show me the alerts" with logs and
- * metrics links, or with nothing at all. Narrowing sends them down the normal
- * POST path, where they get a real answer.
+ * 3 verbs × 2 (optional `the`) × 5 nouns = 30 accepted phrases. `alerts` and
+ * `dashboards` are back in after #66 option 1 became servable: `buildDrilldownLinks`
+ * now emits `/alerting/list`, and `dash-<uid>` links are populated from firing-alert
+ * annotations (#78 / #89) with no `GET /api/search`. The orchestrator still POSTs
+ * when those nouns have no matching link (empty dashboard UIDs), so "show me the
+ * dashboards" does not skip the engine into unrelated logs/metrics links.
  */
-const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|traces|metrics)$/;
+const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|alerts|traces|metrics|dashboards)$/;
 
-/**
- * True when the Ask is only a pure navigation phrase:
- * `(show me|open|display) the? (logs|traces|metrics)`.
- * Diagnosis tokens force POST (show-me does not skip). False positives on the
- * 0-hop skip are dangerous — when ambiguous, return false so the engine runs.
- */
-export function isShowMeOnly(question: string): boolean {
+export type ShowMeNoun = 'logs' | 'alerts' | 'traces' | 'metrics' | 'dashboards';
+
+function normalizeShowMeQuestion(question: string): string {
   // Lowercase; collapse whitespace; strip only surrounding .?! (keep interior).
-  const q = question
+  return question
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[.?!]+|[.?!]+$/g, '')
     .trim();
-  if (!q) {
-    return false;
-  }
-  // Diagnosis wins. See DIAGNOSIS_TOKENS — unreachable today, deliberately kept.
-  if (DIAGNOSIS_TOKENS.test(q)) {
-    return false;
-  }
+}
 
-  return SHOW_ME_PRODUCTION.test(q);
+/** Noun of a pure show-me phrase, or undefined when the Ask is not show-me-only. */
+export function showMeNoun(question: string): ShowMeNoun | undefined {
+  const q = normalizeShowMeQuestion(question);
+  if (!q || DIAGNOSIS_TOKENS.test(q)) {
+    return undefined;
+  }
+  const match = SHOW_ME_PRODUCTION.exec(q);
+  return (match?.[3] as ShowMeNoun | undefined) ?? undefined;
+}
+
+/**
+ * True when Map already has a link that answers this show-me noun.
+ * Used so newly re-accepted `alerts` / `dashboards` do not 0-hop into
+ * unrelated Explore links when their own target is missing (#66).
+ */
+export function drilldownsServeShowMe(noun: ShowMeNoun, links: DrilldownLink[]): boolean {
+  switch (noun) {
+    case 'logs':
+      return links.some((l) => l.id === 'explore-logs' || l.id === 'drilldown-logs');
+    case 'metrics':
+      return links.some((l) => l.id === 'explore-metrics' || l.id === 'drilldown-metrics');
+    case 'traces':
+      return links.some((l) => l.id === 'explore-traces' || l.id === 'drilldown-traces' || l.id.startsWith('trace-'));
+    case 'alerts':
+      return links.some((l) => l.id === 'alerting-list');
+    case 'dashboards':
+      return links.some((l) => l.id.startsWith('dash-'));
+  }
+}
+
+/**
+ * True when the Ask is only a pure navigation phrase:
+ * `(show me|open|display) the? (logs|alerts|traces|metrics|dashboards)`.
+ * Diagnosis tokens force POST (show-me does not skip). False positives on the
+ * 0-hop skip are dangerous — when ambiguous, return false so the engine runs.
+ */
+export function isShowMeOnly(question: string): boolean {
+  return showMeNoun(question) !== undefined;
 }
 
 
@@ -257,6 +287,14 @@ export function buildDrilldownLinks(args: {
       });
     }
   }
+
+  // Core Grafana page — no datasource uid and no GET /api/search. Always emitted so
+  // "show me the alerts" has something to open after #66 option 1.
+  links.push({
+    id: 'alerting-list',
+    label: 'Alerts',
+    href: alertingListUrl(),
+  });
 
   for (const uid of args.dashboardUids.slice(0, 5)) {
     links.push({
