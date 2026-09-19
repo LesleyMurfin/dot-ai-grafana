@@ -78,6 +78,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     setError(undefined);
     setResponseText('');
     setAnalysisResult('');
+    setGitopsStatus(undefined);
     setProposal(undefined);
     setProposeError(undefined);
     try {
@@ -146,6 +147,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     }));
     setResponseText('');
     setAnalysisResult('');
+    setGitopsStatus(undefined);
     setProposal(undefined);
     setProposeError(undefined);
     setError(undefined);
@@ -165,6 +167,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     setError(undefined);
     setResponseText('');
     setAnalysisResult('');
+    setGitopsStatus(undefined);
     setProposal(undefined);
     setProposeError(undefined);
   };
@@ -186,7 +189,6 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
 
   useEffect(() => {
     if (!showPropose) {
-      setGitopsStatus(undefined);
       return;
     }
     let cancelled = false;
@@ -255,6 +257,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
                   setTool((v.value as DotAITool) || 'query');
                   setResponseText('');
                   setAnalysisResult('');
+                  setGitopsStatus(undefined);
                   setProposal(undefined);
                   setProposeError(undefined);
                   setError(undefined);
