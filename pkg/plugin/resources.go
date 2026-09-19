@@ -849,4 +849,6 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/query", a.handleQuery)
 	mux.HandleFunc("/remediate", a.handleRemediate)
 	mux.HandleFunc("/gitops-status", a.handleGitOpsStatus)
+	mux.HandleFunc("/gitops-propose", a.handleGitOpsPropose)
+	// POST /gitops-pr is M3 (live SCM create). Intentionally unregistered.
 }

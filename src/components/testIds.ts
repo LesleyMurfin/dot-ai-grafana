@@ -35,5 +35,12 @@ export const testIds = {
     consent: 'data-testid dotai-consent',
     drilldown: 'data-testid dotai-drilldown',
     currentToggle: 'data-testid dotai-current-toggle',
+    gitopsPropose: 'data-testid dotai-gitops-propose',
+    gitopsProposeButton: 'data-testid dotai-gitops-propose-button',
+    gitopsProposeReason: 'data-testid dotai-gitops-propose-reason',
+    gitopsProposal: 'data-testid dotai-gitops-proposal',
+    gitopsProposalTitle: 'data-testid dotai-gitops-proposal-title',
+    gitopsProposalBody: 'data-testid dotai-gitops-proposal-body',
+    gitopsProposalDiff: 'data-testid dotai-gitops-proposal-diff',
   },
 };

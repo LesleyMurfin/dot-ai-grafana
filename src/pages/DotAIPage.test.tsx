@@ -5,6 +5,7 @@ import { testIds } from '../components/testIds';
 import { ASK_TIMEOUT_MESSAGE, callDotAITool } from '../utils/dotaiApi';
 import { buildRequestText, stablePreamble } from '../utils/progressiveContext';
 import { fetchStackContext } from '../utils/grafanaStack';
+import { fetchGitOpsStatus, proposeGitOpsPR } from '../utils/gitopsApi';
 
 jest.mock('../utils/dotaiApi', () => ({
   ...jest.requireActual('../utils/dotaiApi'),
@@ -19,8 +20,16 @@ jest.mock('../utils/grafanaStack', () => {
   };
 });
 
+jest.mock('../utils/gitopsApi', () => ({
+  ...jest.requireActual('../utils/gitopsApi'),
+  fetchGitOpsStatus: jest.fn(),
+  proposeGitOpsPR: jest.fn(),
+}));
+
 const mockCallDotAITool = callDotAITool as jest.MockedFunction<typeof callDotAITool>;
 const mockFetchStackContext = fetchStackContext as jest.MockedFunction<typeof fetchStackContext>;
+const mockFetchGitOpsStatus = fetchGitOpsStatus as jest.MockedFunction<typeof fetchGitOpsStatus>;
+const mockProposeGitOpsPR = proposeGitOpsPR as jest.MockedFunction<typeof proposeGitOpsPR>;
 
 const emptyStack = {
   current:
@@ -54,6 +63,7 @@ describe('Pages/DotAIPage', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockFetchStackContext.mockResolvedValue({ ...emptyStack });
+    mockFetchGitOpsStatus.mockResolvedValue({ ready: false, reason: 'not_configured' });
   });
 
 
@@ -524,6 +534,101 @@ describe('Pages/DotAIPage', () => {
     expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent(
       'restart deployment suggested'
     );
+    expect(await screen.findByTestId(testIds.dotai.gitopsProposeButton)).toBeDisabled();
+    expect(await screen.findByTestId(testIds.dotai.gitopsProposeReason)).toHaveTextContent(
+      /owner, repo, and PR-create token/i
+    );
+    expect(screen.queryByRole('button', { name: /execute/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /create pr/i })).not.toBeInTheDocument();
+  });
+
+  test('Query results do not offer Propose GitOps PR', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: '3 pods failing',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    await waitFor(() => {
+      expect(mockCallDotAITool.mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+    expect(await screen.findByTestId(testIds.dotai.response)).toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.dotai.gitopsPropose)).not.toBeInTheDocument();
+    expect(mockFetchGitOpsStatus).not.toHaveBeenCalled();
+  });
+
+  test('Propose is disabled with reason when gitops-status.ready is false', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'scale checkout-api',
+      raw: {},
+    });
+    mockFetchGitOpsStatus.mockResolvedValue({ ready: false, reason: 'missing_token' });
+
+    render(<DotAIPage />);
+    await selectTool('Remediate (analysis only)');
+    typeIntent('checkout-api CrashLooping');
+    clickSubmit();
+
+    const button = await screen.findByTestId(testIds.dotai.gitopsProposeButton);
+    expect(button).toBeDisabled();
+    expect(await screen.findByTestId(testIds.dotai.gitopsProposeReason)).toHaveTextContent(
+      /missing PR-create token/i
+    );
+    expect(mockProposeGitOpsPR).not.toHaveBeenCalled();
+  });
+
+  test('ready Propose shows title, body, and diff preview without creating a PR', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'checkout-api CrashLoop in prod',
+      raw: {},
+    });
+    mockFetchGitOpsStatus.mockResolvedValue({
+      ready: true,
+      reason: 'ready',
+      owner: 'acme',
+      repo: 'gitops-prod',
+    });
+    mockProposeGitOpsPR.mockResolvedValue({
+      ok: true,
+      dry: true,
+      created: false,
+      title: 'fix: checkout-api CrashLoop in prod',
+      body: 'Preview only — this plugin has not opened a pull request.',
+      files: [{ path: 'values.yaml', action: 'preview', diff: '+# preview values' }],
+    });
+
+    render(<DotAIPage />);
+    await selectTool('Remediate (analysis only)');
+    typeIntent('checkout-api CrashLooping');
+    clickSubmit();
+
+    const button = await screen.findByTestId(testIds.dotai.gitopsProposeButton);
+    await waitFor(() => {
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    expect(await screen.findByTestId(testIds.dotai.gitopsProposalTitle)).toHaveTextContent(
+      'fix: checkout-api CrashLoop in prod'
+    );
+    expect(screen.getByTestId(testIds.dotai.gitopsProposalBody)).toHaveTextContent(
+      /has not opened a pull request/i
+    );
+    expect(screen.getByTestId(testIds.dotai.gitopsProposalDiff)).toHaveTextContent('values.yaml');
+    expect(screen.getByTestId(testIds.dotai.gitopsProposalDiff)).toHaveTextContent('# preview values');
+    expect(mockProposeGitOpsPR).toHaveBeenCalledWith('checkout-api CrashLoop in prod');
+    expect(screen.queryByRole('button', { name: /create pr/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /apply/i })).not.toBeInTheDocument();
   });
 
   test('Analyze this switches to Remediate and fills box from Current', async () => {

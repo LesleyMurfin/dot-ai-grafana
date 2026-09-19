@@ -274,3 +274,220 @@ func gitopsStatusJSON(t *testing.T, app *App) gitopsStatusResponse {
 	}
 	return body
 }
+
+func readyGitopsApp(t *testing.T) *App {
+	t.Helper()
+	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+		JSONData: []byte(`{"gitopsProvider":"github","gitopsOwner":"acme","gitopsRepo":"gitops-prod","gitopsBaseBranch":"main"}`),
+		DecryptedSecureJSONData: map[string]string{
+			"apiKey":        "analysis-no-apply",
+			"gitopsPrToken": "github-pr-token",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := inst.(*App)
+	noDial := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("gitops-propose must not dial SCM, Kubernetes, or dot-ai")
+		return nil, nil
+	})}
+	app.httpClient = noDial
+	app.toolHTTPClient = noDial
+	return app
+}
+
+func callGitopsPropose(t *testing.T, app *App, pctx backend.PluginContext, body []byte) (int, gitopsProposeResponse, []byte) {
+	t.Helper()
+	var resp backend.CallResourceResponse
+	err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+		PluginContext: pctx,
+		Path:          "gitops-propose",
+		Method:        http.MethodPost,
+		Body:          body,
+	}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+		resp = *r
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed gitopsProposeResponse
+	if len(resp.Body) > 0 {
+		if err := json.Unmarshal(resp.Body, &parsed); err != nil {
+			t.Fatalf("json: %v body=%s", err, string(resp.Body))
+		}
+	}
+	return resp.Status, parsed, resp.Body
+}
+
+func TestGitOpsProposeDry(t *testing.T) {
+	t.Run("F1_not_configured_409", func(t *testing.T) {
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			DecryptedSecureJSONData: map[string]string{"apiKey": "analysis-no-apply"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), []byte(`{"analysis":"checkout-api CrashLoop"}`))
+		if status != http.StatusConflict {
+			t.Fatalf("status=%d body=%s", status, raw)
+		}
+		if body.OK || !body.Dry || body.Created || body.Reason != gitopsReasonNotConfigured {
+			t.Fatalf("got %+v", body)
+		}
+		if body.Title != "" || len(body.Files) != 0 {
+			t.Fatalf("not-ready must not invent a proposal: %+v", body)
+		}
+		if strings.Contains(string(raw), "analysis-no-apply") {
+			t.Fatalf("leaked secret: %s", raw)
+		}
+	})
+
+	t.Run("F2_missing_token_409", func(t *testing.T) {
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData:                []byte(`{"gitopsOwner":"acme","gitopsRepo":"gitops-prod"}`),
+			DecryptedSecureJSONData: map[string]string{"apiKey": "analysis-no-apply"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), []byte(`{"analysis":"x"}`))
+		if status != http.StatusConflict || body.Reason != gitopsReasonMissingToken || body.Created {
+			t.Fatalf("status=%d body=%+v raw=%s", status, body, raw)
+		}
+	})
+
+	t.Run("F4_token_mixup_409", func(t *testing.T) {
+		inst, err := NewApp(context.Background(), backend.AppInstanceSettings{
+			JSONData: []byte(`{"gitopsOwner":"acme","gitopsRepo":"gitops-prod"}`),
+			DecryptedSecureJSONData: map[string]string{
+				"apiKey":        "same-secret",
+				"gitopsPrToken": "same-secret",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		app := inst.(*App)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), []byte(`{"analysis":"x"}`))
+		if status != http.StatusConflict || body.Reason != gitopsReasonTokenMixup || body.Created {
+			t.Fatalf("status=%d body=%+v raw=%s", status, body, raw)
+		}
+		if strings.Contains(string(raw), "same-secret") {
+			t.Fatalf("leaked token: %s", raw)
+		}
+	})
+
+	t.Run("F6_ready_dry_preview_no_scm", func(t *testing.T) {
+		app := readyGitopsApp(t)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), []byte(`{"analysis":"checkout-api CrashLoop in prod"}`))
+		if status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", status, raw)
+		}
+		if !body.OK || !body.Dry || body.Created || body.Reason != gitopsReasonReady {
+			t.Fatalf("got %+v", body)
+		}
+		if body.Title != "fix: checkout-api CrashLoop in prod" {
+			t.Fatalf("title=%q", body.Title)
+		}
+		if body.Owner != "acme" || body.Repo != "gitops-prod" || body.Provider != "github" || body.BaseBranch != "main" {
+			t.Fatalf("repo fields %+v", body)
+		}
+		if !strings.Contains(body.Body, "has not opened a pull request") {
+			t.Fatalf("body missing preview disclaimer: %s", body.Body)
+		}
+		if !strings.Contains(body.Body, "never the analysis token") {
+			t.Fatalf("body must name the token split: %s", body.Body)
+		}
+		if len(body.Files) != 1 || body.Files[0].Path != "values.yaml" {
+			t.Fatalf("files %+v", body.Files)
+		}
+		if !strings.Contains(body.Files[0].Diff, "checkout-api CrashLoop in prod") {
+			t.Fatalf("diff missing analysis excerpt: %s", body.Files[0].Diff)
+		}
+		if !strings.Contains(body.Files[0].Diff, "top-level values") {
+			t.Fatalf("diff must stay OQ2 top-level: %s", body.Files[0].Diff)
+		}
+		low := strings.ToLower(string(raw))
+		if strings.Contains(string(raw), "github-pr-token") || strings.Contains(string(raw), "analysis-no-apply") {
+			t.Fatalf("leaked secret: %s", raw)
+		}
+		if strings.Contains(low, "api.github.com") || strings.Contains(low, "/repos/") {
+			t.Fatalf("dry preview must not mention a live SCM URL: %s", raw)
+		}
+	})
+
+	t.Run("body_cannot_retarget_repo_or_apply", func(t *testing.T) {
+		app := readyGitopsApp(t)
+		defer app.Dispose()
+
+		payload := []byte(`{
+			"analysis":"scale checkout-api",
+			"owner":"evil","repo":"pwned","baseBranch":"attacker",
+			"apply":true,"execute":true,"executeChoice":"apply","sessionId":"s1"
+		}`)
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), payload)
+		if status != http.StatusOK {
+			t.Fatalf("status=%d body=%s", status, raw)
+		}
+		if body.Owner != "acme" || body.Repo != "gitops-prod" || body.BaseBranch != "main" {
+			t.Fatalf("request retargeted saved repo: %+v", body)
+		}
+		if body.Created || !body.Dry {
+			t.Fatalf("apply/execute must not create: %+v", body)
+		}
+	})
+
+	t.Run("empty_analysis_400", func(t *testing.T) {
+		app := readyGitopsApp(t)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, editorPluginContext(), []byte(`{"analysis":"  "}`))
+		if status != http.StatusBadRequest || body.OK || body.Created {
+			t.Fatalf("status=%d body=%+v raw=%s", status, body, raw)
+		}
+	})
+
+	t.Run("viewer_forbidden", func(t *testing.T) {
+		app := readyGitopsApp(t)
+		defer app.Dispose()
+
+		status, body, raw := callGitopsPropose(t, app, viewerPluginContext(), []byte(`{"analysis":"x"}`))
+		if status != http.StatusForbidden || body.Created {
+			t.Fatalf("status=%d body=%+v raw=%s", status, body, raw)
+		}
+	})
+}
+
+func TestGitOpsPRCreateRouteAbsentInM2(t *testing.T) {
+	app := readyGitopsApp(t)
+	defer app.Dispose()
+
+	var resp backend.CallResourceResponse
+	err := app.CallResource(context.Background(), &backend.CallResourceRequest{
+		PluginContext: editorPluginContext(),
+		Path:          "gitops-pr",
+		Method:        http.MethodPost,
+		Body:          []byte(`{"analysis":"x"}`),
+	}, callResourceResponseSenderFunc(func(r *backend.CallResourceResponse) error {
+		resp = *r
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != http.StatusNotFound {
+		t.Fatalf("M3 create route must stay unregistered; status=%d body=%s", resp.Status, string(resp.Body))
+	}
+}
