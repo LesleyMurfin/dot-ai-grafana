@@ -454,9 +454,11 @@ describe('Pages/DotAIPage', () => {
     typeIntent('top issues');
     clickSubmit();
 
-    expect(await screen.findByTestId(testIds.dotai.progressStage)).toHaveTextContent(
-      'Searching other clusters (hop 2 of 3)…'
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId(testIds.dotai.progressStage)).toHaveTextContent(
+        'Searching other clusters (hop 2 of 3)…'
+      );
+    });
 
     await act(async () => {
       resolveHop2({ ok: true, status: 200, summary: 'error boom across clusters', raw: {} });

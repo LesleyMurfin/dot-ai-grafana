@@ -56,10 +56,8 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
 
   useEffect(() => {
     if (!loading) {
-      setElapsedSec(0);
       return;
     }
-    setElapsedSec(0);
     const started = Date.now();
     const id = window.setInterval(() => {
       setElapsedSec(Math.floor((Date.now() - started) / 1000));
@@ -84,6 +82,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     const thread = threads[tool];
     setLoading(true);
     setProgress(null);
+    setElapsedSec(0);
     setError(undefined);
     setResponseText('');
     try {
@@ -124,6 +123,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
       }
       setLoading(false);
       setProgress(null);
+      setElapsedSec(0);
     }
   };
 
