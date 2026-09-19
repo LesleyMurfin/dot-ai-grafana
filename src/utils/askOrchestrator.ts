@@ -31,6 +31,43 @@ export type AskMeta = {
   branch: AskBranch;
 };
 
+/** In-flight stage the UI can show. Not a percent — only real hops / stack reads. */
+export type AskProgressStage = 'stack' | 'hop';
+
+export type AskProgress = {
+  stage: AskProgressStage;
+  hop: number;
+  hops: number;
+  tool: DotAITool;
+  branch?: AskBranch;
+  firstHop?: FirstHop;
+};
+
+/** Branch names the hop loop already uses, phrased for the spinner. */
+export const ASK_PROGRESS_BRANCH_LABEL: Record<AskBranch, string> = {
+  initial: 'first',
+  across: 'across clusters',
+  conflict: 'conflict',
+  hedge: 'hedge',
+  refine: 'refine',
+};
+
+/** Honest status line: hop N of cap plus the branch, or the Grafana stack read. */
+export function formatAskProgress(progress: AskProgress): string {
+  if (progress.stage === 'stack') {
+    return 'Reading Grafana evidence…';
+  }
+  const branchLabel =
+    progress.tool === 'remediate'
+      ? 'analysis'
+      : progress.branch
+        ? ASK_PROGRESS_BRANCH_LABEL[progress.branch]
+        : undefined;
+  return branchLabel
+    ? `Hop ${progress.hop} of ${progress.hops} — ${branchLabel}`
+    : `Hop ${progress.hop} of ${progress.hops}`;
+}
+
 export type OrchestratorResult = {
   ok: boolean;
   summary: string;
@@ -274,11 +311,15 @@ export async function runAskOrchestrator(args: {
   callTool?: (tool: DotAITool, text: string, meta?: AskMeta) => Promise<ToolCallResult>;
   signal?: AbortSignal;
   skipStack?: boolean;
+  onProgress?: (progress: AskProgress) => void;
 }): Promise<OrchestratorResult> {
   const question = args.question.trim();
   const fetchStack = args.fetchStack ?? fetchStackContext;
   const callTool = args.callTool ?? ((t, text, meta) => callDotAITool(t, text, meta, args.signal));
   const tool = args.tool;
+  const report = (progress: AskProgress) => {
+    args.onProgress?.(progress);
+  };
 
   const aborted = () => Boolean(args.signal?.aborted);
 
@@ -309,6 +350,14 @@ export async function runAskOrchestrator(args: {
       first_hop: 'dot-ai',
       branch: 'initial',
     };
+    report({
+      stage: 'hop',
+      hop: 1,
+      hops: 1,
+      tool: 'remediate',
+      branch: 'initial',
+      firstHop: 'dot-ai',
+    });
     const result = await callTool(tool, packed, meta);
     if (!result.ok) {
       return {
@@ -361,6 +410,13 @@ export async function runAskOrchestrator(args: {
     if (args.skipStack) {
       return;
     }
+    report({
+      stage: 'stack',
+      hop: hops,
+      hops: MAX_ASK_HOPS,
+      tool: 'query',
+      firstHop,
+    });
     try {
       const stack = await fetchStack(q);
       stackSnapshot = stack.current;
@@ -420,6 +476,14 @@ export async function runAskOrchestrator(args: {
       first_hop: firstHop,
       branch,
     };
+    report({
+      stage: 'hop',
+      hop: hops,
+      hops: MAX_ASK_HOPS,
+      tool: 'query',
+      branch,
+      firstHop,
+    });
     const result = await callTool('query', packed, meta);
     if (result.ok) {
       lastSummary = result.summary.trim() ? result.summary : 'dot-ai returned no summary';

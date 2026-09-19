@@ -371,7 +371,9 @@ describe('Pages/DotAIPage', () => {
     typeIntent('show nodes');
     clickSubmit();
 
-    expect(await screen.findByTestId(testIds.dotai.loading)).toBeInTheDocument();
+    const loading = await screen.findByTestId(testIds.dotai.loading);
+    expect(loading).toBeInTheDocument();
+    expect(loading).toHaveTextContent('Hop 1 of 3 — first');
     expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
     expect(screen.getByTestId(testIds.dotai.intent)).toBeDisabled();
     // Grafana Select maps disabled→isDisabled; react-select drops combobox role when disabled.
@@ -395,6 +397,78 @@ describe('Pages/DotAIPage', () => {
     const toolInputAfter = document.getElementById('dotai-tool') as HTMLInputElement | null;
     expect(toolInputAfter).not.toBeNull();
     expect(toolInputAfter).not.toBeDisabled();
+  });
+
+  test('loading copy tracks stack then hop/stage from the orchestrator', async () => {
+    let resolveStack!: (value: typeof emptyStack) => void;
+    mockFetchStackContext.mockReturnValue(
+      new Promise((r) => {
+        resolveStack = r;
+      })
+    );
+
+    let resolveHop1!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    let resolveHop2!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    mockCallDotAITool
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveHop1 = r;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveHop2 = r;
+          })
+      );
+
+    render(<DotAIPage />);
+    typeIntent('top issues');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.loading)).toHaveTextContent('Reading Grafana evidence…');
+
+    await act(async () => {
+      resolveStack({ ...emptyStack });
+    });
+    expect(await screen.findByTestId(testIds.dotai.loading)).toHaveTextContent('Hop 1 of 3 — first');
+
+    await act(async () => {
+      resolveHop1({ ok: true, status: 200, summary: 'issues found', raw: {} });
+    });
+    expect(await screen.findByTestId(testIds.dotai.loading)).toHaveTextContent('Hop 2 of 3 — across clusters');
+
+    await act(async () => {
+      resolveHop2({ ok: true, status: 200, summary: 'issues across clusters', raw: {} });
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('issues across clusters');
+  });
+
+  test('remediate loading copy is hop 1 of 1 analysis', async () => {
+    let resolve!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    mockCallDotAITool.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+
+    render(<DotAIPage />);
+    await selectTool('Remediate (analysis only)');
+    typeIntent('checkout-api CrashLooping');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.loading)).toHaveTextContent('Hop 1 of 1 — analysis');
+
+    await act(async () => {
+      resolve({ ok: true, status: 200, summary: 'restart deployment suggested', raw: {} });
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
   });
 
   test('Enter in intent box submits when text is present', async () => {

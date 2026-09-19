@@ -17,7 +17,7 @@ import { ResponseMarkdown } from '../components/ResponseMarkdown';
 import { DotAITool } from '../utils/dotaiApi';
 import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
-import { runAskOrchestrator } from '../utils/askOrchestrator';
+import { AskProgress, formatAskProgress, runAskOrchestrator } from '../utils/askOrchestrator';
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -37,6 +37,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const [tool, setTool] = useState<DotAITool>('query');
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<AskProgress | null>(null);
   const [responseText, setResponseText] = useState('');
   const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -63,6 +64,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     abortRef.current = ac;
     const thread = threads[tool];
     setLoading(true);
+    setProgress(null);
     setError(undefined);
     setResponseText('');
     try {
@@ -72,6 +74,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         thread,
         signal: ac.signal,
         skipStack: !sendGrafanaEvidence,
+        onProgress: setProgress,
       });
       if (ac.signal.aborted) {
         setError(ASK_CANCELLED_MESSAGE);
@@ -101,6 +104,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         abortRef.current = null;
       }
       setLoading(false);
+      setProgress(null);
     }
   };
 
@@ -247,9 +251,14 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
               </Button>
             )}
             {loading && (
-              <span className={styles.loading} data-testid={testIds.dotai.loading}>
+              <span
+                className={styles.loading}
+                data-testid={testIds.dotai.loading}
+                aria-live="polite"
+                aria-atomic="true"
+              >
                 <Spinner inline={true} />
-                Waiting for dot-ai…
+                {progress ? formatAskProgress(progress) : 'Starting…'}
               </span>
             )}
           </div>

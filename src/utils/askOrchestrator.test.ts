@@ -1,8 +1,10 @@
 import {
   answerConflictsWithCurrent,
   answerHedgesOnCurrent,
+  AskProgress,
   currentEvidenceSources,
   classifyFirstHop,
+  formatAskProgress,
   isUnscopedQuestion,
   MAX_ASK_HOPS,
   runAskOrchestrator,
@@ -25,6 +27,75 @@ function stackResult(overrides: Partial<StackContextResult> = {}): StackContextR
     drilldowns: overrides.drilldowns ?? [],
   };
 }
+
+describe('formatAskProgress', () => {
+  test('stack read and hop/branch labels are honest, not a percent', () => {
+    expect(
+      formatAskProgress({ stage: 'stack', hop: 0, hops: MAX_ASK_HOPS, tool: 'query', firstHop: 'grafana' })
+    ).toBe('Reading Grafana evidence…');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 1,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'initial',
+        firstHop: 'grafana',
+      })
+    ).toBe('Hop 1 of 3 — first');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 2,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'across',
+        firstHop: 'grafana',
+      })
+    ).toBe('Hop 2 of 3 — across clusters');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 2,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'conflict',
+        firstHop: 'grafana',
+      })
+    ).toBe('Hop 2 of 3 — conflict');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 3,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'hedge',
+        firstHop: 'grafana',
+      })
+    ).toBe('Hop 3 of 3 — hedge');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 2,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'refine',
+        firstHop: 'dot-ai',
+      })
+    ).toBe('Hop 2 of 3 — refine');
+    expect(
+      formatAskProgress({
+        stage: 'hop',
+        hop: 1,
+        hops: 1,
+        tool: 'remediate',
+        branch: 'initial',
+        firstHop: 'dot-ai',
+      })
+    ).toBe('Hop 1 of 1 — analysis');
+    expect(formatAskProgress({ stage: 'hop', hop: 1, hops: MAX_ASK_HOPS, tool: 'query' })).toBe('Hop 1 of 3');
+  });
+});
 
 describe('classifyFirstHop', () => {
   test('observability language → grafana', () => {
@@ -626,6 +697,139 @@ describe('runAskOrchestrator', () => {
     expect(result.hops).toBe(1);
     expect(fetchStack).not.toHaveBeenCalled();
     expect(callTool).toHaveBeenCalledTimes(1);
+  });
+
+  test('onProgress reports stack then hop/branch for unscoped grafana-first', async () => {
+    const progress: AskProgress[] = [];
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () => stackResult()),
+      callTool: jest.fn(async (): Promise<ToolCallResult> => ({
+        ok: true,
+        status: 200,
+        summary: 'error boom in pod-a across clusters',
+        raw: {},
+      })),
+      onProgress: (p) => progress.push({ ...p }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(2);
+    expect(progress).toEqual([
+      { stage: 'stack', hop: 0, hops: MAX_ASK_HOPS, tool: 'query', firstHop: 'grafana' },
+      {
+        stage: 'hop',
+        hop: 1,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'initial',
+        firstHop: 'grafana',
+      },
+      {
+        stage: 'hop',
+        hop: 2,
+        hops: MAX_ASK_HOPS,
+        tool: 'query',
+        branch: 'across',
+        firstHop: 'grafana',
+      },
+    ]);
+    expect(progress.map(formatAskProgress)).toEqual([
+      'Reading Grafana evidence…',
+      'Hop 1 of 3 — first',
+      'Hop 2 of 3 — across clusters',
+    ]);
+  });
+
+  test('onProgress reports first then conflict then hedge on the 3-hop path', async () => {
+    const stack = stackResult({
+      current:
+        'Loki last 15m (pod/argocd-application-controller ns/demo-gitops):\nComparing app state\n\nPrometheus last 15m:\nno metric samples\n\nTempo last 15m:\nno traces\n\nAlertmanager:\nKubePodCrashLooping firing',
+      logLines: ['Comparing app state'],
+      alertLines: ['KubePodCrashLooping firing'],
+      currentEmpty: false,
+    });
+    const summaries = [
+      "The namespace 'demo-gitops' does not exist in the current cluster.",
+      'The argocd-application-controller pod in namespace demo-gitops is not accessible via standard kubectl contexts in the accessible cluster APIs.',
+      'argocd-application-controller is reconciling on the host cluster per Loki.',
+    ];
+    let n = 0;
+    const progress: AskProgress[] = [];
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show logs for pod argocd-application-controller in namespace demo-gitops',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () => stack),
+      callTool: jest.fn(async (): Promise<ToolCallResult> => {
+        const summary = summaries[Math.min(n, summaries.length - 1)];
+        n += 1;
+        return { ok: true, status: 200, summary, raw: {} };
+      }),
+      onProgress: (p) => progress.push({ ...p }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(3);
+    expect(progress.map((p) => [p.stage, p.hop, p.branch])).toEqual([
+      ['stack', 0, undefined],
+      ['hop', 1, 'initial'],
+      ['hop', 2, 'conflict'],
+      ['hop', 3, 'hedge'],
+    ]);
+    expect(progress.map(formatAskProgress)).toEqual([
+      'Reading Grafana evidence…',
+      'Hop 1 of 3 — first',
+      'Hop 2 of 3 — conflict',
+      'Hop 3 of 3 — hedge',
+    ]);
+  });
+
+  test('onProgress for remediate is a single analysis hop', async () => {
+    const progress: AskProgress[] = [];
+    const result = await runAskOrchestrator({
+      tool: 'remediate',
+      question: 'pod crash',
+      thread: emptyThread(),
+      callTool: jest.fn(async (): Promise<ToolCallResult> => ({
+        ok: true,
+        status: 200,
+        summary: 'restart deployment',
+        raw: {},
+      })),
+      onProgress: (p) => progress.push({ ...p }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(progress).toEqual([
+      { stage: 'hop', hop: 1, hops: 1, tool: 'remediate', branch: 'initial', firstHop: 'dot-ai' },
+    ]);
+    expect(progress.map(formatAskProgress)).toEqual(['Hop 1 of 1 — analysis']);
+  });
+
+  test('onProgress for inventory-first does not invent a stack stage', async () => {
+    const progress: AskProgress[] = [];
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'list namespaces',
+      thread: emptyThread(),
+      fetchStack: jest.fn(async () => stackResult()),
+      callTool: jest.fn(async (): Promise<ToolCallResult> => ({
+        ok: true,
+        status: 200,
+        summary: 'default kube-system',
+        raw: {},
+      })),
+      onProgress: (p) => progress.push({ ...p }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.firstHop).toBe('dot-ai');
+    expect(progress).toEqual([
+      { stage: 'hop', hop: 1, hops: MAX_ASK_HOPS, tool: 'query', branch: 'initial', firstHop: 'dot-ai' },
+    ]);
   });
 
   test('remediate is single analysis hop', async () => {
