@@ -734,6 +734,80 @@ describe('runAskOrchestrator', () => {
     expect(result.summary).toMatch(/Map links/i);
   });
 
+  test('show me the alerts skips dot-ai and keeps Current', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Alertmanager:\nalert KubePodCrashLooping firing',
+        alertLines: ['alert KubePodCrashLooping firing'],
+        drilldowns: [{ id: 'alerting-list', label: 'Alerts', href: '/alerting/list?orgId=1' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the alerts',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'alerting-list', label: 'Alerts', href: '/alerting/list?orgId=1' },
+    ]);
+    expect(result.summary).toMatch(/Map links/i);
+  });
+
+  test('show me the dashboards skips dot-ai when firing-alert dashboard links exist', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Dashboards (from firing alerts):\n/d/abc12def',
+        drilldowns: [{ id: 'dash-abc12def', label: 'Dashboard abc12def', href: '/d/abc12def' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the dashboards',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'dash-abc12def', label: 'Dashboard abc12def', href: '/d/abc12def' },
+    ]);
+  });
+
+  test('show me the alerts still POSTs when diagnosis tokens are present', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Alertmanager:\nalert KubePodCrashLooping firing',
+        alertLines: ['alert KubePodCrashLooping firing'],
+        drilldowns: [{ id: 'alerting-list', label: 'Alerts', href: '/alerting/list?orgId=1' }],
+      })
+    );
+    const callTool = jest.fn(async (): Promise<ToolCallResult> => ({
+      ok: true,
+      status: 200,
+      summary: 'checkout-api is crash looping',
+      raw: {},
+    }));
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the alerts — why is checkout-api crashing?',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBeGreaterThan(0);
+    expect(callTool).toHaveBeenCalled();
+  });
+
   test('show me the logs fails when the Grafana stack read failed (no evidence to show)', async () => {
     const fetchStack = jest.fn(async () => {
       throw new Error('ds.query exploded');
@@ -842,10 +916,9 @@ describe('runAskOrchestrator', () => {
   });
 
   /**
-   * The mirror of the case above. Alert lines make the stack non-empty, but
-   * `buildDrilldownLinks` emits no alerts link (#66), so on a Grafana with no
-   * Loki/Prometheus/Tempo datasource there is Current to read and nothing to open.
-   * The summary must not send that user to a Map panel that has no links in it.
+   * The mirror of the case above. A caller (or a mock) can still hand the
+   * orchestrator evidence with an empty drilldowns list. The summary must not
+   * send that user to a Map panel that has no links in it.
    */
   test('show me the logs does not offer Map links when evidence has no drilldown', async () => {
     const fetchStack = jest.fn(async () =>

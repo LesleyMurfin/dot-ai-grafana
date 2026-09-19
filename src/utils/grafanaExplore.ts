@@ -112,6 +112,14 @@ export function dashboardUrl(uid: string): string {
   return `${appBase()}/d/${encodeURIComponent(uid)}`;
 }
 
+/** Grafana unified Alerting list. Not dashboard /api HTTP, not Explore. */
+export function alertingListUrl(): string {
+  const params = new URLSearchParams({
+    orgId: String(orgId()),
+  });
+  return `${appBase()}/alerting/list?${params.toString()}`;
+}
+
 export function drilldownAppUrl(pluginId: string): string | undefined {
   if (!hasApp(pluginId)) {
     return undefined;
@@ -123,7 +131,7 @@ export function drilldownAppUrl(pluginId: string): string | undefined {
  * Diagnosis tokens that force POST (show-me must not skip the engine).
  *
  * INTENTIONALLY UNREACHABLE TODAY — do not delete. `SHOW_ME_PRODUCTION` below
- * is fully anchored with no tail, so it accepts exactly 18 pure navigation
+ * is fully anchored with no tail, so it accepts exactly 30 pure navigation
  * phrases, none of which contains a token here; removing this changes no
  * current result. It is defence for a later slice that widens the production
  * (e.g. re-adding a `for <resource>` tail), at which point it becomes
@@ -142,22 +150,20 @@ export const DIAGNOSIS_TOKENS =
   /\b(why|error\w*|crash\w*|fail\w*|analy[sz]\w*|remediate|how|improve|root cause|because|issue|issues|unhealthy)\b/;
 
 /**
- * The written contract production, narrowed to the nouns the link builder can
- * actually serve. Fully anchored — no `for <resource>` tail.
+ * The written #6 contract production, restored after #66 option 1 became
+ * servable. Fully anchored — no `for <resource>` tail.
  *
- * `alerts` and `dashboards` are deliberately NOT accepted (#66): on the 0-hop
- * path the engine is skipped, so `buildDrilldownLinks` is the only thing that
- * can answer, and it emits no alerts link at all, while `dash-<uid>` links come
- * from `dashboardUids`, which has no engine-independent source today (#47).
- * Accepting those two nouns would answer "show me the alerts" with logs and
- * metrics links, or with nothing at all. Narrowing sends them down the normal
- * POST path, where they get a real answer.
+ * `alerts` and `dashboards` are accepted again because the 0-hop path can
+ * answer them without the engine: `buildDrilldownLinks` always emits
+ * `/alerting/list` (Grafana unified alerting; no search API), and `dash-<uid>`
+ * links come from firing-alert `dashboardUid` frames already in the stack read
+ * (#89 / #78) — never GET /api/search. Diagnosis tokens still force POST.
  */
-const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|traces|metrics)$/;
+const SHOW_ME_PRODUCTION = /^(show me|open|display)( the)? (logs|alerts|traces|metrics|dashboards)$/;
 
 /**
  * True when the Ask is only a pure navigation phrase:
- * `(show me|open|display) the? (logs|traces|metrics)`.
+ * `(show me|open|display) the? (logs|alerts|traces|metrics|dashboards)`.
  * Diagnosis tokens force POST (show-me does not skip). False positives on the
  * 0-hop skip are dangerous — when ambiguous, return false so the engine runs.
  */
@@ -257,6 +263,15 @@ export function buildDrilldownLinks(args: {
       });
     }
   }
+
+  // Always: Grafana unified alerting is first-party on the 11.4 floor. No
+  // Alertmanager uid and no /api/search — the list page is the alerts target
+  // #66 option 1 asked for.
+  links.push({
+    id: 'alerting-list',
+    label: 'Alerts',
+    href: alertingListUrl(),
+  });
 
   for (const uid of args.dashboardUids.slice(0, 5)) {
     links.push({

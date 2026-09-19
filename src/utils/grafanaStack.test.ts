@@ -361,6 +361,7 @@ describe('fetchStackContext', () => {
     expect(result.current).toContain('/d/abc12def');
     expect(result.mapHint).toContain('dashboards: /d/abc12def');
     expect(result.drilldowns.some((d) => d.href.includes('/d/abc12def'))).toBe(true);
+    expect(result.drilldowns.some((d) => d.id === 'alerting-list' && d.href.includes('/alerting/list'))).toBe(true);
   });
 
   test('never calls GET /api/search to resolve dashboard links from firing alerts', async () => {
@@ -769,6 +770,7 @@ describe('dashboardUidsFromAlertFrames', () => {
     expect(result.mapHint).toContain('dashboards: none linked on firing alerts');
     expect(result.current).toContain('(none linked on firing alerts)');
     expect(result.drilldowns.filter((d) => d.href.startsWith('/d/'))).toHaveLength(0);
+    expect(result.drilldowns.some((d) => d.id === 'alerting-list')).toBe(true);
   });
 
   test('non-alert path is UNCHANGED: no alert firing yields no dashboard hint in Map hint', async () => {

@@ -482,10 +482,10 @@ export async function runAskOrchestrator(args: {
       // "neither", which leaves three cases — and `stackEmpty` implies links exist, since
       // otherwise the guard would have returned.
       //
-      // Evidence with no link is reachable: alert lines make the stack non-empty but
-      // `buildDrilldownLinks` emits no alerts link (#66), so a target whose only evidence
-      // is a firing alert, on a Grafana with no Loki/Prometheus/Tempo datasource, has
-      // Current to read and nothing to open. Do not send that user to Map.
+      // Evidence with no link is still reachable when the stack snapshot is mocked
+      // or a caller builds drilldowns itself. Production `buildDrilldownLinks` now
+      // always emits `/alerting/list` (#66 option 1), so a firing-alert-only Current
+      // has something to open. Do not send a user to Map when links were never built.
       const hasLinks = drilldowns.length > 0;
       lastSummary = stackEmpty
         ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
