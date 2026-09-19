@@ -44,6 +44,14 @@
       "requires": { "symbol": "Prior", "paths": ["src/utils/progressiveContext.ts"] },
       "reason": "Docs describe a condensed Prior block packed into the intent. progressiveContext.ts has no Prior packing.",
       "introduced_by": "PR #43"
+    },
+    {
+      "id": "honest-ask-progress",
+      "phrases": ["elapsed time", "hop 1–3", "hop 1-3"],
+      "ignore_case": true,
+      "requires": { "symbol": "askProgressLabel" },
+      "reason": "Docs promise staged in-flight copy and elapsed time. askProgressLabel owns that UI.",
+      "introduced_by": "issue #8"
     }
   ]
 }

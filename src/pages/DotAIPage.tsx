@@ -1,4 +1,4 @@
-import React, { FormEvent, useMemo, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { PluginPage } from '@grafana/runtime';
@@ -17,7 +17,12 @@ import { ResponseMarkdown } from '../components/ResponseMarkdown';
 import { DotAITool } from '../utils/dotaiApi';
 import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
-import { runAskOrchestrator } from '../utils/askOrchestrator';
+import {
+  AskProgress,
+  askProgressLabel,
+  formatAskElapsed,
+  runAskOrchestrator,
+} from '../utils/askOrchestrator';
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -37,6 +42,8 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const [tool, setTool] = useState<DotAITool>('query');
   const [intent, setIntent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<AskProgress | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [responseText, setResponseText] = useState('');
   const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -46,6 +53,17 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   });
 
   const activeThread = threads[tool];
+
+  useEffect(() => {
+    if (!loading) {
+      return;
+    }
+    const started = Date.now();
+    const id = window.setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - started) / 1000));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   const placeholder = useMemo(() => {
     if (tool === 'remediate') {
@@ -63,6 +81,8 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     abortRef.current = ac;
     const thread = threads[tool];
     setLoading(true);
+    setProgress(null);
+    setElapsedSec(0);
     setError(undefined);
     setResponseText('');
     try {
@@ -72,6 +92,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         thread,
         signal: ac.signal,
         skipStack: !sendGrafanaEvidence,
+        onProgress: setProgress,
       });
       if (ac.signal.aborted) {
         setError(ASK_CANCELLED_MESSAGE);
@@ -101,6 +122,8 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
         abortRef.current = null;
       }
       setLoading(false);
+      setProgress(null);
+      setElapsedSec(0);
     }
   };
 
@@ -247,9 +270,14 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
               </Button>
             )}
             {loading && (
-              <span className={styles.loading} data-testid={testIds.dotai.loading}>
+              <span className={styles.loading} data-testid={testIds.dotai.loading} aria-live="polite">
                 <Spinner inline={true} />
-                Waiting for dot-ai…
+                <span data-testid={testIds.dotai.progressStage}>
+                  {progress ? askProgressLabel(progress) : 'Starting…'}
+                </span>
+                <span className={styles.elapsed} data-testid={testIds.dotai.elapsed}>
+                  {formatAskElapsed(elapsedSec)}
+                </span>
               </span>
             )}
           </div>
@@ -356,6 +384,9 @@ const getStyles = (theme: GrafanaTheme2) => ({
     align-items: center;
     gap: ${theme.spacing(1)};
     color: ${theme.colors.text.secondary};
+  `,
+  elapsed: css`
+    font-variant-numeric: tabular-nums;
   `,
   block: css`
     margin-top: ${theme.spacing(2)};

@@ -759,7 +759,7 @@ Grafana Assistant is unavailable. Built in five independently-reviewable stages:
 - [x] **M5 — Remediate analysis UI.** Analysis text; **no execution surfaced** (allowlist drops execute/apply tokens). Single hop; reuses Query Current.
 
 **Stage 1d — Firefighting UX & dashboard integration**
-- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner, error `Alert`, Clear thread, Analyze this. Cancel + Retry shipped in v1; no elapsed timer.
+- [x] **M6 — Shared layout.** Tool selector, placeholders, spinner with staged hop copy + elapsed timer (`askProgressLabel` / `formatAskElapsed`), error `Alert`, Clear thread, Analyze this. Cancel + Retry shipped in v1.
 - [x] **M7 — Map/Explore/show-me navigation surface.** In v1 scope, folded back from [PRD #3](https://github.com/LesleyMurfin/dot-ai-grafana/issues/23) / [PR #22](https://github.com/LesleyMurfin/dot-ai-grafana/pull/22) — tracked as [issue #6](https://github.com/vfarcic/dot-ai-grafana/issues/6). **State on `main` today:** the Explore/Drilldown link builders shipped with [#52](https://github.com/vfarcic/dot-ai-grafana/pull/52) (`src/utils/grafanaExplore.ts`); the Map-panel wiring and the show-me 0-hop classifier come with [#79](https://github.com/vfarcic/dot-ai-grafana/pull/79). Checked for **scope** — M7 belongs to v1, not to PRD #3 — which is what this section decides; #79 completes the surface.
 
 **Stage 1e — Ship**

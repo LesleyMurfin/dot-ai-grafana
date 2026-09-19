@@ -1,8 +1,10 @@
 import {
   answerConflictsWithCurrent,
   answerHedgesOnCurrent,
+  askProgressLabel,
   currentEvidenceSources,
   classifyFirstHop,
+  formatAskElapsed,
   isUnscopedQuestion,
   MAX_ASK_HOPS,
   runAskOrchestrator,
@@ -171,6 +173,38 @@ describe('isUnscopedQuestion / answerConflictsWithCurrent', () => {
     // the adjacency check closed, so quoted spans are left intact on purpose.
     const subjectInQuotes = "The pod 'argocd-application-controller' was not found.";
     expect(answerConflictsWithCurrent(current, subjectInQuotes)).toBe(true);
+  });
+});
+
+describe('askProgressLabel / formatAskElapsed', () => {
+  test('names each in-flight stage without inventing hops', () => {
+    expect(askProgressLabel({ stage: 'reading-stack', hop: 0, hops: MAX_ASK_HOPS })).toBe(
+      'Reading Grafana evidence…'
+    );
+    expect(askProgressLabel({ stage: 'analyzing', hop: 1, hops: 1 })).toBe('Analyzing issue…');
+    expect(askProgressLabel({ stage: 'initial', hop: 1, hops: MAX_ASK_HOPS })).toBe(
+      'Asking dot-ai (hop 1 of 3)…'
+    );
+    expect(askProgressLabel({ stage: 'across', hop: 2, hops: MAX_ASK_HOPS })).toBe(
+      'Searching other clusters (hop 2 of 3)…'
+    );
+    expect(askProgressLabel({ stage: 'conflict', hop: 2, hops: MAX_ASK_HOPS })).toBe(
+      'Reconciling with Grafana evidence (hop 2 of 3)…'
+    );
+    expect(askProgressLabel({ stage: 'hedge', hop: 3, hops: MAX_ASK_HOPS })).toBe(
+      'Getting a committed answer (hop 3 of 3)…'
+    );
+    expect(askProgressLabel({ stage: 'refine', hop: 2, hops: MAX_ASK_HOPS })).toBe(
+      'Refining with Grafana evidence (hop 2 of 3)…'
+    );
+  });
+
+  test('formatAskElapsed is m:ss and fail-closed on junk', () => {
+    expect(formatAskElapsed(0)).toBe('0:00');
+    expect(formatAskElapsed(5)).toBe('0:05');
+    expect(formatAskElapsed(65)).toBe('1:05');
+    expect(formatAskElapsed(-3)).toBe('0:00');
+    expect(formatAskElapsed(Number.NaN)).toBe('0:00');
   });
 });
 
@@ -635,17 +669,67 @@ describe('runAskOrchestrator', () => {
       expect(text).toMatch(/Analysis only/i);
       return { ok: true, status: 200, summary: 'restart deployment', raw: {} };
     });
+    const progress: Array<{ stage: string; hop: number; hops: number }> = [];
 
     const result = await runAskOrchestrator({
       tool: 'remediate',
       question: 'pod crash',
       thread: { current: 'prior current', map: 'ns/x', history: [], drilldowns: [] },
       callTool,
+      onProgress: (p) => progress.push({ ...p }),
     });
 
     expect(result.ok).toBe(true);
     expect(result.hops).toBe(1);
     expect(result.firstHop).toBe('dot-ai');
+    expect(progress).toEqual([{ stage: 'analyzing', hop: 1, hops: 1 }]);
+  });
+
+  test('reports reading-stack then each hop branch (unscoped across)', async () => {
+    const progress: Array<{ stage: string; hop: number; hops: number }> = [];
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues',
+      thread: emptyThread(),
+      fetchStack: async () => stackResult(),
+      callTool: async (): Promise<ToolCallResult> => ({
+        ok: true,
+        status: 200,
+        summary: 'error boom in pod-a across clusters',
+        raw: {},
+      }),
+      onProgress: (p) => progress.push({ ...p }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(2);
+    expect(progress).toEqual([
+      { stage: 'reading-stack', hop: 0, hops: MAX_ASK_HOPS },
+      { stage: 'initial', hop: 1, hops: MAX_ASK_HOPS },
+      { stage: 'across', hop: 2, hops: MAX_ASK_HOPS },
+    ]);
+  });
+
+  test('skipStack does not report a Grafana evidence read', async () => {
+    const progress: string[] = [];
+    await runAskOrchestrator({
+      tool: 'query',
+      question: 'top issues',
+      thread: emptyThread(),
+      skipStack: true,
+      fetchStack: async () => {
+        throw new Error('should not read the stack');
+      },
+      callTool: async (): Promise<ToolCallResult> => ({
+        ok: true,
+        status: 200,
+        summary: 'listed',
+        raw: {},
+      }),
+      onProgress: (p) => progress.push(p.stage),
+    });
+
+    expect(progress).toEqual(['initial', 'across']);
   });
 
   test('Grafana stack throw does not fail the Ask; packs failure note', async () => {
