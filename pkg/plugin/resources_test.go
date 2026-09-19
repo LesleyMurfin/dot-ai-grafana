@@ -116,6 +116,7 @@ func TestMethodNotAllowed(t *testing.T) {
 		{"health", http.MethodPut},
 		{"test-connection", http.MethodGet},
 		{"gitops-status", http.MethodPost},
+		{"gitops-propose", http.MethodGet},
 	}
 	for _, tc := range cases {
 		tc := tc

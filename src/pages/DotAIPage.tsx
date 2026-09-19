@@ -1,4 +1,4 @@
-import React, { FormEvent, useMemo, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { css } from '@emotion/css';
 import { GrafanaTheme2, SelectableValue } from '@grafana/data';
 import { PluginPage } from '@grafana/runtime';
@@ -18,6 +18,13 @@ import { DotAITool } from '../utils/dotaiApi';
 import { ASK_CANCELLED_MESSAGE, askErrorTitle } from '../utils/askErrors';
 import { emptyThread, ToolThread } from '../utils/progressiveContext';
 import { runAskOrchestrator } from '../utils/askOrchestrator';
+import {
+  fetchGitOpsStatus,
+  gitopsReasonCopy,
+  GitOpsProposal,
+  GitOpsStatus,
+  proposeGitOpsPR,
+} from '../utils/gitopsApi';
 
 const TOOL_OPTIONS: Array<SelectableValue<DotAITool>> = [
   { label: 'Query', value: 'query', description: 'Natural language cluster questions' },
@@ -44,6 +51,11 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     query: emptyThread(),
     remediate: emptyThread(),
   });
+  const [analysisResult, setAnalysisResult] = useState('');
+  const [gitopsStatus, setGitopsStatus] = useState<GitOpsStatus | undefined>();
+  const [proposing, setProposing] = useState(false);
+  const [proposal, setProposal] = useState<GitOpsProposal | undefined>();
+  const [proposeError, setProposeError] = useState<string | undefined>();
 
   const activeThread = threads[tool];
 
@@ -65,6 +77,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     setLoading(true);
     setError(undefined);
     setResponseText('');
+    setAnalysisResult('');
+    setGitopsStatus(undefined);
+    setProposal(undefined);
+    setProposeError(undefined);
     try {
       const result = await runAskOrchestrator({
         tool,
@@ -84,6 +100,7 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
       if (result.ok) {
         setResponseText(result.summary);
         setIntent('');
+        setAnalysisResult(tool === 'remediate' ? result.summary : '');
       } else {
         setError(result.errorMessage || 'Request failed');
         if (result.summary) {
@@ -129,6 +146,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
       [tool]: emptyThread(),
     }));
     setResponseText('');
+    setAnalysisResult('');
+    setGitopsStatus(undefined);
+    setProposal(undefined);
+    setProposeError(undefined);
     setError(undefined);
   };
 
@@ -145,6 +166,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
     setIntent(queryCurrent);
     setError(undefined);
     setResponseText('');
+    setAnalysisResult('');
+    setGitopsStatus(undefined);
+    setProposal(undefined);
+    setProposeError(undefined);
   };
 
   const onIntentKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -160,6 +185,47 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   };
 
   const showAnalyzeThis = tool === 'query' && Boolean(threads.query.current.trim()) && !loading;
+  const showPropose = tool === 'remediate' && Boolean(analysisResult) && !loading;
+
+  useEffect(() => {
+    if (!showPropose) {
+      return;
+    }
+    let cancelled = false;
+    fetchGitOpsStatus().then((status) => {
+      if (!cancelled) {
+        setGitopsStatus(status);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showPropose, analysisResult]);
+
+  const onPropose = async () => {
+    if (!analysisResult || proposing || !gitopsStatus?.ready) {
+      return;
+    }
+    setProposing(true);
+    setProposeError(undefined);
+    setProposal(undefined);
+    try {
+      const result = await proposeGitOpsPR(analysisResult);
+      if (result.created || !result.dry) {
+        setProposeError('Preview refused: the plugin must not create a pull request in this version.');
+        return;
+      }
+      if (result.ok) {
+        setProposal(result);
+        return;
+      }
+      setProposeError(result.error || gitopsReasonCopy(result.reason || ''));
+    } catch (e) {
+      setProposeError(e instanceof Error ? e.message : 'Propose failed');
+    } finally {
+      setProposing(false);
+    }
+  };
 
   return (
     <PluginPage>
@@ -190,6 +256,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
                   }
                   setTool((v.value as DotAITool) || 'query');
                   setResponseText('');
+                  setAnalysisResult('');
+                  setGitopsStatus(undefined);
+                  setProposal(undefined);
+                  setProposeError(undefined);
                   setError(undefined);
                 }}
                 inputId="dotai-tool"
@@ -328,6 +398,57 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
             <ResponseMarkdown text={responseText} />
           </div>
         )}
+
+        {showPropose && (
+          <div className={styles.propose} data-testid={testIds.dotai.gitopsPropose}>
+            <div className={styles.actions}>
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid={testIds.dotai.gitopsProposeButton}
+                disabled={!gitopsStatus?.ready || proposing}
+                onClick={() => void onPropose()}
+              >
+                {proposing ? 'Preparing preview…' : 'Propose GitOps PR'}
+              </Button>
+            </div>
+            {gitopsStatus && !gitopsStatus.ready && (
+              <div className={styles.proposeReason} data-testid={testIds.dotai.gitopsProposeReason}>
+                {gitopsReasonCopy(gitopsStatus.reason)}
+              </div>
+            )}
+            {proposeError && (
+              <Alert title="GitOps PR preview failed" severity="error" className={styles.block}>
+                {proposeError}
+              </Alert>
+            )}
+            {proposal && (
+              <div className={styles.proposal} data-testid={testIds.dotai.gitopsProposal}>
+                <h3 className={styles.responseTitle}>GitOps PR preview</h3>
+                <p className={styles.proposeReason}>
+                  Preview only — no pull request was created and nothing was applied to the cluster.
+                </p>
+                <div data-testid={testIds.dotai.gitopsProposalTitle}>
+                  <div className={styles.proposalLabel}>Title</div>
+                  <pre className={styles.pre}>{proposal.title}</pre>
+                </div>
+                <div data-testid={testIds.dotai.gitopsProposalBody}>
+                  <div className={styles.proposalLabel}>Body</div>
+                  <pre className={styles.pre}>{proposal.body}</pre>
+                </div>
+                <div data-testid={testIds.dotai.gitopsProposalDiff}>
+                  <div className={styles.proposalLabel}>Diff</div>
+                  {(proposal.files ?? []).map((file) => (
+                    <div key={file.path}>
+                      <div className={styles.proposalLabel}>{file.path}</div>
+                      <pre className={styles.pre}>{file.diff}</pre>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </PluginPage>
   );
@@ -407,5 +528,26 @@ const getStyles = (theme: GrafanaTheme2) => ({
     word-break: break-word;
     font-family: ${theme.typography.fontFamilyMonospace};
     font-size: ${theme.typography.bodySmall.fontSize};
+  `,
+  propose: css`
+    margin-top: ${theme.spacing(2)};
+    padding: ${theme.spacing(2)};
+    border: 1px solid ${theme.colors.border.weak};
+    border-radius: ${theme.shape.radius.default};
+  `,
+  proposeReason: css`
+    color: ${theme.colors.text.secondary};
+    font-size: ${theme.typography.bodySmall.fontSize};
+    margin-bottom: ${theme.spacing(1)};
+  `,
+  proposal: css`
+    margin-top: ${theme.spacing(1.5)};
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1.5)};
+  `,
+  proposalLabel: css`
+    font-weight: ${theme.typography.fontWeightMedium};
+    margin-bottom: ${theme.spacing(0.5)};
   `,
 });
