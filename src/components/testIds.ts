@@ -8,6 +8,13 @@ export const testIds = {
     debugLog: 'data-testid ac-debug-log',
     showContext: 'data-testid ac-show-context',
     sendGrafanaEvidence: 'data-testid ac-send-evidence',
+    gitopsProvider: 'data-testid ac-gitops-provider',
+    gitopsOwner: 'data-testid ac-gitops-owner',
+    gitopsRepo: 'data-testid ac-gitops-repo',
+    gitopsBaseBranch: 'data-testid ac-gitops-base-branch',
+    gitopsApiUrl: 'data-testid ac-gitops-api-url',
+    gitopsPrToken: 'data-testid ac-gitops-pr-token',
+    gitopsStatus: 'data-testid ac-gitops-status',
   },
   dotai: {
     container: 'data-testid dotai-container',
