@@ -98,7 +98,6 @@ func viewerPluginContext() backend.PluginContext {
 	}
 }
 
-
 func TestMethodNotAllowed(t *testing.T) {
 	inst, err := NewApp(context.Background(), backend.AppInstanceSettings{})
 	if err != nil {
@@ -116,6 +115,7 @@ func TestMethodNotAllowed(t *testing.T) {
 		{"health", http.MethodPost},
 		{"health", http.MethodPut},
 		{"test-connection", http.MethodGet},
+		{"gitops-status", http.MethodPost},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -675,9 +675,7 @@ func TestTestConnection(t *testing.T) {
 		}
 	})
 
-
 }
-
 
 func TestProxyTools(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1633,7 +1631,6 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		}
 	})
 
-
 	t.Run("query_allowlists_intent_only", func(t *testing.T) {
 		gotPath, gotBody = "", nil
 		payload := []byte(`{"intent":"list pods","execute":true,"mode":"execute"}`)
@@ -1674,8 +1671,6 @@ func TestRemediateAnalysisOnly(t *testing.T) {
 		}
 	})
 }
-
-
 
 func TestCheckHealth(t *testing.T) {
 	t.Run("unconfigured", func(t *testing.T) {
@@ -2170,7 +2165,6 @@ func TestAskLogDisabledByDefault(t *testing.T) {
 	}
 }
 
-
 func TestAppendAskLogRotatesAtMaxSize(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "dotai-ask.log")
@@ -2490,4 +2484,3 @@ func TestAskLogUserAttribution(t *testing.T) {
 		}
 	})
 }
-

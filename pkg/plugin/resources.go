@@ -177,6 +177,7 @@ func askBodyPreview(body []byte) string {
 	}
 	for _, k := range []string{
 		"apiKey", "apikey", "api_key",
+		"gitopsPrToken", "gitopsprtoken",
 		"authorization", "Authorization",
 		"token", "authToken", "password", "secret",
 		"hop", "hops", "current_empty", "first_hop", "branch",
@@ -321,8 +322,6 @@ func appendAskLog(ctx context.Context, tool string, body []byte, status int, sum
 	defer func() { _ = f.Close() }()
 	_, _ = f.Write(line)
 }
-
-
 
 // handleHealth is the plugin resource health probe.
 // When configured, it calls dot-ai version (same path as Test connection).
@@ -849,4 +848,5 @@ func (a *App) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/test-connection", a.handleTestConnection)
 	mux.HandleFunc("/query", a.handleQuery)
 	mux.HandleFunc("/remediate", a.handleRemediate)
+	mux.HandleFunc("/gitops-status", a.handleGitOpsStatus)
 }

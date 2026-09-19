@@ -11,7 +11,29 @@ export type AppPluginSettings = {
   debugLog?: boolean;
   showContext?: boolean;
   sendGrafanaEvidence?: boolean;
+  gitopsProvider?: string;
+  gitopsOwner?: string;
+  gitopsRepo?: string;
+  gitopsBaseBranch?: string;
+  gitopsApiUrl?: string;
 };
+
+export type GitopsJsonData = {
+  gitopsProvider: string;
+  gitopsOwner: string;
+  gitopsRepo: string;
+  gitopsBaseBranch: string;
+  gitopsApiUrl: string;
+};
+
+/** Empty GitOps keys persisted on save so clearing a field actually clears it. */
+export const emptyGitopsJsonData = (): GitopsJsonData => ({
+  gitopsProvider: '',
+  gitopsOwner: '',
+  gitopsRepo: '',
+  gitopsBaseBranch: '',
+  gitopsApiUrl: '',
+});
 
 type State = {
   apiUrl: string;
@@ -20,7 +42,49 @@ type State = {
   debugLog: boolean;
   showContext: boolean;
   sendGrafanaEvidence: boolean;
+  gitopsOwner: string;
+  gitopsRepo: string;
+  gitopsBaseBranch: string;
+  gitopsApiUrl: string;
+  gitopsPrToken: string;
+  isGitopsPrTokenSet: boolean;
 };
+
+function persistGitopsJson(state: State): GitopsJsonData {
+  const hasGitops = Boolean(
+    state.gitopsOwner || state.gitopsRepo || state.gitopsApiUrl || state.gitopsPrToken || state.isGitopsPrTokenSet
+  );
+  if (!hasGitops) {
+    return emptyGitopsJsonData();
+  }
+  return {
+    gitopsProvider: 'github',
+    gitopsOwner: state.gitopsOwner,
+    gitopsRepo: state.gitopsRepo,
+    gitopsBaseBranch: state.gitopsBaseBranch || 'main',
+    gitopsApiUrl: state.gitopsApiUrl,
+  };
+}
+
+function gitopsStatusCopy(state: State): string {
+  const tokenPresent = Boolean(state.isGitopsPrTokenSet || state.gitopsPrToken);
+  if (!state.gitopsOwner && !state.gitopsRepo && !tokenPresent) {
+    return 'GitOps PR execute is off until owner, repo, and PR-create token are set.';
+  }
+  if (state.gitopsPrToken && state.apiKey && state.gitopsPrToken === state.apiKey) {
+    return 'PR-create token must not be the analysis token. Execute stays off.';
+  }
+  if (!state.gitopsOwner) {
+    return 'GitOps PR execute is off: missing owner.';
+  }
+  if (!state.gitopsRepo) {
+    return 'GitOps PR execute is off: missing repo.';
+  }
+  if (!tokenPresent) {
+    return 'GitOps PR execute is off: missing PR-create token.';
+  }
+  return 'GitOps credentials are set. PR create is not enabled in this version (M3). Query and Remediate still use the analysis token only.';
+}
 
 type TestStatus =
   | { kind: 'idle' }
@@ -97,6 +161,12 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
     debugLog: Boolean(jsonData?.debugLog),
     showContext: jsonData?.showContext !== false,
     sendGrafanaEvidence: jsonData?.sendGrafanaEvidence !== false,
+    gitopsOwner: jsonData?.gitopsOwner || '',
+    gitopsRepo: jsonData?.gitopsRepo || '',
+    gitopsBaseBranch: jsonData?.gitopsBaseBranch || '',
+    gitopsApiUrl: jsonData?.gitopsApiUrl || '',
+    gitopsPrToken: '',
+    isGitopsPrTokenSet: Boolean(secureJsonFields?.gitopsPrToken),
   });
   const [testStatus, setTestStatus] = useState<TestStatus>({ kind: 'idle' });
 
@@ -109,6 +179,24 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
       apiKey: '',
       isApiKeySet: false,
     });
+
+  const onResetGitopsPrToken = () =>
+    setState({
+      ...state,
+      gitopsPrToken: '',
+      isGitopsPrTokenSet: false,
+    });
+
+  const buildSecureJsonData = (): { apiKey?: string; gitopsPrToken?: string } | undefined => {
+    const secure: { apiKey?: string; gitopsPrToken?: string } = {};
+    if (!state.isApiKeySet) {
+      secure.apiKey = state.apiKey;
+    }
+    if (!state.isGitopsPrTokenSet && state.gitopsPrToken) {
+      secure.gitopsPrToken = state.gitopsPrToken;
+    }
+    return Object.keys(secure).length > 0 ? secure : undefined;
+  };
 
   const onChange = (event: ChangeEvent<HTMLInputElement>) => {
     setState({
@@ -131,14 +219,11 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
         debugLog: state.debugLog,
         showContext: state.showContext,
         sendGrafanaEvidence: state.sendGrafanaEvidence,
+        ...persistGitopsJson(state),
       },
-      // This cannot be queried later by the frontend.
-      // We don't want to override it in case it was set previously and left untouched now.
-      secureJsonData: state.isApiKeySet
-        ? undefined
-        : {
-            apiKey: state.apiKey,
-          },
+      // Secrets cannot be queried later by the frontend.
+      // Omit a key when it was set previously and left untouched.
+      secureJsonData: buildSecureJsonData(),
     });
   };
 
@@ -290,6 +375,94 @@ const AppConfig = ({ plugin }: AppConfigProps) => {
             {testStatus.kind === 'loading' ? 'Testing…' : 'Test connection'}
           </Button>
         </div>
+      </FieldSet>
+
+      <FieldSet label="GitOps PR credentials">
+        <p className={s.colorWeak}>
+          Optional. Query and Remediate keep using the no-apply analysis token and work when these
+          fields are empty. The PR-create token is stored separately and is not used to call
+          dot-ai. Execute stays off until owner, repo, and a distinct PR-create token are set. This
+          version does not open pull requests yet.
+        </p>
+        <Alert title="GitOps execute" severity="info" className={s.marginTop} data-testid={testIds.appConfig.gitopsStatus}>
+          {gitopsStatusCopy(state)}
+        </Alert>
+        <Field label="Provider" description="GitHub only in this version (GitLab is undecided).">
+          <Input
+            width={60}
+            id="config-gitops-provider"
+            data-testid={testIds.appConfig.gitopsProvider}
+            name="gitopsProvider"
+            value="github"
+            disabled
+            readOnly
+          />
+        </Field>
+        <Field label="Owner" description="GitHub org or user that owns the GitOps repo." className={s.marginTop}>
+          <Input
+            width={60}
+            id="config-gitops-owner"
+            data-testid={testIds.appConfig.gitopsOwner}
+            name="gitopsOwner"
+            value={state.gitopsOwner}
+            placeholder="acme"
+            onChange={onChange}
+          />
+        </Field>
+        <Field label="Repository" description="GitOps repository name (not owner/repo combined)." className={s.marginTop}>
+          <Input
+            width={60}
+            id="config-gitops-repo"
+            data-testid={testIds.appConfig.gitopsRepo}
+            name="gitopsRepo"
+            value={state.gitopsRepo}
+            placeholder="gitops-prod"
+            onChange={onChange}
+          />
+        </Field>
+        <Field label="Base branch" description="Branch PRs will target. Defaults to main when other GitOps fields are set." className={s.marginTop}>
+          <Input
+            width={60}
+            id="config-gitops-base-branch"
+            data-testid={testIds.appConfig.gitopsBaseBranch}
+            name="gitopsBaseBranch"
+            value={state.gitopsBaseBranch}
+            placeholder="main"
+            onChange={onChange}
+          />
+        </Field>
+        <Field
+          label="GitHub API URL"
+          description="Leave empty for api.github.com. Reserved for GitHub Enterprise (used when PR create lands)."
+          className={s.marginTop}
+        >
+          <Input
+            width={60}
+            id="config-gitops-api-url"
+            data-testid={testIds.appConfig.gitopsApiUrl}
+            name="gitopsApiUrl"
+            value={state.gitopsApiUrl}
+            placeholder="https://api.github.com"
+            onChange={onChange}
+          />
+        </Field>
+        <Field
+          label="PR-create token"
+          description="GitHub token with contents and pull-requests write on the GitOps repo only. Must not be the analysis token. Stored encrypted. Unused until PR create is implemented."
+          className={s.marginTop}
+        >
+          <SecretInput
+            width={60}
+            id="config-gitops-pr-token"
+            data-testid={testIds.appConfig.gitopsPrToken}
+            name="gitopsPrToken"
+            value={state.gitopsPrToken}
+            isConfigured={state.isGitopsPrTokenSet}
+            placeholder="GitHub PR-create token"
+            onChange={onChange}
+            onReset={onResetGitopsPrToken}
+          />
+        </Field>
       </FieldSet>
     </form>
   );

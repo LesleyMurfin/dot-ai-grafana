@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PluginType } from '@grafana/data';
 import { getBackendSrv } from '@grafana/runtime';
 import { of } from 'rxjs';
-import AppConfig, { AppConfigProps } from './AppConfig';
+import AppConfig, { AppConfigProps, emptyGitopsJsonData } from './AppConfig';
 import { testIds } from 'components/testIds';
 
 jest.mock('@grafana/runtime', () => ({
@@ -102,8 +102,15 @@ describe('Components/AppConfig', () => {
     render(<AppConfig plugin={plugin} query={props.query} />);
 
     expect(screen.queryByRole('group', { name: /dot-ai api settings/i })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: /gitops pr credentials/i })).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.apiKey)).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.apiUrl)).toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.appConfig.gitopsOwner)).toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.appConfig.gitopsRepo)).toBeInTheDocument();
+    expect(screen.queryByTestId(testIds.appConfig.gitopsPrToken)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.appConfig.gitopsStatus)).toHaveTextContent(
+      'GitOps PR execute is off until owner, repo, and PR-create token are set.'
+    );
     expect(screen.queryByRole('button', { name: /save api settings/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /test connection/i })).toBeInTheDocument();
     expect(screen.queryByTestId(testIds.appConfig.testConnection)).toBeInTheDocument();
@@ -220,6 +227,7 @@ describe('Components/AppConfig', () => {
       debugLog: false,
       showContext: true,
       sendGrafanaEvidence: true,
+      ...emptyGitopsJsonData(),
     });
     expect(call![0].data.secureJsonData).toBeUndefined();
 
@@ -298,6 +306,7 @@ describe('Components/AppConfig', () => {
       debugLog: true,
       showContext: false,
       sendGrafanaEvidence: true,
+      ...emptyGitopsJsonData(),
     });
   });
 
@@ -333,6 +342,7 @@ describe('Components/AppConfig', () => {
       debugLog: false,
       showContext: true,
       sendGrafanaEvidence: false,
+      ...emptyGitopsJsonData(),
     });
   });
 
@@ -356,6 +366,118 @@ describe('Components/AppConfig', () => {
     expect(description).toMatch(/Map of resource names/);
     expect(description).toMatch(
       /condensed Prior block \(up to 240 chars of earlier questions and answers, where the question side can also carry follow-up instructions this page adds automatically\) are still sent/
+    );
+  });
+
+  test('submit persists GitOps owner and repo without requiring a PR token', async () => {
+    mockFetch.mockReturnValue(of({ data: {} }));
+    stubLocationReload();
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        id: 'sample-app',
+        enabled: true,
+        pinned: false,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsOwner), {
+      target: { value: 'acme' },
+    });
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsRepo), {
+      target: { value: 'gitops-prod' },
+    });
+    fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
+    expect(call).toBeDefined();
+    expect(call![0].data.jsonData).toEqual({
+      apiUrl: 'http://dot-ai:3456',
+      debugLog: false,
+      showContext: true,
+      sendGrafanaEvidence: true,
+      gitopsProvider: 'github',
+      gitopsOwner: 'acme',
+      gitopsRepo: 'gitops-prod',
+      gitopsBaseBranch: 'main',
+      gitopsApiUrl: '',
+    });
+    expect(call![0].data.secureJsonData).toBeUndefined();
+    expect(screen.getByTestId(testIds.appConfig.gitopsStatus)).toHaveTextContent(
+      'GitOps PR execute is off: missing PR-create token.'
+    );
+  });
+
+  test('submit sends a newly typed PR-create token without clobbering a stored analysis token', async () => {
+    mockFetch.mockReturnValue(of({ data: {} }));
+    stubLocationReload();
+
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        id: 'sample-app',
+        enabled: true,
+        pinned: false,
+        jsonData: { apiUrl: 'http://dot-ai:3456', gitopsOwner: 'acme', gitopsRepo: 'gitops-prod' },
+        secureJsonFields: { apiKey: true },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsPrToken), {
+      target: { value: 'github-pr-token' },
+    });
+    fireEvent.click(screen.getByTestId(testIds.appConfig.submit));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled();
+    });
+
+    const call = mockFetch.mock.calls.find(([opts]) => opts.url === '/api/plugins/sample-app/settings');
+    expect(call).toBeDefined();
+    expect(call![0].data.secureJsonData).toEqual({ gitopsPrToken: 'github-pr-token' });
+    expect(call![0].data.secureJsonData.apiKey).toBeUndefined();
+  });
+
+  test('status warns when the typed PR-create token matches the typed analysis token', () => {
+    const plugin = {
+      meta: {
+        ...props.plugin.meta,
+        enabled: true,
+        jsonData: { apiUrl: 'http://dot-ai:3456' },
+      },
+    };
+
+    // @ts-ignore
+    render(<AppConfig plugin={plugin} query={props.query} />);
+
+    fireEvent.change(screen.getByTestId(testIds.appConfig.apiKey), {
+      target: { value: 'same-secret' },
+    });
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsOwner), {
+      target: { value: 'acme' },
+    });
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsRepo), {
+      target: { value: 'gitops-prod' },
+    });
+    fireEvent.change(screen.getByTestId(testIds.appConfig.gitopsPrToken), {
+      target: { value: 'same-secret' },
+    });
+
+    expect(screen.getByTestId(testIds.appConfig.gitopsStatus)).toHaveTextContent(
+      'PR-create token must not be the analysis token. Execute stays off.'
     );
   });
 });
