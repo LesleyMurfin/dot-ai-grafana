@@ -13,7 +13,7 @@ import {
   PodNamespaceTarget,
   StackContextResult,
 } from './grafanaStack';
-import { DrilldownLink, isShowMeOnly } from './grafanaExplore';
+import { DrilldownLink, drilldownsServeShowMe, isShowMeOnly, showMeNoun } from './grafanaExplore';
 
 /** Max dot-ai POSTs per user Ask (ask-log lines). Grafana DS reads do not count. */
 export const MAX_ASK_HOPS = 3;
@@ -472,41 +472,48 @@ export async function runAskOrchestrator(args: {
       if (stackLoadError) {
         return finish(false, `Grafana stack read failed: ${stackLoadError}`);
       }
-      // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and no
-      // drilldown link was rebuilt: there is no Current to read and no Map link to open.
-      if (stackEmpty && drilldowns.length === 0) {
-        return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
+      // #66 option 1: alerts/dashboards are accepted phrases, but only skip the engine
+      // when Map already has a link for that noun. Empty dashboard UIDs (no firing-alert
+      // annotations) must POST rather than 0-hop into unrelated logs/metrics links.
+      const noun = showMeNoun(question);
+      const showMeUnservable =
+        (noun === 'alerts' || noun === 'dashboards') && !drilldownsServeShowMe(noun, drilldowns);
+      if (!showMeUnservable) {
+        // Read succeeded but carries nothing (no Loki datasource, or no lines in 15m) and no
+        // drilldown link was rebuilt: there is no Current to read and no Map link to open.
+        if (stackEmpty && drilldowns.length === 0) {
+          return finish(false, 'No Grafana evidence in the last 15m: nothing to show for this target.');
+        }
+        // Say only what is actually on screen. Two independent things can be present or
+        // absent here: evidence in Current, and links in Map. The guard above rules out
+        // "neither", which leaves three cases — and `stackEmpty` implies links exist, since
+        // otherwise the guard would have returned.
+        //
+        // Evidence with no matching link is still reachable for logs/metrics/traces when
+        // those datasources are missing. Alerts now have `/alerting/list`. Do not send
+        // the user to a Map panel that has no links in it.
+        const hasLinks = drilldowns.length > 0;
+        lastSummary = stackEmpty
+          ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
+          : hasLinks
+            ? 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.'
+            : 'Grafana evidence is in Current. No Explore or Drilldown link for this target — read Current.';
+        history = appendHistory(history, question, lastSummary);
+        return {
+          ok: true,
+          summary: lastSummary,
+          thread: {
+            current: stackSnapshot || args.thread.current,
+            map,
+            history,
+            drilldowns,
+          },
+          firstHop,
+          hops: 0,
+          currentEmpty,
+          lastPacked: '',
+        };
       }
-      // Say only what is actually on screen. Two independent things can be present or
-      // absent here: evidence in Current, and links in Map. The guard above rules out
-      // "neither", which leaves three cases — and `stackEmpty` implies links exist, since
-      // otherwise the guard would have returned.
-      //
-      // Evidence with no link is reachable: alert lines make the stack non-empty but
-      // `buildDrilldownLinks` emits no alerts link (#66), so a target whose only evidence
-      // is a firing alert, on a Grafana with no Loki/Prometheus/Tempo datasource, has
-      // Current to read and nothing to open. Do not send that user to Map.
-      const hasLinks = drilldowns.length > 0;
-      lastSummary = stackEmpty
-        ? 'No Grafana evidence in Current for this target. Use Map links to open Explore or Drilldown and look yourself.'
-        : hasLinks
-          ? 'Grafana evidence is in Current. Use Map links to open Explore or Drilldown.'
-          : 'Grafana evidence is in Current. No Explore or Drilldown link for this target — read Current.';
-      history = appendHistory(history, question, lastSummary);
-      return {
-        ok: true,
-        summary: lastSummary,
-        thread: {
-          current: stackSnapshot || args.thread.current,
-          map,
-          history,
-          drilldowns,
-        },
-        firstHop,
-        hops: 0,
-        currentEmpty,
-        lastPacked: '',
-      };
     }
     const r1 = await callDotAI(question, 'initial');
     if (!r1.ok) {

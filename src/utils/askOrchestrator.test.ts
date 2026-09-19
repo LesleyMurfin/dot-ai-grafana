@@ -847,6 +847,99 @@ describe('runAskOrchestrator', () => {
    * Loki/Prometheus/Tempo datasource there is Current to read and nothing to open.
    * The summary must not send that user to a Map panel that has no links in it.
    */
+  test('show me the alerts skips dot-ai when Map has an alerting list link', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Alertmanager:\nalert KubePodCrashLooping firing',
+        alertLines: ['alert KubePodCrashLooping firing'],
+        drilldowns: [{ id: 'alerting-list', label: 'Alerts', href: '/alerting/list' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the alerts',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([{ id: 'alerting-list', label: 'Alerts', href: '/alerting/list' }]);
+    expect(result.summary).toMatch(/Map links/i);
+  });
+
+  test('show me the dashboards skips dot-ai when firing-alert UIDs produced dash links', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Dashboards (from firing alerts):\n/d/abc12def',
+        drilldowns: [{ id: 'dash-abc12def', label: 'Dashboard abc12def', href: '/d/abc12def' }],
+      })
+    );
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the dashboards',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBe(0);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(result.thread.drilldowns).toEqual([
+      { id: 'dash-abc12def', label: 'Dashboard abc12def', href: '/d/abc12def' },
+    ]);
+  });
+
+  test('show me the dashboards POSTs when no dash links exist (does not skip into unrelated Map)', async () => {
+    const fetchStack = jest.fn(async () =>
+      stackResult({
+        current: 'Loki last 15m:\nboom',
+        logLines: ['boom'],
+        drilldowns: [
+          { id: 'explore-logs', label: 'Explore logs', href: '/explore?q=1' },
+          { id: 'alerting-list', label: 'Alerts', href: '/alerting/list' },
+        ],
+      })
+    );
+    const callTool = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      summary: 'no dashboards linked on firing alerts',
+      raw: {},
+    }));
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me dashboards',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.hops).toBeGreaterThan(0);
+    expect(callTool).toHaveBeenCalled();
+    expect(result.summary).toMatch(/no dashboards linked/i);
+  });
+
+  test('show me the alerts still errors when Grafana evidence is disabled', async () => {
+    const fetchStack = jest.fn();
+    const callTool = jest.fn();
+    const result = await runAskOrchestrator({
+      tool: 'query',
+      question: 'show me the alerts',
+      thread: emptyThread(),
+      fetchStack,
+      callTool,
+      skipStack: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/Send Grafana evidence/i);
+    expect(fetchStack).not.toHaveBeenCalled();
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
   test('show me the logs does not offer Map links when evidence has no drilldown', async () => {
     const fetchStack = jest.fn(async () =>
       stackResult({

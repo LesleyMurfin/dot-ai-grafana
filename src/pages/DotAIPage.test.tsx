@@ -770,6 +770,28 @@ describe('Pages/DotAIPage', () => {
     expect(screen.getByTestId(testIds.dotai.current)).toHaveTextContent('boom');
   });
 
+  test('show me the alerts skips POST and renders Alerting list link', async () => {
+    mockFetchStackContext.mockResolvedValue({
+      ...emptyStack,
+      current: 'Alertmanager:\nalert KubePodCrashLooping firing',
+      mapHint: 'Alertmanager',
+      alertLines: ['alert KubePodCrashLooping firing'],
+      currentEmpty: false,
+      drilldowns: [{ id: 'alerting-list', label: 'Alerts', href: '/alerting/list' }],
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show me the alerts');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.drilldown)).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Alerts' });
+    expect(link).toHaveAttribute('href', '/alerting/list');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(mockCallDotAITool).not.toHaveBeenCalled();
+  });
+
   /**
    * Consent runs both ways: with "Send Grafana evidence" off the plugin must not read a
    * datasource — and must not then claim it did. A show-me Ask has nothing to point at in
