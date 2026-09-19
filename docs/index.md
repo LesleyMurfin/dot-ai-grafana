@@ -37,7 +37,7 @@ On Query, the page reads the configured Loki, Prometheus, Tempo, and Alertmanage
 
 **Question routing.** Observability wording (`logs`, `metrics`, `traces`, `alerts`, `top issues`, `crash`, `failing`, `restarts`) — and anything the plugin does not recognise as inventory wording, which is the default — reads the Grafana stack first, then asks the engine with that evidence attached. Inventory wording (`list namespaces`, `show pods`) goes straight to the engine. Either way, every Ask makes at least one engine call.
 
-While an Ask is in flight, **Cancel** aborts it. Failures show an error Alert with distinct titles (timed out, authentication failed, permission denied, not found, unreachable, cancelled); **Retry** re-runs the same intent text.
+While an Ask is in flight, the spinner names the current stage (Grafana evidence read, hop 1–3, or analysis-only Remediate) and elapsed time; **Cancel** aborts it. Failures show an error Alert with distinct titles (timed out, authentication failed, permission denied, not found, unreachable, cancelled); **Retry** re-runs the same intent text.
 
 [Query tool documentation](https://devopstoolkit.ai/docs/ai-engine/tools/query)
 

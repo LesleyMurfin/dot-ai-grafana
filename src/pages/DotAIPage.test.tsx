@@ -56,6 +56,10 @@ describe('Pages/DotAIPage', () => {
     mockFetchStackContext.mockResolvedValue({ ...emptyStack });
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
 
   test('renders intent field and submit button', () => {
     render(<DotAIPage />);
@@ -372,6 +376,9 @@ describe('Pages/DotAIPage', () => {
     clickSubmit();
 
     expect(await screen.findByTestId(testIds.dotai.loading)).toBeInTheDocument();
+    expect(screen.getByTestId(testIds.dotai.progressStage)).toHaveTextContent('Asking dot-ai (hop 1 of 3)…');
+    expect(screen.getByTestId(testIds.dotai.elapsed)).toHaveTextContent('0:00');
+    expect(screen.queryByText('Waiting for dot-ai…')).not.toBeInTheDocument();
     expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
     expect(screen.getByTestId(testIds.dotai.intent)).toBeDisabled();
     // Grafana Select maps disabled→isDisabled; react-select drops combobox role when disabled.
@@ -395,6 +402,123 @@ describe('Pages/DotAIPage', () => {
     const toolInputAfter = document.getElementById('dotai-tool') as HTMLInputElement | null;
     expect(toolInputAfter).not.toBeNull();
     expect(toolInputAfter).not.toBeDisabled();
+  });
+
+  test('grafana-first Ask names the evidence read before hop 1', async () => {
+    let resolveStack!: (value: typeof emptyStack) => void;
+    mockFetchStackContext.mockReturnValue(
+      new Promise((r) => {
+        resolveStack = r;
+      })
+    );
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'ok',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('show failing pods');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.progressStage)).toHaveTextContent(
+      'Reading Grafana evidence…'
+    );
+
+    await act(async () => {
+      resolveStack({ ...emptyStack });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
+  });
+
+  test('unscoped follow-up hop replaces the spinner copy', async () => {
+    let resolveHop2!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    mockCallDotAITool
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        summary: 'error boom in pod-a',
+        raw: {},
+      })
+      .mockReturnValueOnce(
+        new Promise((r) => {
+          resolveHop2 = r;
+        })
+      );
+
+    render(<DotAIPage />);
+    typeIntent('top issues');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.progressStage)).toHaveTextContent(
+      'Searching other clusters (hop 2 of 3)…'
+    );
+
+    await act(async () => {
+      resolveHop2({ ok: true, status: 200, summary: 'error boom across clusters', raw: {} });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
+  });
+
+  test('remediate spinner says analyzing, not a query hop', async () => {
+    let resolve!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    mockCallDotAITool.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+
+    render(<DotAIPage />);
+    await selectTool('Remediate (analysis only)');
+    typeIntent('checkout CrashLoop');
+    clickSubmit();
+
+    expect(await screen.findByTestId(testIds.dotai.progressStage)).toHaveTextContent('Analyzing issue…');
+    expect(screen.queryByText(/hop \d+ of/)).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolve({ ok: true, status: 200, summary: 'OOM', raw: {} });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
+  });
+
+  test('elapsed timer ticks while an Ask is in flight', async () => {
+    jest.useFakeTimers();
+    let resolve!: (value: { ok: boolean; status: number; summary: string; raw: unknown }) => void;
+    mockCallDotAITool.mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+
+    render(<DotAIPage />);
+    typeIntent('show nodes');
+    clickSubmit();
+
+    expect(screen.getByTestId(testIds.dotai.elapsed)).toHaveTextContent('0:00');
+
+    act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(screen.getByTestId(testIds.dotai.elapsed)).toHaveTextContent('0:05');
+
+    jest.useRealTimers();
+    await act(async () => {
+      resolve({ ok: true, status: 200, summary: 'ok', raw: {} });
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId(testIds.dotai.loading)).not.toBeInTheDocument();
+    });
   });
 
   test('Enter in intent box submits when text is present', async () => {

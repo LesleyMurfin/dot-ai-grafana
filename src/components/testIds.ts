@@ -17,6 +17,8 @@ export const testIds = {
     answerMarkdown: 'data-testid dotai-answer-markdown',
     error: 'data-testid dotai-error',
     loading: 'data-testid dotai-loading',
+    progressStage: 'data-testid dotai-progress-stage',
+    elapsed: 'data-testid dotai-elapsed',
     tool: 'data-testid dotai-tool',
     history: 'data-testid dotai-history',
     current: 'data-testid dotai-current',

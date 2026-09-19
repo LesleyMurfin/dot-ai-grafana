@@ -23,6 +23,46 @@ export type FirstHop = 'grafana' | 'dot-ai';
 /** Re-exported so callers get the branch union from the orchestrator's own surface. */
 export type { AskBranch };
 
+/**
+ * In-flight stage the page can name. `AskBranch` is a hop that is on the wire;
+ * `reading-stack` is a Grafana DS read (not a hop); `analyzing` is Remediate.
+ */
+export type AskProgressStage = AskBranch | 'reading-stack' | 'analyzing';
+
+export type AskProgress = {
+  stage: AskProgressStage;
+  hop: number;
+  hops: number;
+};
+
+/** Operator-facing copy for the in-flight spinner. Keep in lockstep with stage. */
+export function askProgressLabel(progress: AskProgress): string {
+  switch (progress.stage) {
+    case 'reading-stack':
+      return 'Reading Grafana evidence…';
+    case 'analyzing':
+      return 'Analyzing issue…';
+    case 'initial':
+      return `Asking dot-ai (hop ${progress.hop} of ${progress.hops})…`;
+    case 'across':
+      return `Searching other clusters (hop ${progress.hop} of ${progress.hops})…`;
+    case 'conflict':
+      return `Reconciling with Grafana evidence (hop ${progress.hop} of ${progress.hops})…`;
+    case 'hedge':
+      return `Getting a committed answer (hop ${progress.hop} of ${progress.hops})…`;
+    case 'refine':
+      return `Refining with Grafana evidence (hop ${progress.hop} of ${progress.hops})…`;
+  }
+}
+
+/** Elapsed Ask time as `m:ss`. Non-finite / negative values render as `0:00`. */
+export function formatAskElapsed(seconds: number): string {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${minutes}:${rest.toString().padStart(2, '0')}`;
+}
+
 export type AskMeta = {
   hop: number;
   hops: number;
@@ -274,11 +314,15 @@ export async function runAskOrchestrator(args: {
   callTool?: (tool: DotAITool, text: string, meta?: AskMeta) => Promise<ToolCallResult>;
   signal?: AbortSignal;
   skipStack?: boolean;
+  onProgress?: (progress: AskProgress) => void;
 }): Promise<OrchestratorResult> {
   const question = args.question.trim();
   const fetchStack = args.fetchStack ?? fetchStackContext;
   const callTool = args.callTool ?? ((t, text, meta) => callDotAITool(t, text, meta, args.signal));
   const tool = args.tool;
+  const report = (progress: AskProgress) => {
+    args.onProgress?.(progress);
+  };
 
   const aborted = () => Boolean(args.signal?.aborted);
 
@@ -309,6 +353,7 @@ export async function runAskOrchestrator(args: {
       first_hop: 'dot-ai',
       branch: 'initial',
     };
+    report({ stage: 'analyzing', hop: 1, hops: 1 });
     const result = await callTool(tool, packed, meta);
     if (!result.ok) {
       return {
@@ -361,6 +406,7 @@ export async function runAskOrchestrator(args: {
     if (args.skipStack) {
       return;
     }
+    report({ stage: 'reading-stack', hop: hops, hops: MAX_ASK_HOPS });
     try {
       const stack = await fetchStack(q);
       stackSnapshot = stack.current;
@@ -404,6 +450,7 @@ export async function runAskOrchestrator(args: {
       };
     }
     hops += 1;
+    report({ stage: branch, hop: hops, hops: MAX_ASK_HOPS });
     const packed = buildRequestText({
       tool: 'query',
       current: stackSnapshot || args.thread.current,

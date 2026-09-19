@@ -100,6 +100,10 @@ Subtests listed for navigation; the contract count is the 13 top-level funcs.
 - error path shows error message without History rewrite; stack Current may remain
 - timeout error renders the 120s limit line under an Ask timed out title
 - loading state shows spinner and disables double-submit
+- grafana-first Ask names the evidence read before hop 1
+- unscoped follow-up hop replaces the spinner copy
+- remediate spinner says analyzing, not a query hop
+- elapsed timer ticks while an Ask is in flight
 - Enter in intent box submits when text is present
 - Shift+Enter in intent box does not submit
 - Enter does not submit while loading
@@ -107,11 +111,12 @@ Subtests listed for navigation; the contract count is the 13 top-level funcs.
 - Analyze this switches to Remediate and fills box from Current
 - Clear thread resets active tool Current and History only
 
-**`src/utils/askOrchestrator.test.ts`** — 3 describes, 19 tests
+**`src/utils/askOrchestrator.test.ts`** — 4 describes (counts drift; this list is the names)
 
 - describe `classifyFirstHop`: observability language → grafana; inventory language → dot-ai; default → grafana
 - describe `isUnscopedQuestion / answerConflictsWithCurrent`: top issues is unscoped; named pod is not; denial vs Loki evidence is a conflict; live ask-log hop-1 denials are conflicts (regression: TEST window 20:42:55Z, hops=1); currentEvidenceSources reports only blocks with real lines; soft "not accessible" over real evidence is a hedge, a committed answer is not; quoted upstream "HTTP 404 Not Found" is not a denial of Current
-- describe `runAskOrchestrator`: top issues triggers stack queries and a second across-clusters hop; Current vs answer conflict forces hop 2 and keeps Grafana evidence packed; conflict hop 2 prompt names the Current datasources and target, and forbids denial; hop 2 that still hedges on the conflict forces a third hop; hop 2 that answers from Current does not spend a third hop; unscoped hop 2 that only quotes a 404 does not force a third hop; empty stack refine does not exceed hop cap; hop loop hard-stops at MAX_ASK_HOPS; dot-ai-first inventory skips stack when healthy list; remediate is single analysis hop
+- describe `askProgressLabel / formatAskElapsed`: names each in-flight stage without inventing hops; formatAskElapsed is m:ss and fail-closed on junk
+- describe `runAskOrchestrator`: top issues triggers stack queries and a second across-clusters hop; Current vs answer conflict forces hop 2 and keeps Grafana evidence packed; conflict hop 2 prompt names the Current datasources and target, and forbids denial; hop 2 that still hedges on the conflict forces a third hop; hop 2 that answers from Current does not spend a third hop; unscoped hop 2 that only quotes a 404 does not force a third hop; empty stack refine does not exceed hop cap; hop loop hard-stops at MAX_ASK_HOPS; dot-ai-first inventory skips stack when healthy list; remediate is single analysis hop; reports reading-stack then each hop branch (unscoped across); skipStack does not report a Grafana evidence read
 
 **`src/utils/dotaiApi.test.ts`** — describe `callDotAITool` (11 tests)
 
