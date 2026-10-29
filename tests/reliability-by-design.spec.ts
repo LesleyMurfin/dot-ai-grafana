@@ -167,6 +167,8 @@ test.describe('Reliability by design — transport-level upstream failure', () =
     // #58 / #44 P-privacy: the 502 envelope must not echo the configured
     // upstream scheme, host, or port. Unit equivalent:
     // TestTransportErrorDoesNotLeakUpstreamURL (pkg/plugin/resources_test.go).
+    // Denylist must stay non-empty — an empty spread makes this pin hollow.
+    expect(UPSTREAM_URL_LEAK_NEEDLES.length).toBeGreaterThan(0);
     const urlLeak = bodyContainsForbidden(text, ...UPSTREAM_URL_LEAK_NEEDLES);
     expect(urlLeak, `502 envelope must not leak upstream URL pieces: ${text}`).toEqual([]);
 
