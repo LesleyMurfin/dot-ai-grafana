@@ -3,6 +3,7 @@ import {
   PROVISIONED_API_KEY,
   UPSTREAM_INTERNAL_FIELD,
   UPSTREAM_SECRET_MARKER,
+  ackConsent,
   asEnvelope,
   bodyContainsForbidden,
   dialProbe,
@@ -11,6 +12,7 @@ import {
   STUB_BASE_URL,
   stubHealth,
 } from './byDesignHelpers';
+
 import { testIds } from '../src/components/testIds';
 
 /**
@@ -340,6 +342,7 @@ test.describe('Security by design — untrusted markdown answer', () => {
     });
 
     await gotoPage('/');
+    await ackConsent(page);
     await page.getByTestId(testIds.dotai.intent).fill('what is wrong with the api pod');
     await page.getByTestId(testIds.dotai.submit).click();
 

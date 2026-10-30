@@ -97,6 +97,22 @@ describe('progressiveContext', () => {
     expect(text).not.toMatch(/\bYou:/);
   });
 
+  test('buildRequestText redacts Bearer token in Current before pack', () => {
+    const text = buildRequestText({
+      tool: 'query',
+      current: 'Loki last 15m:\nAuthorization Bearer super-secret-token failed',
+      map: 'ns/prod',
+      box: 'why did auth fail?',
+      history: [],
+    });
+
+    expect(text).toContain('[REDACTED]');
+    expect(text).not.toContain('super-secret-token');
+    expect(text).not.toMatch(/\bBearer\s+super-secret-token\b/);
+    expect(text).toContain('why did auth fail?');
+    expect(text.length).toBeLessThanOrEqual(MAX_INTENT_CHARS);
+  });
+
   test('buildRequestText follow-up Prior keeps referent from previous turn', () => {
     const history = appendHistory(
       [],

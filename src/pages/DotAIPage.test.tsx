@@ -46,14 +46,55 @@ function typeIntent(value: string) {
   fireEvent.change(screen.getByTestId(testIds.dotai.intent), { target: { value } });
 }
 
+function ackConsent() {
+  const btn = screen.queryByTestId(testIds.dotai.consentAck);
+  if (btn) {
+    fireEvent.click(btn);
+  }
+}
+
 function clickSubmit() {
+  ackConsent();
   fireEvent.click(screen.getByTestId(testIds.dotai.submit));
 }
+
 
 describe('Pages/DotAIPage', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     mockFetchStackContext.mockResolvedValue({ ...emptyStack });
+  });
+
+
+  test('Ask submit stays disabled until consent is acknowledged', () => {
+    render(<DotAIPage />);
+
+    expect(screen.getByTestId(testIds.dotai.consentAck)).toBeInTheDocument();
+    typeIntent('list pods');
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
+
+    ackConsent();
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeEnabled();
+    // Disclosure stays after ack (button may hide; notice text must remain).
+    expect(screen.getByTestId(testIds.dotai.consent)).toHaveTextContent(/Asks POST/);
+  });
+
+  test('after consent ack, submit runs the Ask', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'pods listed',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('list pods in default');
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
+    ackConsent();
+    fireEvent.click(screen.getByTestId(testIds.dotai.submit));
+
+    expect(await screen.findByTestId(testIds.dotai.response)).toHaveTextContent('pods listed');
+    expect(mockCallDotAITool).toHaveBeenCalled();
   });
 
 
@@ -406,7 +447,9 @@ describe('Pages/DotAIPage', () => {
     });
 
     render(<DotAIPage />);
+    ackConsent();
     typeIntent('list nodes');
+    ackConsent();
 
     fireEvent.keyDown(screen.getByTestId(testIds.dotai.intent), {
       key: 'Enter',
@@ -644,7 +687,8 @@ describe('Pages/DotAIPage', () => {
     expect(notice).toHaveTextContent(
       /the question side can also carry follow-up instructions this page adds automatically/
     );
-    expect(notice).toHaveTextContent(/quote log, metric and alert lines verbatim/);
+    expect(notice).toHaveTextContent(/quote log, metric and alert lines/);
+    expect(notice).toHaveTextContent(/\[REDACTED\]/);
     expect(notice).toHaveTextContent(/The toggle does not cover Prior, Current or Map/);
     expect(notice).toHaveTextContent(/Full History stays in this browser/);
 
@@ -693,8 +737,9 @@ describe('Pages/DotAIPage', () => {
       /the question side can also carry follow-up instructions this page adds automatically/
     );
     expect(notice).toHaveTextContent(
-      /Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too/
+      /Answers quote log, metric and alert lines; credential-shaped substrings/
     );
+    expect(notice).toHaveTextContent(/masked as \[REDACTED\] before POST/);
     expect(notice).toHaveTextContent(/Full History stays in this browser/);
 
     typeIntent('status of pod checkout-api in namespace prod');

@@ -4,6 +4,7 @@ import { testIds } from '../src/components/testIds';
 import { MAX_INTENT_CHARS, MAX_PRIOR_CHARS } from '../src/utils/progressiveContext';
 import {
   type StubIntent,
+  ackConsent,
   asEnvelope,
   isStableEnvelope,
   priorBlockFromPacked,
@@ -126,6 +127,7 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
    * Ask's response is still mounted on the second pass.
    */
   async function askTwice(page: Page, first: string, second: string): Promise<void> {
+    await ackConsent(page);
     for (const text of [first, second]) {
       await page.getByTestId(testIds.dotai.intent).fill(text);
       await page.getByTestId(testIds.dotai.submit).click();
@@ -133,6 +135,7 @@ test.describe('Consent by design — the notice matches what is POSTed', () => {
       await expect(page.getByTestId(testIds.dotai.response)).toBeVisible();
     }
   }
+
 
   function followUp(intents: StubIntent[], marker: string): StubIntent {
     const match = intents.filter((entry) => entry.text.includes(marker));

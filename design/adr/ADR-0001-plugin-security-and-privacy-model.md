@@ -29,7 +29,7 @@ So **cluster log content becomes prompt content**, and **prompt content reaches 
 | Body caps | Request 1 MiB; upstream response 8 MiB | `pkg/plugin/resources.go:671`, `727` |
 | Ask log | Optional (`debugLog`, default off); JSONL on Grafana data path; size rotate 1 MiB → `.1`; preview strips top-level secret **keys** only (not secrets inside log lines); entry had no user/org fields at audit time | `pkg/plugin/app.go:33-54`; `resources.go:60-84`, `132-148`, `236-271` (SecAudit) |
 | Evidence packing | Cluster-wide LogQL when no ns/pod; `textLinesFromFrames` whitespace-collapses only; packed under `Current:` with user text after as `Question:`/`Issue:` | `src/utils/grafanaStack.ts:45-46`, `282-306`; `progressiveContext.ts:97-122` |
-| Evidence opt-out | `sendGrafanaEvidence=false` skips stack fetch; consent banner is informational only | `src/utils/askOrchestrator.ts:356-359`; `src/pages/DotAIPage.tsx:169-176` |
+| Evidence opt-out | `sendGrafanaEvidence=false` skips stack fetch; consent banner always shows egress disclosure and requires one-click **Understood** ack per page mount before Ask (not a legal consent ledger) | `src/utils/askOrchestrator.ts`; `src/pages/DotAIPage.tsx` consent + `consentAck` |
 | UI / route role gate | Configuration page `role: Admin`; tool resource routes require Grafana **Editor+** before any engine proxy call (Decision §1; fail closed if no user) | `src/plugin.json:27-41`; role helpers in `pkg/plugin/resources.go` |
 | Drilldowns | Explore links are UI-only; never POSTed | `src/utils/progressiveContext.ts:14-15` |
 
@@ -92,6 +92,8 @@ Until then, per-user OAuth/Dex forwarding remains **out of v1 scope** (PRD #1 DD
 | **Engine** | Authoritative long-term redaction, retention, and model-provider policy | **Preferred upstream**; plugin must not assume it exists yet (§Open questions) |
 
 **Why client + backend, not client-only:** client-only is earlier (less data on the wire from honest UI use) but weaker (any non-UI caller of the resource API skips it). Backend-only is later (data already left the browser). **Both** for secret-shaped patterns; engine remains the right place for org-wide policy and provider-side guarantees.
+
+**v1 ships client + backend secret-shaped redaction** (shared contract, replacement `[REDACTED]`): TypeScript `src/utils/secretRedact.ts` (`redactSecretShaped`, used by `buildRequestText`) and Go `pkg/plugin/secret_redact.go` (used by `sanitizeQueryBody` / `sanitizeRemediateBody` / `askBodyPreview`). Shapes: Bearer tokens, `api_key`/`apiKey`/`apikey`, `password`/`passwd`/`secret`, PEM blocks, JWTs (`eyJ…`), AWS `AKIA…` key ids, `authorization=`/`:`. Engine redaction remains preferred long-term; these helpers are defense in depth, not a substitute for it.
 
 **Evidence is untrusted input** — see §5 Prompt injection. Redaction is not a substitute for injection hardening.
 
@@ -165,11 +167,11 @@ Minimum audit record for an Ask (ask log when enabled; and any future metrics):
 
 ### 8. Consent
 
-**v1 decision: informational consent is required when evidence is sent; recorded consent is deferred.**
+**v1 decision: egress disclosure is always on; one-click acknowledgment gates Ask; recorded/legal consent is deferred.**
 
-- When `sendGrafanaEvidence` is true, show the banner (`DotAIPage.tsx:169-176`) stating that Grafana datasource facts go to the configured dot-ai server (and may reach that server’s LLM).
-- Banner must remain visible (not a one-click dismiss that is forgotten) **or** be paired with a settings acknowledgement. v1 keeps the always-on info alert; no separate legal “I agree” store.
-- `sendGrafanaEvidence=false` is the operator off-switch (skips fetch and hides banner).
+- Show the banner on every tools page mount stating what each Ask POSTs (and that answers may quote credential-shaped lines until redacted on pack/proxy).
+- **Understood** (`testIds.dotai.consentAck`) must be clicked once per page mount before submit/runAsk/retry/Enter-submit. Disclosure text stays visible after ack; the button may hide. This is **not** a durable legal “I agree” store.
+- `sendGrafanaEvidence=false` skips Grafana datasource fetch; the banner still discloses Prior/Current/Map egress (evidence-off copy).
 - **Deferred:** durable per-user consent ledger, timestamp of acknowledgement, IdP-linked privacy notice version. Revisit if a regulated adopter requires it.
 
 ### 9. Secret echo

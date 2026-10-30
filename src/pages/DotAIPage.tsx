@@ -40,6 +40,8 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   const [responseText, setResponseText] = useState('');
   const [currentOpen, setCurrentOpen] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [consentAcknowledged, setConsentAcknowledged] = useState(false);
+
   const [threads, setThreads] = useState<Threads>({
     query: emptyThread(),
     remediate: emptyThread(),
@@ -55,9 +57,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
   }, [tool]);
 
   const runAsk = async (trimmed: string) => {
-    if (!trimmed) {
+    if (!trimmed || !consentAcknowledged) {
       return;
     }
+
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -153,9 +156,10 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
       return;
     }
     event.preventDefault();
-    if (loading || !intent.trim()) {
+    if (loading || !intent.trim() || !consentAcknowledged) {
       return;
     }
+
     event.currentTarget.form?.requestSubmit();
   };
 
@@ -169,9 +173,24 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           severity="info"
           data-testid={testIds.dotai.consent}
         >
-          {sendGrafanaEvidence
-            ? 'Asks POST to your configured dot-ai server: your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically). Query Asks that need live data replace Current with Grafana datasource facts read at that moment (Loki, Prometheus, Tempo, Alertmanager) instead of sending both; Remediate Asks read no datasource. Answers quote log, metric and alert lines verbatim, so anything credential-shaped in them is sent too. Full History stays in this browser.'
-            : 'Send Grafana evidence is off, so Asks read no datasource. Asks still POST your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically) \u2014 both quote log, metric and alert lines verbatim. The toggle does not cover Prior, Current or Map. Full History stays in this browser.'}
+          <div className={styles.consentBody}>
+            <div>
+              {sendGrafanaEvidence
+                ? 'Asks POST to your configured dot-ai server: your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically). Query Asks that need live data replace Current with Grafana datasource facts read at that moment (Loki, Prometheus, Tempo, Alertmanager) instead of sending both; Remediate Asks read no datasource. Answers quote log, metric and alert lines; credential-shaped substrings (Bearer, apiKey, PEM, JWT, AKIA, password) are masked as [REDACTED] before POST. Full History stays in this browser.'
+                : 'Send Grafana evidence is off, so Asks read no datasource. Asks still POST your question, the session Current summary and Map of resource names, and a condensed Prior block of up to 240 characters built from your earlier questions and dot-ai\u2019s earlier answers (the question side can also carry follow-up instructions this page adds automatically) \u2014 both may quote log, metric and alert lines (credential-shaped substrings are masked as [REDACTED] before POST). The toggle does not cover Prior, Current or Map. Full History stays in this browser.'}
+            </div>
+            {!consentAcknowledged ? (
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid={testIds.dotai.consentAck}
+                onClick={() => setConsentAcknowledged(true)}
+                className={styles.consentAck}
+              >
+                Understood
+              </Button>
+            ) : null}
+          </div>
         </Alert>
         {tool === 'remediate' && (
           <Alert title="Analysis only" severity="info">
@@ -218,9 +237,14 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
           </Field>
 
           <div className={styles.actions}>
-            <Button type="submit" data-testid={testIds.dotai.submit} disabled={loading || !intent.trim()}>
+            <Button
+              type="submit"
+              data-testid={testIds.dotai.submit}
+              disabled={loading || !intent.trim() || !consentAcknowledged}
+            >
               {loading ? 'Running…' : tool === 'remediate' ? 'Analyze' : 'Ask'}
             </Button>
+
             {loading && (
               <Button type="button" variant="secondary" data-testid={testIds.dotai.cancel} onClick={onCancel}>
                 Cancel
@@ -260,9 +284,15 @@ function DotAIPage({ showContext = true, sendGrafanaEvidence = true }: DotAIPage
             {error}
             {error !== ASK_CANCELLED_MESSAGE && (
               <div className={styles.actions}>
-                <Button type="button" data-testid={testIds.dotai.retry} onClick={onRetry} disabled={loading || !intent.trim()}>
+                <Button
+                  type="button"
+                  data-testid={testIds.dotai.retry}
+                  onClick={onRetry}
+                  disabled={loading || !intent.trim() || !consentAcknowledged}
+                >
                   Retry
                 </Button>
+
               </div>
             )}
           </Alert>
@@ -343,6 +373,14 @@ const getStyles = (theme: GrafanaTheme2) => ({
     display: flex;
     flex-direction: column;
     gap: ${theme.spacing(1)};
+  `,
+  consentBody: css`
+    display: flex;
+    flex-direction: column;
+    gap: ${theme.spacing(1.5)};
+  `,
+  consentAck: css`
+    align-self: flex-start;
   `,
   actions: css`
     display: flex;

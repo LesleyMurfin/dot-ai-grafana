@@ -1,5 +1,6 @@
 import { DotAITool } from './dotaiApi';
 import { DrilldownLink } from './grafanaExplore';
+import { redactSecretShaped } from './secretRedact';
 
 /** Conversation turn. UI shows full text; packer may send a condensed Prior block. */
 export type HistoryTurn = {
@@ -174,11 +175,15 @@ export function buildRequestText(args: {
   /** Full display history; packer condenses recent turn(s) into Prior. */
   history?: HistoryTurn[];
 }): string {
-  const box = args.box.trim();
-  const instructions = (args.instructions ?? []).map((line) => line.trim()).filter(Boolean);
-  const fullCurrent = args.current.trim();
-  let map = args.map.trim();
-  let prior = condensePriorTurns(args.history ?? [], MAX_PRIOR_CHARS);
+  // Secret-shaped redaction runs before packing so evidence/question never
+  // carry Bearer/apiKey/PEM/JWT/AKIA/authorization forms onto the wire (ADR §2).
+  const box = redactSecretShaped(args.box.trim());
+  const instructions = (args.instructions ?? [])
+    .map((line) => redactSecretShaped(line.trim()))
+    .filter(Boolean);
+  const fullCurrent = redactSecretShaped(args.current.trim());
+  let map = redactSecretShaped(args.map.trim());
+  let prior = redactSecretShaped(condensePriorTurns(args.history ?? [], MAX_PRIOR_CHARS));
 
   const pack = (c: string, m: string, p: string, instr: string[], question = box): string => {
     const parts: string[] = [stablePreamble(args.tool)];
@@ -245,7 +250,7 @@ export function buildRequestText(args: {
 
   // 2. Shrink Prior to the single latest turn, tighter budget
   if (prior) {
-    prior = condensePriorTurns(args.history ?? [], Math.min(160, MAX_PRIOR_CHARS), 1);
+    prior = redactSecretShaped(condensePriorTurns(args.history ?? [], Math.min(160, MAX_PRIOR_CHARS), 1));
     text = pack(fullCurrent, map, prior, instr);
     if (text.length <= MAX_INTENT_CHARS) {
       return text;

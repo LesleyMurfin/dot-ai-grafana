@@ -1,6 +1,8 @@
 import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
+import { ackConsent } from './byDesignHelpers';
 import pluginJson from '../src/plugin.json';
+
 
 const pluginId = pluginJson.id;
 
@@ -59,6 +61,7 @@ test.describe('dot-ai app navigation', () => {
     });
 
     await gotoPage('/');
+    await ackConsent(page);
 
     const intent = page.getByTestId(testIds.dotai.intent);
     const submit = page.getByTestId(testIds.dotai.submit);
@@ -66,6 +69,7 @@ test.describe('dot-ai app navigation', () => {
 
     await intent.fill('list pods in default namespace');
     await expect(submit).toBeEnabled();
+
 
     const responsePromise = page.waitForResponse(toolResourceUrl('query'));
     await submit.click();
@@ -99,6 +103,7 @@ test.describe('dot-ai app navigation', () => {
     });
 
     const appPage = await gotoPage('/');
+    await ackConsent(page);
 
     // Select Remediate (analysis only) — no execute UI.
     await page.getByTestId(testIds.dotai.tool).click();
@@ -144,6 +149,7 @@ test.describe('dot-ai app navigation', () => {
     });
 
     await gotoPage('/');
+    await ackConsent(page);
 
     const intent = page.getByTestId(testIds.dotai.intent);
     const submit = page.getByTestId(testIds.dotai.submit);
@@ -151,6 +157,7 @@ test.describe('dot-ai app navigation', () => {
 
     await intent.fill('show failing deployments');
     await expect(submit).toBeEnabled();
+
     await submit.click();
 
     const loading = page.getByTestId(testIds.dotai.loading);

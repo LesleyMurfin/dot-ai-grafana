@@ -185,7 +185,7 @@ func askBodyPreview(body []byte) string {
 	}
 	for _, k := range []string{"intent", "issue"} {
 		if s := trimmedStringAt(m, k); s != "" {
-			return truncateRunesKeepTail(s, max, tail)
+			return truncateRunesKeepTail(redactSecretShaped(s), max, tail)
 		}
 	}
 	b, err := json.Marshal(m)
@@ -265,6 +265,7 @@ func sanitizeQueryBody(body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid JSON body")
 	}
 	intent, _ := in["intent"].(string)
+	intent = redactSecretShaped(intent)
 	if strings.TrimSpace(intent) == "" {
 		return nil, fmt.Errorf("intent is required")
 	}
@@ -615,6 +616,8 @@ func sanitizeRemediateBody(body []byte) ([]byte, error) {
 	out := make(map[string]any, 2)
 	intent, _ := in["intent"].(string)
 	issue, _ := in["issue"].(string)
+	intent = redactSecretShaped(intent)
+	issue = redactSecretShaped(issue)
 	if strings.TrimSpace(issue) == "" && strings.TrimSpace(intent) != "" {
 		issue = intent
 	}

@@ -1,4 +1,7 @@
+import type { Page } from '@playwright/test';
+import { testIds } from '../src/components/testIds';
 import pluginJson from '../src/plugin.json';
+
 
 /** Plugin id under test (must match src/plugin.json). */
 export const PLUGIN_ID = pluginJson.id;
@@ -11,16 +14,56 @@ export const UPSTREAM_INTERNAL_FIELD = 'raw_upstream_internal_do_not_leak';
 export const PROVISIONED_API_KEY = 'bydesign-e2e-bearer-token-do-not-leak';
 
 /**
+ * Provisioned stub `apiUrl` — must match `provisioning/plugins/apps.yaml`
+ * `jsonData.apiUrl` exactly (LOAD-BEARING hostname; see yaml comment).
+ */
+export const PROVISIONED_API_URL = 'http://dot-ai-stub.svc:8080';
+
+/**
+ * Derive denylist needles from a provisioned upstream URL so a host/port rename
+ * in apps.yaml cannot silently hollow the e2e leak pin.
+ * Includes scheme (`http://`/`https://`), full hostname, first DNS label when
+ * multi-label, and `:PORT` when the URL carries an explicit port.
+ */
+export function leakNeedlesFromApiUrl(url: string): string[] {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return [];
+  }
+
+  const needles: string[] = [];
+
+  // protocol is "http:" / "https:"; keep the `://` form browsers/errors echo.
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    needles.push(`${parsed.protocol}//`);
+  }
+
+  if (parsed.hostname) {
+    needles.push(parsed.hostname);
+    const firstLabel = parsed.hostname.split('.')[0];
+    if (firstLabel && firstLabel !== parsed.hostname) {
+      needles.push(firstLabel);
+    }
+  }
+
+  if (parsed.port) {
+    needles.push(`:${parsed.port}`);
+  }
+
+  return [...new Set(needles)];
+}
+
+/**
  * Provisioned stub `apiUrl` pieces (`provisioning/plugins/apps.yaml`).
  * A transport-error 502 must not echo scheme, host, or port to the browser
  * (#58 / #44 privacy). The Go unit pin is TestTransportErrorDoesNotLeakUpstreamURL.
+ * Derived from PROVISIONED_API_URL — do not hand-edit the array.
  */
-export const UPSTREAM_URL_LEAK_NEEDLES = [
-  'http://',
-  'https://',
-  'dot-ai-stub', // covers `dot-ai-stub.svc` and the compose service name
-  ':8080',
-] as const;
+export const UPSTREAM_URL_LEAK_NEEDLES: readonly string[] = Object.freeze(
+  leakNeedlesFromApiUrl(PROVISIONED_API_URL)
+);
 
 export type ToolName = 'query' | 'remediate' | 'test-connection' | 'health';
 
@@ -133,4 +176,15 @@ export async function stubIntents(): Promise<StubIntent[]> {
 /** Unique per-request dial probe token, planted in the request body. */
 export function dialProbe(label: string): string {
   return `DIALPROBE-${label}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * One-click egress disclosure ack (per page mount). Call after gotoPage before
+ * the first Ask submit — submit stays disabled until Understood is clicked.
+ */
+export async function ackConsent(page: Page): Promise<void> {
+  const btn = page.getByTestId(testIds.dotai.consentAck);
+  if (await btn.isVisible().catch(() => false)) {
+    await btn.click();
+  }
 }

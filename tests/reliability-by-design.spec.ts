@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test, expect } from './fixtures';
 import { testIds } from '../src/components/testIds';
 import {
   PLUGIN_ID,
   PROVISIONED_API_KEY,
+  PROVISIONED_API_URL,
   UPSTREAM_INTERNAL_FIELD,
   UPSTREAM_SECRET_MARKER,
   UPSTREAM_URL_LEAK_NEEDLES,
@@ -12,6 +15,7 @@ import {
   isStableEnvelope,
   resourcePath,
   stubHealth,
+  ackConsent,
 } from './byDesignHelpers';
 
 /**
@@ -167,8 +171,17 @@ test.describe('Reliability by design — transport-level upstream failure', () =
     // #58 / #44 P-privacy: the 502 envelope must not echo the configured
     // upstream scheme, host, or port. Unit equivalent:
     // TestTransportErrorDoesNotLeakUpstreamURL (pkg/plugin/resources_test.go).
-    // Denylist must stay non-empty — an empty spread makes this pin hollow.
+    // Denylist is derived from PROVISIONED_API_URL (must match apps.yaml).
+    // Stay non-empty — an empty spread makes this pin hollow.
+    const appsYaml = readFileSync(
+      join(__dirname, '..', 'provisioning', 'plugins', 'apps.yaml'),
+      'utf8'
+    );
+    expect(appsYaml).toContain(PROVISIONED_API_URL);
     expect(UPSTREAM_URL_LEAK_NEEDLES.length).toBeGreaterThan(0);
+    expect(UPSTREAM_URL_LEAK_NEEDLES).toEqual(
+      expect.arrayContaining(['http://', 'dot-ai-stub.svc', 'dot-ai-stub', ':8080'])
+    );
     const urlLeak = bodyContainsForbidden(text, ...UPSTREAM_URL_LEAK_NEEDLES);
     expect(urlLeak, `502 envelope must not leak upstream URL pieces: ${text}`).toEqual([]);
 
@@ -216,6 +229,7 @@ test.describe('Reliability by design — degrades without a configured Grafana d
     });
 
     await gotoPage('/');
+    await ackConsent(page);
     await page.getByTestId(testIds.dotai.intent).fill('status of pod checkout-api in namespace prod');
     await page.getByTestId(testIds.dotai.submit).click();
 

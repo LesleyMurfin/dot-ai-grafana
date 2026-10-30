@@ -2221,6 +2221,20 @@ func TestAskBodyPreviewStripsSecrets(t *testing.T) {
 	if strings.Contains(got, "sekrit") || strings.Contains(got, "Bearer") {
 		t.Fatalf("leaked secret in %q", got)
 	}
+
+	// Substring secrets inside the intent body (not only top-level keys) must redact.
+	bodyWithSecrets := "log line Bearer super-secret-token apiKey=sekrit-value password=hunter2"
+	got = askBodyPreview([]byte(`{"intent":` + mustJSONString(bodyWithSecrets) + `}`))
+	if strings.Contains(got, "super-secret-token") ||
+		strings.Contains(got, "sekrit-value") ||
+		strings.Contains(got, "hunter2") ||
+		strings.Contains(got, "Bearer super") {
+		t.Fatalf("substring secret leaked in preview %q", got)
+	}
+	if !strings.Contains(got, redactedPlaceholder) {
+		t.Fatalf("expected %s in preview, got %q", redactedPlaceholder, got)
+	}
+
 	// Over-long bodies keep head AND tail: the question is packed after Current, so a
 	// head-only cut drops the follow-up prompt that identifies the hop branch.
 	long := strings.Repeat("x", 5000)
