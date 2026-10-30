@@ -171,9 +171,11 @@ func askBodyPreview(body []byte) string {
 	if len(body) == 0 {
 		return ""
 	}
+	// Every return path must run redactSecretShaped: non-JSON bodies and the
+	// fallback marshal still carry free text that can hold Bearer/apiKey/PEM.
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
-		return truncateRunesKeepTail(string(body), max, tail)
+		return truncateRunesKeepTail(redactSecretShaped(string(body)), max, tail)
 	}
 	for _, k := range []string{
 		"apiKey", "apikey", "api_key",
@@ -192,7 +194,7 @@ func askBodyPreview(body []byte) string {
 	if err != nil {
 		return ""
 	}
-	return truncateRunesKeepTail(string(b), max, tail)
+	return truncateRunesKeepTail(redactSecretShaped(string(b)), max, tail)
 }
 
 // askMetaFromBody pulls optional orchestration fields for the ask log.
@@ -288,8 +290,10 @@ func appendAskLog(ctx context.Context, tool string, body []byte, status int, sum
 		Tool:         tool,
 		Body:         askBodyPreview(body),
 		Status:       status,
-		Summary:      truncateRunes(summary, 512),
-		Error:        truncateRunes(errMsg, 512),
+		// Summary/Error can echo secret-shaped spans from upstream model text;
+		// redact before the JSONL line hits the Grafana data PVC (ADR §2/§4).
+		Summary:      truncateRunes(redactSecretShaped(summary), 512),
+		Error:        truncateRunes(redactSecretShaped(errMsg), 512),
 		Hop:          hop,
 		Hops:         hops,
 		CurrentEmpty: currentEmpty,

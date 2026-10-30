@@ -97,6 +97,50 @@ describe('Pages/DotAIPage', () => {
     expect(mockCallDotAITool).toHaveBeenCalled();
   });
 
+  test('form submit without consent ack does not call the API', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'should not run',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('list pods');
+    expect(screen.getByTestId(testIds.dotai.submit)).toBeDisabled();
+
+    // Bypass the disabled button: fire submit on the form the way Enter/requestSubmit would.
+    const form = screen.getByTestId(testIds.dotai.submit).closest('form');
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockCallDotAITool).not.toHaveBeenCalled();
+  });
+
+  test('Enter without consent ack does not call the API', async () => {
+    mockCallDotAITool.mockResolvedValue({
+      ok: true,
+      status: 200,
+      summary: 'should not run',
+      raw: {},
+    });
+
+    render(<DotAIPage />);
+    typeIntent('list pods');
+    fireEvent.keyDown(screen.getByTestId(testIds.dotai.intent), {
+      key: 'Enter',
+      code: 'Enter',
+      shiftKey: false,
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockCallDotAITool).not.toHaveBeenCalled();
+  });
 
   test('renders intent field and submit button', () => {
     render(<DotAIPage />);

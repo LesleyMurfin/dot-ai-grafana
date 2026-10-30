@@ -27,7 +27,7 @@ So **cluster log content becomes prompt content**, and **prompt content reaches 
 | Draft-URL probe | Org Admin required to test a draft `apiUrl`; SEC-01 never reuses saved key against a different draft URL | `pkg/plugin/resources.go:329-345` |
 | Response envelope | Proxy returns stable `{ok,status,summary,error}`; never reflects raw upstream body; maps 401/403 → 502 | `pkg/plugin/resources.go:742-761` |
 | Body caps | Request 1 MiB; upstream response 8 MiB | `pkg/plugin/resources.go:671`, `727` |
-| Ask log | Optional (`debugLog`, default off); JSONL on Grafana data path; size rotate 1 MiB → `.1`; preview strips top-level secret **keys** only (not secrets inside log lines); entry had no user/org fields at audit time | `pkg/plugin/app.go:33-54`; `resources.go:60-84`, `132-148`, `236-271` (SecAudit) |
+| Ask log | Optional (`debugLog`, default off); JSONL on Grafana data path; size rotate 1 MiB → `.1`; body preview + summary/error run secret-shaped redaction (`[REDACTED]`); top-level secret keys stripped from preview map | `pkg/plugin/app.go`; `resources.go` ask log + `secret_redact.go` |
 | Evidence packing | Cluster-wide LogQL when no ns/pod; `textLinesFromFrames` whitespace-collapses only; packed under `Current:` with user text after as `Question:`/`Issue:` | `src/utils/grafanaStack.ts:45-46`, `282-306`; `progressiveContext.ts:97-122` |
 | Evidence opt-out | `sendGrafanaEvidence=false` skips stack fetch; consent banner always shows egress disclosure and requires one-click **Understood** ack per page mount before Ask (not a legal consent ledger) | `src/utils/askOrchestrator.ts`; `src/pages/DotAIPage.tsx` consent + `consentAck` |
 | UI / route role gate | Configuration page `role: Admin`; tool resource routes require Grafana **Editor+** before any engine proxy call (Decision §1; fail closed if no user) | `src/plugin.json:27-41`; role helpers in `pkg/plugin/resources.go` |
@@ -192,11 +192,11 @@ Minimum audit record for an Ask (ask log when enabled; and any future metrics):
 | **1. Prompt injection via evidence** | Treat evidence as untrusted; fence/escape section markers; strip instruction-shaped evidence lines; analysis-only + human gate before any PRD #2 action; size caps remain | Stronger engine-side prompt firewall; PRD #2/\#4 refuse evidence-only authorisation | Plugin (pack + docs); engine for deep filter |
 | **2. Privilege escalation (Grafana RBAC ≠ K8s RBAC)** | **Accepted only with Editor+ (or Admin) role-gate on `/query` and `/remediate`**; shared no-apply token; Viewer must not invoke engine | Per-user Dex/OAuth (I-003) when trigger hits; documented no-apply role name | Plugin (route gate); engine (token RBAC); operator (token mint) |
 | **3. Data egress / residency** | Egress only to configured dot-ai; https-except-cluster-local; sovereignty = operator’s engine/LLM choice; no plugin-side model calls | Optional stricter SSRF allowlist UI; Cloud track (PRD #1 DD10 out of scope) | Plugin (URL gate + docs); engine/operator (LLM residency) |
-| **4. Data at rest** | `debugLog` default off; when on: ≤7 days or 2 segments + secret-shaped redaction in preview; no HTTP API to logs | Encryption-at-rest beyond Grafana PVC norms; central SIEM ship | Plugin |
+| **4. Data at rest** | `debugLog` default off; when on: ≤7 days or 2 segments + secret-shaped redaction in body preview **and** summary/error fields; no HTTP API to logs | Encryption-at-rest beyond Grafana PVC norms; central SIEM ship | Plugin |
 | **5. Attribution / audit** | Record login + org id + role on ask-log lines; role-gate implies authenticated user | Engine-side per-user identity (I-003 / Dex) | Plugin (log fields); engine (OAuth) |
 | **6. Tenancy** | Supported layout = one org ↔ one config ↔ one token; label org on logs; shared token across orgs is discouraged | Per-org credentials and isolation | Plugin + operator |
 | **7. Secret echo** | Client + backend secret-shaped redaction before egress; advisory UI; no v1 response scrubber | Engine output filtering / provider-side controls | Plugin (redact); engine (preferred long-term) |
-| **8. Consent** | Informational banner whenever evidence send is on; off-switch via `sendGrafanaEvidence` | Durable consent ledger / notice versioning | Plugin (banner); legal/operator if regulated |
+| **8. Consent** | Egress disclosure always on; one-click **Understood** ack per mount gates Ask; `sendGrafanaEvidence=false` skips datasource fetch only | Durable consent ledger / notice versioning | Plugin (banner+ack); legal/operator if regulated |
 
 ---
 

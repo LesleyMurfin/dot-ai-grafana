@@ -2262,6 +2262,96 @@ func TestAskBodyPreviewStripsSecrets(t *testing.T) {
 	if got = askBodyPreview(body); got != ctxQuestion {
 		t.Fatalf("context question truncated: len=%d", len([]rune(got)))
 	}
+
+	// Non-JSON bodies still redact (no intent key to walk).
+	raw := askBodyPreview([]byte("plain Bearer super-secret-token trailing"))
+	if strings.Contains(raw, "super-secret-token") || strings.Contains(raw, "Bearer super") {
+		t.Fatalf("non-JSON preview leaked secret: %q", raw)
+	}
+	if !strings.Contains(raw, redactedPlaceholder) {
+		t.Fatalf("non-JSON preview missing %s: %q", redactedPlaceholder, raw)
+	}
+}
+
+// TestSanitizeBodiesRedactSecrets proves F1 defense-in-depth on the upstream path:
+// sanitizeQueryBody / sanitizeRemediateBody must mask secret-shaped spans before
+// the JSON leaves the plugin (not only ask-log preview).
+func TestSanitizeBodiesRedactSecrets(t *testing.T) {
+	t.Parallel()
+
+	qBody, err := sanitizeQueryBody([]byte(`{"intent":"see Bearer super-secret-token and apiKey=sekrit-value","execute":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var q map[string]any
+	if err := json.Unmarshal(qBody, &q); err != nil {
+		t.Fatal(err)
+	}
+	intent, _ := q["intent"].(string)
+	if strings.Contains(intent, "super-secret-token") || strings.Contains(intent, "sekrit-value") {
+		t.Fatalf("query sanitize leaked secret: %q", intent)
+	}
+	if !strings.Contains(intent, redactedPlaceholder) {
+		t.Fatalf("query sanitize missing %s: %q", redactedPlaceholder, intent)
+	}
+	if _, ok := q["execute"]; ok {
+		t.Fatalf("query sanitize must drop execute: %v", q)
+	}
+
+	rBody, err := sanitizeRemediateBody([]byte(`{"issue":"password=hunter2 in logs","intent":"api_key: abc123","execute":true,"apply":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r map[string]any
+	if err := json.Unmarshal(rBody, &r); err != nil {
+		t.Fatal(err)
+	}
+	issue, _ := r["issue"].(string)
+	rIntent, _ := r["intent"].(string)
+	for _, s := range []string{issue, rIntent} {
+		if strings.Contains(s, "hunter2") || strings.Contains(s, "abc123") {
+			t.Fatalf("remediate sanitize leaked secret: issue=%q intent=%q", issue, rIntent)
+		}
+		if s != "" && !strings.Contains(s, redactedPlaceholder) {
+			t.Fatalf("remediate sanitize missing %s: issue=%q intent=%q", redactedPlaceholder, issue, rIntent)
+		}
+	}
+	if _, ok := r["execute"]; ok {
+		t.Fatalf("remediate sanitize must drop execute: %v", r)
+	}
+}
+
+// TestAppendAskLogRedactsSummaryAndError pins PVC ask-log lines: model echo in
+// summary/error must not land as plaintext when debugLog is on.
+func TestAppendAskLogRedactsSummaryAndError(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "dotai-ask.log")
+	prev := askLogPath
+	askLogPath = logPath
+	t.Cleanup(func() { askLogPath = prev })
+
+	appendAskLog(
+		context.Background(),
+		"query",
+		[]byte(`{"intent":"list pods"}`),
+		http.StatusOK,
+		"found Bearer super-secret-token in logs",
+		"upstream said apiKey=sekrit-value",
+	)
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := string(raw)
+	for _, bad := range []string{"super-secret-token", "sekrit-value", "Bearer super", "apiKey=sekrit"} {
+		if strings.Contains(line, bad) {
+			t.Fatalf("ask log leaked %q in %s", bad, line)
+		}
+	}
+	if !strings.Contains(line, redactedPlaceholder) {
+		t.Fatalf("ask log missing %s: %s", redactedPlaceholder, line)
+	}
 }
 
 func mustJSONString(s string) string {
